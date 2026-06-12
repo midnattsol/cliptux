@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=cliptux
+Comment=Wayland-native screenshots with annotation editor
+Exec=/home/midnattsol/.local/bin/cliptux --daemon
+Icon=cliptux
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=false
+X-GNOME-UsesNotifications=true
