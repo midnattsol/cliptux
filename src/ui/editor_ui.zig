@@ -2,8 +2,8 @@
 //! procedural button icons. Operates on the Editor state.
 
 const std = @import("std");
-const render = @import("render.zig");
-const text_mod = @import("text.zig");
+const render = @import("../gfx/render.zig");
+const text_mod = @import("../gfx/text.zig");
 const shapes_mod = @import("shapes.zig");
 const editor_mod = @import("editor.zig");
 

@@ -1,8 +1,8 @@
 const std = @import("std");
-const shot = @import("shot.zig");
-const daemon = @import("daemon.zig");
-const devtools = @import("devtools.zig");
-const Env = @import("env.zig").Env;
+const shot = @import("app/shot.zig");
+const daemon = @import("app/daemon.zig");
+const devtools = @import("app/devtools.zig");
+const Env = @import("app/env.zig").Env;
 
 const usage =
     \\cliptux - Wayland-native screenshot tool with annotation editor
@@ -68,7 +68,7 @@ pub fn main(init: std.process.Init) !void {
             std.fmt.parseInt(i64, args[3], 10) catch 0
         else
             0;
-        try @import("settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
+        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
@@ -77,15 +77,15 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
-    _ = @import("dbus.zig");
-    _ = @import("portal.zig");
-    _ = @import("config.zig");
-    _ = @import("text.zig");
-    _ = @import("editor.zig");
-    _ = @import("shapes.zig");
-    _ = @import("editor_ui.zig");
-    _ = @import("png.zig");
-    _ = @import("font.zig");
-    _ = @import("render.zig");
-    _ = @import("wayland.zig");
+    _ = @import("platform/dbus.zig");
+    _ = @import("platform/portal.zig");
+    _ = @import("app/config.zig");
+    _ = @import("gfx/text.zig");
+    _ = @import("ui/editor.zig");
+    _ = @import("ui/shapes.zig");
+    _ = @import("ui/editor_ui.zig");
+    _ = @import("gfx/png.zig");
+    _ = @import("gfx/font.zig");
+    _ = @import("gfx/render.zig");
+    _ = @import("platform/wayland.zig");
 }

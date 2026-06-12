@@ -2,14 +2,14 @@
 //! permission dialog, and copy/save handling around the editor.
 
 const std = @import("std");
-const dbus = @import("dbus.zig");
-const portal = @import("portal.zig");
-const png = @import("png.zig");
-const sys = @import("sys.zig");
+const dbus = @import("../platform/dbus.zig");
+const portal = @import("../platform/portal.zig");
+const png = @import("../gfx/png.zig");
+const sys = @import("../platform/sys.zig");
 const Env = @import("env.zig").Env;
 
 fn warmupPw() void {
-    _ = @import("pw.zig").available();
+    _ = @import("../platform/pw.zig").available();
 }
 
 pub fn nowMs() i64 {
@@ -19,8 +19,8 @@ pub fn nowMs() i64 {
 }
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel: ?[4]i32, smoke_ms: i64) !void {
-    const editor_mod = @import("editor.zig");
-    const window = @import("window.zig");
+    const editor_mod = @import("../ui/editor.zig");
+    const window = @import("../ui/window.zig");
     const config = @import("config.zig");
     const t0 = nowMs();
 
@@ -32,7 +32,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
     portal.ensureAppScope(gpa, &conn);
 
     var cfg = config.load(gpa, env.home);
-    const text = @import("text.zig");
+    const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
 
@@ -81,7 +81,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 }
 
 fn acquireImage(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *@import("config.zig").Config, from_file: ?[]const u8) !png.Image {
-    const pw = @import("pw.zig");
+    const pw = @import("../platform/pw.zig");
     const config = @import("config.zig");
 
     if (from_file) |path| {
@@ -146,8 +146,8 @@ fn acquireImage(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *
 /// First-run consent: open a small focused window, re-request the screenshot
 /// so GNOME can show its permission dialog, then recapture once granted.
 fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ![]u8 {
-    const window = @import("window.zig");
-    const render = @import("render.zig");
+    const window = @import("../ui/window.zig");
+    const render = @import("../gfx/render.zig");
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();

@@ -3,9 +3,9 @@
 //! custom cursors and clipboard ownership.
 
 const std = @import("std");
-const sys = @import("sys.zig");
-const wl = @import("wayland.zig");
-const render = @import("render.zig");
+const sys = @import("../platform/sys.zig");
+const wl = @import("../platform/wayland.zig");
+const render = @import("../gfx/render.zig");
 
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64 },

@@ -2,7 +2,7 @@
 //! ~/.config/cliptux/config, written atomically on change.
 
 const std = @import("std");
-const sys = @import("sys.zig");
+const sys = @import("../platform/sys.zig");
 
 pub const Action = enum {
     select,

@@ -2,8 +2,8 @@
 //! shape display list painter, selection handles and the text-input keymap.
 
 const std = @import("std");
-const render = @import("render.zig");
-const text_mod = @import("text.zig");
+const render = @import("../gfx/render.zig");
+const text_mod = @import("../gfx/text.zig");
 
 const Canvas = render.Canvas;
 

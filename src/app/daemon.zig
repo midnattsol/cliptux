@@ -3,9 +3,9 @@
 //! in the foreground; only one instance can own org.midnattsol.cliptux.
 
 const std = @import("std");
-const dbus = @import("dbus.zig");
-const portal = @import("portal.zig");
-const sys = @import("sys.zig");
+const dbus = @import("../platform/dbus.zig");
+const portal = @import("../platform/portal.zig");
+const sys = @import("../platform/sys.zig");
 const Env = @import("env.zig").Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {

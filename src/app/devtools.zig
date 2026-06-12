@@ -2,10 +2,10 @@
 //! test-window, test-capture, test-grab, test-font, test-decode.
 
 const std = @import("std");
-const dbus = @import("dbus.zig");
-const portal = @import("portal.zig");
-const png = @import("png.zig");
-const sys = @import("sys.zig");
+const dbus = @import("../platform/dbus.zig");
+const portal = @import("../platform/portal.zig");
+const png = @import("../gfx/png.zig");
+const sys = @import("../platform/sys.zig");
 const Env = @import("env.zig").Env;
 const nowMs = @import("shot.zig").nowMs;
 
@@ -14,7 +14,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     if (std.mem.eql(u8, cmd, "test-window")) {
 
         // internal development tool: fullscreen gradient for ~3s, Esc to close
-        const window = @import("window.zig");
+        const window = @import("../ui/window.zig");
         var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
         defer win.deinit();
         try win.open("cliptux test", .{});
@@ -46,7 +46,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     if (std.mem.eql(u8, cmd, "test-grab")) {
 
         // internal development tool: ScreenCast + PipeWire single frame
-        const pw = @import("pw.zig");
+        const pw = @import("../platform/pw.zig");
         var cfg = @import("config.zig").load(gpa, env.home);
         var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
         defer conn.deinit();
@@ -75,8 +75,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     if (std.mem.eql(u8, cmd, "test-font")) {
 
         // internal development tool: render sample text to a PNG
-        const text = @import("text.zig");
-        const render = @import("render.zig");
+        const text = @import("../gfx/text.zig");
+        const render = @import("../gfx/render.zig");
         text.init(gpa);
         defer text.deinit();
         const W = 900;

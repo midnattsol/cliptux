@@ -4,7 +4,7 @@
 //! coverage bitmaps. Enough for crisp UI text; no hinting, no kerning.
 
 const std = @import("std");
-const sys = @import("sys.zig");
+const sys = @import("../platform/sys.zig");
 
 fn beU16(d: []const u8, off: usize) u16 {
     return std.mem.readInt(u16, d[off..][0..2], .big);

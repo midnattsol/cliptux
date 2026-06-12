@@ -2,8 +2,8 @@
 //! com.canonical.dbusmenu, exported over our native DBus connection.
 
 const std = @import("std");
-const dbus = @import("dbus.zig");
-const render = @import("render.zig");
+const dbus = @import("../platform/dbus.zig");
+const render = @import("../gfx/render.zig");
 
 const sni_path = "/StatusNotifierItem";
 const menu_path = "/MenuBar";

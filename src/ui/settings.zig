@@ -3,9 +3,9 @@
 
 const std = @import("std");
 const window = @import("window.zig");
-const render = @import("render.zig");
-const config = @import("config.zig");
-const text = @import("text.zig");
+const render = @import("../gfx/render.zig");
+const config = @import("../app/config.zig");
+const text = @import("../gfx/text.zig");
 
 const Canvas = render.Canvas;
 const Window = window.Window;

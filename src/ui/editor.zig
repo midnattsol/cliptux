@@ -4,10 +4,10 @@
 
 const std = @import("std");
 const window = @import("window.zig");
-const render = @import("render.zig");
-const text_mod = @import("text.zig");
-const png = @import("png.zig");
-const config = @import("config.zig");
+const render = @import("../gfx/render.zig");
+const text_mod = @import("../gfx/text.zig");
+const png = @import("../gfx/png.zig");
+const config = @import("../app/config.zig");
 const shapes_mod = @import("shapes.zig");
 const ui = @import("editor_ui.zig");
 
