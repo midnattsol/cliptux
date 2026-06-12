@@ -120,6 +120,14 @@ fn redirectStdio(env: Env) void {
     const dir3 = std.fmt.bufPrint(&buf, "{s}/.local/state/cliptux", .{env.home}) catch return;
     sys.mkdir(dir3);
     const log_path = std.fmt.bufPrint(&buf, "{s}/.local/state/cliptux/daemon.log", .{env.home}) catch return;
+    // bounded logging: rotate once past 1 MiB, keeping a single .old file,
+    // so the log can never grow beyond ~2 MiB total
+    if ((sys.fileSize(log_path) catch 0) > 1024 * 1024) {
+        var old_buf: [512]u8 = undefined;
+        if (std.fmt.bufPrint(&old_buf, "{s}.old", .{log_path})) |old_path| {
+            sys.rename(log_path, old_path) catch {};
+        } else |_| {}
+    }
     const log_fd = sys.openAppend(log_path) catch return;
     sys.dup2(log_fd, 1);
     sys.dup2(log_fd, 2);

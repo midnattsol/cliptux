@@ -289,3 +289,13 @@ pub fn dup2(old_fd: fd_t, new_fd: fd_t) void {
 pub fn exitProcess(code: u8) noreturn {
     linux.exit(code);
 }
+
+pub fn fileSize(path: []const u8) !u64 {
+    var pathz: [4096]u8 = undefined;
+    if (path.len >= pathz.len) return error.PathTooLong;
+    @memcpy(pathz[0..path.len], path);
+    pathz[path.len] = 0;
+    var stx: linux.Statx = undefined;
+    _ = try check(linux.statx(linux.AT.FDCWD, pathz[0..path.len :0].ptr, 0, .{ .SIZE = true }, &stx));
+    return stx.size;
+}
