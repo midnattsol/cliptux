@@ -1,16 +1,24 @@
 name: CI
 
 on:
+  # PRs are the primary gate; the push trigger covers direct pushes to main
+  # and verifies the actual merge result (PR runs test the PR head only)
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
-  pull_request:
+
+# supersede in-flight runs when new commits land on the same ref
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Zig
         uses: mlugg/setup-zig@v2

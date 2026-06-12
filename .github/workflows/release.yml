@@ -19,7 +19,7 @@ jobs:
           - target: aarch64-linux-gnu.2.31
             arch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
