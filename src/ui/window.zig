@@ -6,6 +6,7 @@ const std = @import("std");
 const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
 const render = @import("../gfx/render.zig");
+const png = @import("../gfx/png.zig");
 
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64 },
@@ -43,6 +44,48 @@ const Buffer = struct {
     pixels: []align(4) u8 = &.{},
 };
 
+const ClipboardImage = struct {
+    alloc: std.mem.Allocator,
+    pixels: []u32,
+    width: u32,
+    height: u32,
+    png_data: []u8 = &.{},
+    encode_failed: bool = false,
+    thread: ?std.Thread = null,
+
+    fn create(alloc: std.mem.Allocator, pixels: []u32, width: u32, height: u32) !*ClipboardImage {
+        const self = try alloc.create(ClipboardImage);
+        self.* = .{ .alloc = alloc, .pixels = pixels, .width = width, .height = height };
+        errdefer alloc.destroy(self);
+        self.thread = try std.Thread.spawn(.{}, encodeWorker, .{self});
+        return self;
+    }
+
+    fn deinit(self: *ClipboardImage) void {
+        if (self.thread) |thread| thread.join();
+        self.alloc.free(self.png_data);
+        self.alloc.free(self.pixels);
+        const alloc = self.alloc;
+        alloc.destroy(self);
+    }
+
+    fn waitPng(self: *ClipboardImage) ![]const u8 {
+        if (self.thread) |thread| {
+            thread.join();
+            self.thread = null;
+        }
+        if (self.encode_failed) return error.ClipboardEncodeFailed;
+        return self.png_data;
+    }
+
+    fn encodeWorker(self: *ClipboardImage) void {
+        self.png_data = png.encode(self.alloc, self.pixels, self.width, self.height) catch {
+            self.encode_failed = true;
+            return;
+        };
+    }
+};
+
 pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
 
 pub const Window = struct {
@@ -67,7 +110,8 @@ pub const Window = struct {
     keyboard: u32 = 0,
     data_device: u32 = 0,
     clipboard_source: u32 = 0,
-    clipboard_data: []u8 = &.{},
+    clipboard_png: []u8 = &.{},
+    clipboard_image: ?*ClipboardImage = null,
     viewport: u32 = 0,
     fs_obj: u32 = 0, // wp_fractional_scale_v1
     scale120: u32 = 120, // fractional scale numerator (120 = 1.0)
@@ -698,10 +742,24 @@ pub const Window = struct {
         return self.clipboard_source != 0;
     }
 
-    /// Claim the clipboard selection with an image/png data source. Takes
-    /// ownership of data on success. Call while the window still has focus
-    /// (serial must be fresh).
+    /// Claim the clipboard selection with an already-encoded image/png data
+    /// source. Takes ownership of data on success. Call while the window still
+    /// has focus (serial must be fresh).
     pub fn setClipboardPng(self: *Window, data: []u8) !void {
+        try self.claimClipboardSource();
+        self.clipboard_png = data;
+    }
+
+    /// Claim the clipboard selection immediately, then encode the raw image in
+    /// the background. Takes ownership of pixels on success.
+    pub fn setClipboardImage(self: *Window, pixels: []u32, width: u32, height: u32) !void {
+        const image = try ClipboardImage.create(self.alloc, pixels, width, height);
+        errdefer image.deinit();
+        try self.claimClipboardSource();
+        self.clipboard_image = image;
+    }
+
+    fn claimClipboardSource(self: *Window) !void {
         if (self.ddm == 0 or self.data_device == 0) return error.NoDataDevice;
         const c = &self.conn;
         const source = c.newId();
@@ -712,7 +770,6 @@ pub const Window = struct {
 
         self.dropClipboardSource();
         self.clipboard_source = source;
-        self.clipboard_data = data;
     }
 
     /// Serve clipboard reads until another client replaces the selection.
@@ -731,7 +788,11 @@ pub const Window = struct {
                 _ = r.string(); // mime
                 if (self.conn.takeFd()) |fd| {
                     defer sys.close(fd);
-                    sys.writeAllBlocking(fd, self.clipboard_data) catch |err| switch (err) {
+                    const clipboard_data = if (self.clipboard_image) |image| image.waitPng() catch |err| {
+                        std.log.warn("clipboard encode failed: {t}", .{err});
+                        return;
+                    } else self.clipboard_png;
+                    sys.writeAllBlocking(fd, clipboard_data) catch |err| switch (err) {
                         error.BrokenPipe, error.ConnectionReset => {},
                         else => std.log.warn("clipboard send failed: {t}", .{err}),
                     };
@@ -747,9 +808,13 @@ pub const Window = struct {
             self.conn.request(self.clipboard_source, wl.wl_data_source.destroy, &.{}) catch {};
             self.clipboard_source = 0;
         }
-        if (self.clipboard_data.len > 0) {
-            self.alloc.free(self.clipboard_data);
-            self.clipboard_data = &.{};
+        if (self.clipboard_png.len > 0) {
+            self.alloc.free(self.clipboard_png);
+            self.clipboard_png = &.{};
+        }
+        if (self.clipboard_image) |image| {
+            image.deinit();
+            self.clipboard_image = null;
         }
         self.conn.flush() catch {};
     }

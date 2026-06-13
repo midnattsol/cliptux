@@ -25,7 +25,13 @@ const evdevToChar = shapes_mod.evdevToChar;
 
 pub const Action = enum { cancel, save };
 
-pub const CopyNotice = enum { none, copying, copied, failed };
+pub const CopyNotice = enum { none, copied, failed };
+
+const ExportedPixels = struct {
+    pixels: []u32,
+    width: u32,
+    height: u32,
+};
 
 pub const Result = struct {
     action: Action,
@@ -616,13 +622,9 @@ pub const Editor = struct {
     fn copyToClipboard(self: *Editor) !void {
         if (self.text_edit != null) try self.commitText();
 
-        self.showCopyNotice(.copying, 0);
-        try self.renderFrame();
-        self.needs_render = false;
-
-        const png_data = try self.exportPng();
-        self.win.setClipboardPng(png_data) catch |err| {
-            self.alloc.free(png_data);
+        const exported = try self.exportPixels();
+        self.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
+            self.alloc.free(exported.pixels);
             std.log.warn("copy failed: {t}", .{err});
             self.showCopyNotice(.failed, 1200);
             return;
@@ -714,29 +716,36 @@ pub const Editor = struct {
 
     // --- export ---
 
-    fn exportPng(self: *Editor) ![]u8 {
+    fn exportPixels(self: *Editor) !ExportedPixels {
         self.ensureSelection();
         const sel = self.sel.?.normalized();
 
         // include uncommitted text, then use the flat cache (base + shapes)
         if (self.text_edit != null) try self.commitText();
         self.ensureFlat();
-        const w: i32 = @intCast(self.win.width);
-        const h: i32 = @intCast(self.win.height);
-        const px = self.flat;
+        const window_width: i32 = @intCast(self.win.width);
+        const window_height: i32 = @intCast(self.win.height);
+        const source_pixels = self.flat;
 
-        const cx = std.math.clamp(sel.x, 0, w - 1);
-        const cy = std.math.clamp(sel.y, 0, h - 1);
-        const cw = std.math.clamp(sel.w, 1, w - cx);
-        const ch = std.math.clamp(sel.h, 1, h - cy);
+        const crop_x = std.math.clamp(sel.x, 0, window_width - 1);
+        const crop_y = std.math.clamp(sel.y, 0, window_height - 1);
+        const crop_width = std.math.clamp(sel.w, 1, window_width - crop_x);
+        const crop_height = std.math.clamp(sel.h, 1, window_height - crop_y);
 
-        const crop = try self.alloc.alloc(u32, @intCast(cw * ch));
-        defer self.alloc.free(crop);
-        var y: i32 = 0;
-        while (y < ch) : (y += 1) {
-            const src = px[@intCast((cy + y) * w + cx)..][0..@intCast(cw)];
-            @memcpy(crop[@intCast(y * cw)..][0..@intCast(cw)], src);
+        const crop_pixels = try self.alloc.alloc(u32, @intCast(crop_width * crop_height));
+        errdefer self.alloc.free(crop_pixels);
+        var crop_row: i32 = 0;
+        while (crop_row < crop_height) : (crop_row += 1) {
+            const source_row = source_pixels[@intCast((crop_y + crop_row) * window_width + crop_x)..][0..@intCast(crop_width)];
+            const destination_row = crop_pixels[@intCast(crop_row * crop_width)..][0..@intCast(crop_width)];
+            @memcpy(destination_row, source_row);
         }
-        return png.encode(self.alloc, crop, @intCast(cw), @intCast(ch));
+        return .{ .pixels = crop_pixels, .width = @intCast(crop_width), .height = @intCast(crop_height) };
+    }
+
+    fn exportPng(self: *Editor) ![]u8 {
+        const exported = try self.exportPixels();
+        defer self.alloc.free(exported.pixels);
+        return png.encode(self.alloc, exported.pixels, exported.width, exported.height);
     }
 };

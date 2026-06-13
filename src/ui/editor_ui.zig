@@ -190,7 +190,6 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
     const ui_scale = self.uf();
     const message = switch (self.copy_notice) {
         .none => return,
-        .copying => "Copying...",
         .copied => "Copied to clipboard",
         .failed => "Copy failed",
     };
@@ -205,7 +204,6 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
     const notice_y = self.sc(28);
     const background_color: u32 = switch (self.copy_notice) {
         .none => unreachable,
-        .copying => 0xF24DABF7,
         .copied => 0xF22F9E44,
         .failed => 0xF2E03131,
     };
