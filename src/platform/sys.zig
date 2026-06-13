@@ -55,6 +55,25 @@ pub fn writeAll(fd: fd_t, buf: []const u8) !void {
     while (off < buf.len) off += try write(fd, buf[off..]);
 }
 
+/// Like writeAll, but waits for fds that temporarily reject writes. Wayland
+/// clipboard pipes can be non-blocking; closing them after EAGAIN truncates
+/// large PNG transfers.
+pub fn writeAllBlocking(fd: fd_t, buf: []const u8) !void {
+    var off: usize = 0;
+    while (off < buf.len) {
+        const n = write(fd, buf[off..]) catch |err| switch (err) {
+            error.WouldBlock => {
+                var fds = [_]linux.pollfd{.{ .fd = fd, .events = linux.POLL.OUT, .revents = 0 }};
+                _ = try poll(&fds, -1);
+                continue;
+            },
+            else => return err,
+        };
+        if (n == 0) return error.BrokenPipe;
+        off += n;
+    }
+}
+
 pub fn close(fd: fd_t) void {
     _ = linux.close(fd);
 }

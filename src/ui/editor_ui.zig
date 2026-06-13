@@ -185,6 +185,35 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
     text_mod.draw(canvas, chip_x + self.sc(28), tb.y + @divTrunc(tb.h, 2) - @divTrunc(text_mod.height(fs), 2), fs, 0xFFAAB2BA, label);
 }
 
+pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
+    const window_width: i32 = @intCast(self.win.width);
+    const ui_scale = self.uf();
+    const message = switch (self.copy_notice) {
+        .none => return,
+        .copying => "Copying...",
+        .copied => "Copied to clipboard",
+        .failed => "Copy failed",
+    };
+    const message_font_size = 15.0 * ui_scale;
+    const message_width = text_mod.width(message_font_size, message);
+    const message_height = text_mod.height(message_font_size);
+    const horizontal_padding = self.sc(18);
+    const vertical_padding = self.sc(10);
+    const notice_width = message_width + horizontal_padding * 2;
+    const notice_height = message_height + vertical_padding * 2;
+    const notice_x = @divTrunc(window_width - notice_width, 2);
+    const notice_y = self.sc(28);
+    const background_color: u32 = switch (self.copy_notice) {
+        .none => unreachable,
+        .copying => 0xF24DABF7,
+        .copied => 0xF22F9E44,
+        .failed => 0xF2E03131,
+    };
+    canvas.fillRoundRectAA(notice_x, notice_y + self.sc(2), notice_width, notice_height, 14.0 * ui_scale, 0x44000000);
+    canvas.fillRoundRectAA(notice_x, notice_y, notice_width, notice_height, 14.0 * ui_scale, background_color);
+    text_mod.draw(canvas, notice_x + horizontal_padding, notice_y + vertical_padding, message_font_size, 0xFFFFFFFF, message);
+}
+
 fn prevRight(kind: ButtonKind, buttons: []const Button) i32 {
     var right: i32 = 0;
     for (buttons) |b| {

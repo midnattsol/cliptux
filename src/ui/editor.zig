@@ -23,7 +23,9 @@ const handleAt = shapes_mod.handleAt;
 const resizeWithHandle = shapes_mod.resizeWithHandle;
 const evdevToChar = shapes_mod.evdevToChar;
 
-pub const Action = enum { cancel, copy, save };
+pub const Action = enum { cancel, save };
+
+pub const CopyNotice = enum { none, copying, copied, failed };
 
 pub const Result = struct {
     action: Action,
@@ -32,6 +34,12 @@ pub const Result = struct {
 };
 
 const dim_color: u32 = 0x8C000000;
+
+fn nowMs() i64 {
+    var ts: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+}
 
 const DragMode = union(enum) {
     none,
@@ -101,6 +109,8 @@ pub const Editor = struct {
     smoke_deadline_ms: i64 = 0, // dev: auto-cancel timestamp (0 = off)
     cfg_thickness: i32 = 3, // logical default, scaled at first layout
     binds: [config.n_actions]config.Bind = config.default_binds,
+    copy_notice: CopyNotice = .none,
+    copy_notice_hide_at_ms: i64 = 0,
 
     pub fn init(alloc: std.mem.Allocator, win: *Window, img: *const png.Image) Editor {
         return .{ .alloc = alloc, .win = win, .img = img };
@@ -156,19 +166,24 @@ pub const Editor = struct {
     /// Run the editor; returns the user's chosen action and exported PNG.
     pub fn run(self: *Editor) !Result {
         while (self.running) {
+            const now = nowMs();
             if (self.smoke_deadline_ms != 0) {
-                var ts: std.os.linux.timespec = undefined;
-                _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-                if (@as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000) > self.smoke_deadline_ms) {
+                if (now > self.smoke_deadline_ms) {
                     self.action = .cancel;
                     break;
                 }
             }
-            const ev = (try self.win.nextEventTimeout(100)) orelse continue;
-            try self.handle(ev);
-            // drain whatever else is queued before rendering
-            while (self.win.queue.items.len > 0) {
-                try self.handle(try self.win.nextEvent());
+            if (self.copy_notice_hide_at_ms != 0 and now >= self.copy_notice_hide_at_ms) {
+                self.copy_notice = .none;
+                self.copy_notice_hide_at_ms = 0;
+                self.needs_render = true;
+            }
+            if (try self.win.nextEventTimeout(100)) |ev| {
+                try self.handle(ev);
+                // drain whatever else is queued before rendering
+                while (self.win.queue.items.len > 0) {
+                    try self.handle(try self.win.nextEvent());
+                }
             }
             if (self.needs_render and !self.win.frame_pending) {
                 try self.renderFrame();
@@ -494,10 +509,7 @@ pub const Editor = struct {
             .color => |c| self.color_idx = c,
             .undo => self.undo(),
             .redo => self.redoOne(),
-            .copy => {
-                self.action = .copy;
-                self.running = false;
-            },
+            .copy => try self.copyToClipboard(),
             .save => {
                 self.action = .save;
                 self.running = false;
@@ -531,11 +543,7 @@ pub const Editor = struct {
                 .pixelate => self.tool = .pixelate,
                 .counter => self.tool = .counter,
                 .text => self.tool = .text,
-                .copy => {
-                    self.ensureSelection();
-                    self.action = .copy;
-                    self.running = false;
-                },
+                .copy => try self.copyToClipboard(),
                 .save => {
                     self.ensureSelection();
                     self.action = .save;
@@ -560,11 +568,7 @@ pub const Editor = struct {
                     self.running = false;
                 }
             },
-            window.KEY_ENTER, KEY_KPENTER => {
-                self.ensureSelection();
-                self.action = .copy;
-                self.running = false;
-            },
+            window.KEY_ENTER, KEY_KPENTER => try self.copyToClipboard(),
             KEY_Y => if (ctrl) self.redoOne(),
             KEY_MINUS => self.thickness = @max(1, self.thickness - 1),
             KEY_EQUAL => self.thickness = @min(32, self.thickness + 1),
@@ -607,6 +611,29 @@ pub const Editor = struct {
             }
             self.text_edit = null;
         }
+    }
+
+    fn copyToClipboard(self: *Editor) !void {
+        if (self.text_edit != null) try self.commitText();
+
+        self.showCopyNotice(.copying, 0);
+        try self.renderFrame();
+        self.needs_render = false;
+
+        const png_data = try self.exportPng();
+        self.win.setClipboardPng(png_data) catch |err| {
+            self.alloc.free(png_data);
+            std.log.warn("copy failed: {t}", .{err});
+            self.showCopyNotice(.failed, 1200);
+            return;
+        };
+        self.showCopyNotice(.copied, 1200);
+    }
+
+    fn showCopyNotice(self: *Editor, copy_notice: CopyNotice, duration_ms: i64) void {
+        self.copy_notice = copy_notice;
+        self.copy_notice_hide_at_ms = if (duration_ms > 0) nowMs() + duration_ms else 0;
+        self.needs_render = true;
     }
 
     fn ensureSelection(self: *Editor) void {
@@ -654,6 +681,7 @@ pub const Editor = struct {
         ui.drawSelectionChrome(self, &canvas);
         try ui.layoutToolbar(self);
         ui.drawToolbar(self, &canvas);
+        if (self.copy_notice != .none) ui.drawCopyNotice(self, &canvas);
         try self.win.present();
     }
 
@@ -684,8 +712,6 @@ pub const Editor = struct {
         }
     }
 
-    // --- export ---
-    // --- export ---
     // --- export ---
 
     fn exportPng(self: *Editor) ![]u8 {

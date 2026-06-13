@@ -86,7 +86,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         @memset(px, 0xFF1B1F23);
         var canvas = render.Canvas.init(px, W, H);
         text.draw(&canvas, 20, 16, 34.0, 0xFFE9ECEF, "cliptux Settings — AaBbGg 0123");
-        text.draw(&canvas, 20, 70, 22.0, 0xFF4DABF7, "Notification after copy or save");
+        text.draw(&canvas, 20, 70, 22.0, 0xFF4DABF7, "Notification after saving");
         text.draw(&canvas, 20, 105, 16.0, 0xFF8B939B, "Bind a key to \"cliptux\" — áéíóú ñ ç ü");
         text.draw(&canvas, 20, 140, 13.0, 0xFFE9ECEF, "Small 13px: The quick brown fox jumps over the lazy dog");
         text.draw(&canvas, 20, 170, 11.0, 0xFFE9ECEF, "Tiny 11px: The quick brown fox jumps over the lazy dog");

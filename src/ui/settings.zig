@@ -238,7 +238,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         card(&ui, margin, y, w - margin * 2, card_h, "General");
         var ry = y + ui.sc(16) + ui.sc(26);
 
-        ry = toggleRow(&ui, regions, alloc, margin, ry, w, "Notification after copy or save", cfg.notify, .toggle_notify, mx, my);
+        ry = toggleRow(&ui, regions, alloc, margin, ry, w, "Notification after saving", cfg.notify, .toggle_notify, mx, my);
         ry = toggleRow(&ui, regions, alloc, margin, ry, w, "Also copy to clipboard when saving", cfg.copy_on_save, .toggle_copy_on_save, mx, my);
 
         // thickness row

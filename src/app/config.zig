@@ -32,7 +32,7 @@ pub const Action = enum {
             .pixelate => "Pixelate",
             .counter => "Counter badge",
             .text => "Text",
-            .copy => "Copy and exit",
+            .copy => "Copy to clipboard",
             .save => "Save and exit",
             .undo => "Undo",
             .redo => "Redo",
@@ -114,7 +114,7 @@ pub fn bindName(b: Bind, buf: []u8) []const u8 {
 }
 
 pub const Config = struct {
-    /// desktop notification after copy/save
+    /// desktop notification after saving
     notify: bool = true,
     /// also copy to clipboard when saving to disk
     copy_on_save: bool = false,

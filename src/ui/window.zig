@@ -66,6 +66,8 @@ pub const Window = struct {
     pointer: u32 = 0,
     keyboard: u32 = 0,
     data_device: u32 = 0,
+    clipboard_source: u32 = 0,
+    clipboard_data: []u8 = &.{},
     viewport: u32 = 0,
     fs_obj: u32 = 0, // wp_fractional_scale_v1
     scale120: u32 = 120, // fractional scale numerator (120 = 1.0)
@@ -159,6 +161,7 @@ pub const Window = struct {
     }
 
     pub fn deinit(self: *Window) void {
+        self.dropClipboardSource();
         self.destroyPool();
         if (self.cursor_pool_mem.len > 0) sys.munmap(self.cursor_pool_mem);
         self.queue.deinit(self.alloc);
@@ -423,6 +426,8 @@ pub const Window = struct {
         } else if (ev.object == self.frame_cb and ev.opcode == wl.wl_callback.ev_done) {
             self.frame_pending = false;
             try self.queue.append(self.alloc, .frame_done);
+        } else if (ev.object != 0 and ev.object == self.clipboard_source) {
+            try self.handleClipboardSource(ev.opcode, &r);
         } else if (ev.object == self.pointer) {
             try self.handlePointer(ev.opcode, &r);
         } else if (ev.object == self.keyboard) {
@@ -689,9 +694,14 @@ pub const Window = struct {
         c.flush() catch {};
     }
 
-    /// Claim the clipboard selection with an image/png data source.
-    /// Call while the window still has focus (serial must be fresh).
-    pub fn claimClipboardPng(self: *Window) !u32 {
+    pub fn hasClipboard(self: *const Window) bool {
+        return self.clipboard_source != 0;
+    }
+
+    /// Claim the clipboard selection with an image/png data source. Takes
+    /// ownership of data on success. Call while the window still has focus
+    /// (serial must be fresh).
+    pub fn setClipboardPng(self: *Window, data: []u8) !void {
         if (self.ddm == 0 or self.data_device == 0) return error.NoDataDevice;
         const c = &self.conn;
         const source = c.newId();
@@ -699,36 +709,48 @@ pub const Window = struct {
         try c.request(source, wl.wl_data_source.offer, &.{.{ .string = "image/png" }});
         try c.request(self.data_device, wl.wl_data_device.set_selection, &.{ .{ .object = source }, .{ .uint = self.input_serial } });
         try c.flush();
-        return source;
+
+        self.dropClipboardSource();
+        self.clipboard_source = source;
+        self.clipboard_data = data;
     }
 
     /// Serve clipboard reads until another client replaces the selection.
     /// Blocks; safe to call after closeWindow().
-    pub fn serveClipboard(self: *Window, source: u32, data: []const u8) !void {
-        const c = &self.conn;
-        while (true) {
+    pub fn serveClipboard(self: *Window) !void {
+        while (self.clipboard_source != 0) {
             const ev = try self.conn.readEvent();
-            if (ev.object == source) {
-                var r = wl.ArgReader{ .data = ev.body };
-                switch (ev.opcode) {
-                    wl.wl_data_source.ev_send => {
-                        _ = r.string(); // mime
-                        if (self.conn.takeFd()) |fd| {
-                            sys.writeAll(fd, data) catch {};
-                            sys.close(fd);
-                        }
-                    },
-                    wl.wl_data_source.ev_cancelled => {
-                        try c.request(source, wl.wl_data_source.destroy, &.{});
-                        try c.flush();
-                        return;
-                    },
-                    else => {},
-                }
-            } else {
-                try self.handleEvent(ev);
-                self.queue.clearRetainingCapacity();
-            }
+            try self.handleEvent(ev);
+            self.queue.clearRetainingCapacity();
         }
+    }
+
+    fn handleClipboardSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
+        switch (opcode) {
+            wl.wl_data_source.ev_send => {
+                _ = r.string(); // mime
+                if (self.conn.takeFd()) |fd| {
+                    defer sys.close(fd);
+                    sys.writeAllBlocking(fd, self.clipboard_data) catch |err| switch (err) {
+                        error.BrokenPipe, error.ConnectionReset => {},
+                        else => std.log.warn("clipboard send failed: {t}", .{err}),
+                    };
+                }
+            },
+            wl.wl_data_source.ev_cancelled => self.dropClipboardSource(),
+            else => {},
+        }
+    }
+
+    fn dropClipboardSource(self: *Window) void {
+        if (self.clipboard_source != 0) {
+            self.conn.request(self.clipboard_source, wl.wl_data_source.destroy, &.{}) catch {};
+            self.clipboard_source = 0;
+        }
+        if (self.clipboard_data.len > 0) {
+            self.alloc.free(self.clipboard_data);
+            self.clipboard_data = &.{};
+        }
+        self.conn.flush() catch {};
     }
 };

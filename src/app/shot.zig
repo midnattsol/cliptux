@@ -57,17 +57,19 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
     defer if (result.png_data) |d| gpa.free(d);
 
     switch (result.action) {
-        .cancel => win.closeWindow(),
-        .copy => {
-            const source = try win.claimClipboardPng();
+        .cancel => {
             win.closeWindow();
             ed.releaseCaches(); // serving may outlive the session; drop ~140MB
-            if (cfg.notify) portal.notify(gpa, &conn, "cliptux", "Screenshot copied to clipboard");
-            // keep serving paste requests until another app owns the clipboard
-            try win.serveClipboard(source, result.png_data.?);
+            if (win.hasClipboard()) try win.serveClipboard();
         },
         .save => {
-            const source: ?u32 = if (cfg.copy_on_save) try win.claimClipboardPng() else null;
+            if (cfg.copy_on_save) {
+                const copy = try gpa.dupe(u8, result.png_data.?);
+                win.setClipboardPng(copy) catch |err| {
+                    gpa.free(copy);
+                    std.log.warn("copy-on-save failed: {t}", .{err});
+                };
+            }
             win.closeWindow();
             ed.releaseCaches();
             const path = try savePng(gpa, env, &cfg, result.png_data.?);
@@ -75,7 +77,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             var buf: [512]u8 = undefined;
             const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
             if (cfg.notify) portal.notify(gpa, &conn, "cliptux", msg);
-            if (source) |src| try win.serveClipboard(src, result.png_data.?);
+            if (win.hasClipboard()) try win.serveClipboard();
         },
     }
 }
