@@ -161,7 +161,7 @@ pub const Tray = struct {
     }
 
     const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
-        .{ .id = 1, .label = "Take snapshot", .separator = false },
+        .{ .id = 1, .label = "Take screenshot", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
         .{ .id = 4, .label = "Quit", .separator = false },
