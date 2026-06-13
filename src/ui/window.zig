@@ -37,7 +37,10 @@ pub const KEY_RIGHTSHIFT: u32 = 54;
 const Buffer = struct {
     id: u32 = 0,
     busy: bool = false,
-    pixels: []align(std.heap.page_size_min) u8 = &.{},
+    // 4-byte aligned: the pool is page-aligned and buf_size is a multiple
+    // of 4 (stride = w*4), so each buffer offset is u32-aligned. It is NOT
+    // page-aligned for arbitrary window sizes, only u32-aligned.
+    pixels: []align(4) u8 = &.{},
 };
 
 pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
