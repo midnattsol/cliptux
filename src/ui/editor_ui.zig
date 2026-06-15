@@ -9,6 +9,7 @@ const editor_mod = @import("editor.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
+const DragMode = editor_mod.DragMode;
 const Tool = shapes_mod.Tool;
 const Rect = shapes_mod.Rect;
 const palette = shapes_mod.palette;
@@ -84,7 +85,7 @@ pub const tool_list = [_]Tool{ .select, .pen, .line, .arrow, .rect, .ellipse, .h
 
 pub fn layoutToolbar(self: *Editor) !void {
     self.buttons.clearRetainingCapacity();
-    if (self.sel == null) {
+    if (self.sel == null or self.drag != .none) {
         self.toolbar_rect = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
         return;
     }
@@ -139,7 +140,7 @@ pub fn layoutToolbar(self: *Editor) !void {
 }
 
 pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
-    if (self.sel == null) return;
+    if (self.sel == null or self.drag != .none) return;
     const tb = self.toolbar_rect;
     const f = self.uf();
     // soft drop shadow + rounded bar

@@ -399,6 +399,14 @@ pub const Window = struct {
         return self.queue.orderedRemove(0);
     }
 
+    /// Read and dispatch all events already buffered in the Wayland socket
+    /// without blocking. Call before rendering to get the latest input state.
+    pub fn drainPending(self: *Window) !void {
+        while (self.conn.pollEvent()) |ev| {
+            try self.handleEvent(ev);
+        }
+    }
+
     fn dispatchOne(self: *Window) !void {
         const ev = try self.conn.readEvent();
         try self.handleEvent(ev);
@@ -499,7 +507,14 @@ pub const Window = struct {
                 const f = self.pointerScale();
                 self.ptr_x = r.fixed() * f;
                 self.ptr_y = r.fixed() * f;
-                try self.queue.append(self.alloc, .{ .pointer_motion = .{ .x = self.ptr_x, .y = self.ptr_y } });
+                if (self.queue.items.len > 0 and
+                    self.queue.items[self.queue.items.len - 1] == .pointer_motion)
+                {
+                    self.queue.items[self.queue.items.len - 1] =
+                        .{ .pointer_motion = .{ .x = self.ptr_x, .y = self.ptr_y } };
+                } else {
+                    try self.queue.append(self.alloc, .{ .pointer_motion = .{ .x = self.ptr_x, .y = self.ptr_y } });
+                }
             },
             wl.wl_pointer.ev_button => {
                 const serial = r.uint();

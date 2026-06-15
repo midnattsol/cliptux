@@ -47,7 +47,7 @@ fn nowMs() i64 {
     return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
 }
 
-const DragMode = union(enum) {
+pub const DragMode = union(enum) {
     none,
     selecting,
     moving_sel: struct { orig: Rect, start: Point },
@@ -186,12 +186,16 @@ pub const Editor = struct {
             }
             if (try self.win.nextEventTimeout(100)) |ev| {
                 try self.handle(ev);
-                // drain whatever else is queued before rendering
                 while (self.win.queue.items.len > 0) {
                     try self.handle(try self.win.nextEvent());
                 }
             }
             if (self.needs_render and !self.win.frame_pending) {
+                // drain buffered Wayland events to get latest pointer position
+                try self.win.drainPending();
+                while (self.win.queue.items.len > 0) {
+                    try self.handle(try self.win.nextEvent());
+                }
                 try self.renderFrame();
                 self.needs_render = false;
             }
@@ -291,11 +295,11 @@ pub const Editor = struct {
                 self.running = false;
             },
             .pointer_motion => |m| {
-                self.mouse = .{ .x = @intFromFloat(m.x), .y = @intFromFloat(m.y) };
+                self.mouse = .{ .x = @intFromFloat(@round(m.x)), .y = @intFromFloat(@round(m.y)) };
                 try self.onMotion();
             },
             .pointer_button => |b| {
-                self.mouse = .{ .x = @intFromFloat(b.x), .y = @intFromFloat(b.y) };
+                self.mouse = .{ .x = @intFromFloat(@round(b.x)), .y = @intFromFloat(@round(b.y)) };
                 if (b.button == window.BTN_LEFT) {
                     if (b.pressed) try self.onPress() else try self.onRelease();
                 } else if (b.button == window.BTN_RIGHT and b.pressed) {
