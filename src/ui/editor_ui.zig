@@ -188,9 +188,11 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
 
 pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
     const window_width: i32 = @intCast(self.win.width);
+    const window_height: i32 = @intCast(self.win.height);
     const ui_scale = self.uf();
     const message = switch (self.copy_notice) {
         .none => return,
+        .copying => "Copying...",
         .copied => "Copied to clipboard",
         .failed => "Copy failed",
     };
@@ -198,19 +200,72 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
     const message_width = text_mod.width(message_font_size, message);
     const message_height = text_mod.height(message_font_size);
     const horizontal_padding = self.sc(18);
-    const vertical_padding = self.sc(10);
-    const notice_width = message_width + horizontal_padding * 2;
-    const notice_height = message_height + vertical_padding * 2;
-    const notice_x = @divTrunc(window_width - notice_width, 2);
-    const notice_y = self.sc(28);
-    const background_color: u32 = switch (self.copy_notice) {
+    const vertical_padding = self.sc(12);
+    const icon_size = self.sc(22);
+    const gap = self.sc(12);
+    const min_width = self.sc(220);
+    const margin = self.sc(24);
+    var notice_width = @max(min_width, icon_size + gap + message_width + horizontal_padding * 2);
+    notice_width = @min(notice_width, @max(self.sc(160), window_width - margin * 2));
+    const notice_height = @max(self.sc(52), @max(icon_size, message_height) + vertical_padding * 2);
+    var notice_x = window_width - notice_width - margin;
+    if (notice_x < margin) notice_x = @divTrunc(window_width - notice_width, 2);
+    if (notice_x < margin) notice_x = margin;
+    var notice_y = window_height - notice_height - margin;
+    if (notice_y < margin) notice_y = margin;
+    const accent: u32 = switch (self.copy_notice) {
         .none => unreachable,
-        .copied => 0xF22F9E44,
+        .copying => 0xFF4DABF7,
+        .copied => 0xFF4DABF7,
         .failed => 0xF2E03131,
     };
-    canvas.fillRoundRectAA(notice_x, notice_y + self.sc(2), notice_width, notice_height, 14.0 * ui_scale, 0x44000000);
-    canvas.fillRoundRectAA(notice_x, notice_y, notice_width, notice_height, 14.0 * ui_scale, background_color);
-    text_mod.draw(canvas, notice_x + horizontal_padding, notice_y + vertical_padding, message_font_size, 0xFFFFFFFF, message);
+
+    canvas.fillRoundRectAA(notice_x + self.sc(2), notice_y + self.sc(5), notice_width, notice_height, 17.0 * ui_scale, 0x44000000);
+    canvas.fillRoundRectAA(notice_x, notice_y, notice_width, notice_height, 17.0 * ui_scale, 0x35FFFFFF);
+    canvas.fillRoundRectAA(notice_x + 1, notice_y + 1, notice_width - 2, notice_height - 2, 16.0 * ui_scale, 0xF21A2028);
+    canvas.fillRoundRectAA(notice_x + self.sc(9), notice_y + self.sc(10), self.sc(3), notice_height - self.sc(20), 1.5 * ui_scale, accent);
+
+    const content_x = notice_x + horizontal_padding + self.sc(5);
+    const icon_cx: f64 = @floatFromInt(content_x + @divTrunc(icon_size, 2));
+    const icon_cy: f64 = @floatFromInt(notice_y + @divTrunc(notice_height, 2));
+    drawCopyNoticeIcon(canvas, self.copy_notice, icon_cx, icon_cy, ui_scale, accent);
+
+    const text_x = content_x + icon_size + gap;
+    const text_y = notice_y + @divTrunc(notice_height - message_height, 2);
+    text_mod.draw(canvas, text_x, text_y, message_font_size, 0xFFEFF4FA, message);
+}
+
+fn drawCopyNoticeIcon(canvas: *Canvas, copy_notice: editor_mod.CopyNotice, cx: f64, cy: f64, scale: f64, accent: u32) void {
+    const P = struct { x: i32, y: i32 };
+    switch (copy_notice) {
+        .none => return,
+        .copying => {
+            canvas.ringAA(cx, cy, 9.5 * scale, 2.0 * scale, 0x804DABF7);
+            canvas.fillCircleAA(cx + 6.5 * scale, cy - 6.5 * scale, 2.4 * scale, accent);
+        },
+        .copied => {
+            canvas.fillCircleAA(cx, cy, 10.5 * scale, accent);
+            const check = [_]P{
+                .{ .x = @intFromFloat(cx - 5.2 * scale), .y = @intFromFloat(cy + 0.2 * scale) },
+                .{ .x = @intFromFloat(cx - 1.4 * scale), .y = @intFromFloat(cy + 4.1 * scale) },
+                .{ .x = @intFromFloat(cx + 6.1 * scale), .y = @intFromFloat(cy - 5.0 * scale) },
+            };
+            canvas.strokePolylineAA(check[0..], 2.2 * scale, 0xFFFFFFFF);
+        },
+        .failed => {
+            canvas.fillCircleAA(cx, cy, 10.5 * scale, accent);
+            const a = [_]P{
+                .{ .x = @intFromFloat(cx - 4.6 * scale), .y = @intFromFloat(cy - 4.6 * scale) },
+                .{ .x = @intFromFloat(cx + 4.6 * scale), .y = @intFromFloat(cy + 4.6 * scale) },
+            };
+            const b = [_]P{
+                .{ .x = @intFromFloat(cx - 4.6 * scale), .y = @intFromFloat(cy + 4.6 * scale) },
+                .{ .x = @intFromFloat(cx + 4.6 * scale), .y = @intFromFloat(cy - 4.6 * scale) },
+            };
+            canvas.strokePolylineAA(a[0..], 2.1 * scale, 0xFFFFFFFF);
+            canvas.strokePolylineAA(b[0..], 2.1 * scale, 0xFFFFFFFF);
+        },
+    }
 }
 
 fn prevRight(kind: ButtonKind, buttons: []const Button) i32 {

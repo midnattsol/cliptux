@@ -25,7 +25,7 @@ const evdevToChar = shapes_mod.evdevToChar;
 
 pub const Action = enum { cancel, save };
 
-pub const CopyNotice = enum { none, copied, failed };
+pub const CopyNotice = enum { none, copying, copied, failed };
 
 const ExportedPixels = struct {
     pixels: []u32,
@@ -626,14 +626,20 @@ pub const Editor = struct {
     fn copyToClipboard(self: *Editor) !void {
         if (self.text_edit != null) try self.commitText();
 
+        self.showCopyNotice(.copying, 0);
+        if (!self.win.frame_pending) {
+            try self.renderFrame();
+            self.needs_render = false;
+        }
+
         const exported = try self.exportPixels();
         self.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
             self.alloc.free(exported.pixels);
             std.log.warn("copy failed: {t}", .{err});
-            self.showCopyNotice(.failed, 1200);
+            self.showCopyNotice(.failed, 2400);
             return;
         };
-        self.showCopyNotice(.copied, 1200);
+        self.showCopyNotice(.copied, 2400);
     }
 
     fn showCopyNotice(self: *Editor, copy_notice: CopyNotice, duration_ms: i64) void {
