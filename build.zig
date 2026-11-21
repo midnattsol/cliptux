@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
+    addGnomeExtension(b, exe.root_module);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -31,6 +32,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
+    addGnomeExtension(b, tests.root_module);
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
@@ -63,4 +65,12 @@ pub fn build(b: *std.Build) void {
     e2e_step.dependOn(&run_e2e.step);
     const drive_step = b.step("e2e-driver", "Install the e2e input driver (zig-out/bin/shotlet-drive)");
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
+}
+
+/// The GNOME Shell extension ships inside the binary, for
+/// `shotlet gnome-integration install`.
+fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
+    const dir = "gnome-extension/shotlet@midnattsol.github.io/";
+    m.addAnonymousImport("gnome_ext_js", .{ .root_source_file = b.path(dir ++ "extension.js") });
+    m.addAnonymousImport("gnome_ext_metadata", .{ .root_source_file = b.path(dir ++ "metadata.json") });
 }
