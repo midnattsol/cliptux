@@ -87,7 +87,7 @@ pub fn begin(alloc: std.mem.Allocator, conn: *dbus.Connection, interactive: bool
     var token_buf: [48]u8 = undefined;
     var ts: std.os.linux.timespec = undefined;
     _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-    const token = try std.fmt.bufPrint(&token_buf, "cliptux_{d}_{d}", .{
+    const token = try std.fmt.bufPrint(&token_buf, "shotlet_{d}_{d}", .{
         std.os.linux.getpid(),
         @as(u64, @intCast(ts.nsec)),
     });
@@ -181,15 +181,15 @@ test "percent decode" {
     try std.testing.expectEqualStrings("/home/x/Imágenes/a b.png", decoded);
 }
 
-/// Move this process into its own `app-cliptux-<pid>.scope` transient systemd
+/// Move this process into its own `app-shotlet-<pid>.scope` transient systemd
 /// scope (same mechanism as `systemd-run --user --scope`). xdg-desktop-portal
-/// derives the caller's app id from the unit name, so this makes us "cliptux"
+/// derives the caller's app id from the unit name, so this makes us "shotlet"
 /// regardless of which terminal/launcher started the process. GNOME requires
 /// that id to match the focused window's app_id before showing its consent
 /// dialog, and keys the stored permission on it.
 pub fn ensureAppScope(alloc: std.mem.Allocator, conn: *dbus.Connection) void {
     ensureAppScopeInner(alloc, conn) catch |err| {
-        std.log.warn("could not move into app-cliptux scope: {t}", .{err});
+        std.log.warn("could not move into app-shotlet scope: {t}", .{err});
     };
 }
 
@@ -197,7 +197,7 @@ fn ensureAppScopeInner(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
     {
         const cg = try sys.readFileAlloc(alloc, "/proc/self/cgroup", 4096);
         defer alloc.free(cg);
-        if (std.mem.indexOf(u8, cg, "app-cliptux") != null) return; // already there
+        if (std.mem.indexOf(u8, cg, "app-shotlet") != null) return; // already there
     }
 
     const systemd_name = "org.freedesktop.systemd1";
@@ -213,7 +213,7 @@ fn ensureAppScopeInner(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
     }
     const pid: u32 = @intCast(std.os.linux.getpid());
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "app-cliptux-{d}.scope", .{pid});
+    const name = try std.fmt.bufPrint(&name_buf, "app-shotlet-{d}.scope", .{pid});
 
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
@@ -252,7 +252,7 @@ fn ensureAppScopeInner(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
     while (tries < 20) : (tries += 1) {
         const cg = try sys.readFileAlloc(alloc, "/proc/self/cgroup", 4096);
         defer alloc.free(cg);
-        if (std.mem.indexOf(u8, cg, "app-cliptux") != null) return;
+        if (std.mem.indexOf(u8, cg, "app-shotlet") != null) return;
         var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 50 * std.time.ns_per_ms };
         _ = std.os.linux.nanosleep(&ts, null);
     }
@@ -269,7 +269,7 @@ pub fn notify(alloc: std.mem.Allocator, conn: *dbus.Connection, summary: []const
 fn notifyInner(alloc: std.mem.Allocator, conn: *dbus.Connection, summary: []const u8, text: []const u8) !void {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
-    try m.putString("cliptux"); // app_name
+    try m.putString("Shotlet"); // app_name
     try m.putU32(0); // replaces_id
     try m.putString("camera-photo"); // icon
     try m.putString(summary);
@@ -384,8 +384,8 @@ pub fn scCreateSession(alloc: std.mem.Allocator, conn: *dbus.Connection) ![]u8 {
     try conn.addMatch("type='signal',interface='org.freedesktop.portal.Request',member='Response'");
     var tok_buf: [64]u8 = undefined;
     var stok_buf: [64]u8 = undefined;
-    const tok = try makeToken(&tok_buf, "cliptux_r");
-    const stok = try makeToken(&stok_buf, "cliptux_s");
+    const tok = try makeToken(&tok_buf, "shotlet_r");
+    const stok = try makeToken(&stok_buf, "shotlet_s");
 
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
@@ -445,7 +445,7 @@ pub fn scSelectAndStart(alloc: std.mem.Allocator, conn: *dbus.Connection, sessio
     var tok_buf: [64]u8 = undefined;
 
     {
-        const tok = try makeToken(&tok_buf, "cliptux_r");
+        const tok = try makeToken(&tok_buf, "shotlet_r");
         var m = dbus.Marshal.init(alloc);
         defer m.deinit();
         try m.putObjectPath(session_path);
@@ -482,7 +482,7 @@ pub fn scSelectAndStart(alloc: std.mem.Allocator, conn: *dbus.Connection, sessio
     var new_token: ?[]u8 = null;
     errdefer if (new_token) |t| alloc.free(t);
     {
-        const tok = try makeToken(&tok_buf, "cliptux_r");
+        const tok = try makeToken(&tok_buf, "shotlet_r");
         var m = dbus.Marshal.init(alloc);
         defer m.deinit();
         try m.putObjectPath(session_path);

@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=cliptux
+Name=Shotlet
 Comment=Wayland-native screenshots with annotation editor
-Exec=/home/midnattsol/.local/bin/cliptux --daemon
-Icon=cliptux
+Exec=shotlet --daemon
+Icon=shotlet
 Terminal=false
 Categories=Utility;Graphics;
 StartupNotify=false

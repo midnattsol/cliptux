@@ -237,7 +237,7 @@ pub const Window = struct {
         try c.request(self.wm_base, wl.xdg_wm_base.get_xdg_surface, &.{ .{ .new_id = self.xdg_surf }, .{ .object = self.surface } });
         self.toplevel = c.newId();
         try c.request(self.xdg_surf, wl.xdg_surface.get_toplevel, &.{.{ .new_id = self.toplevel }});
-        try c.request(self.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = "cliptux" }});
+        try c.request(self.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = "shotlet" }});
         try c.request(self.toplevel, wl.xdg_toplevel.set_title, &.{.{ .string = title }});
         if (opts.fullscreen) {
             try c.request(self.toplevel, wl.xdg_toplevel.set_fullscreen, &.{.{ .object = 0 }});
@@ -290,7 +290,7 @@ pub const Window = struct {
         const buf_size: usize = @as(usize, stride) * h;
         const total = buf_size * 2;
 
-        self.pool_fd = try sys.memfdCreate("cliptux-shm", sys.MFD_CLOEXEC);
+        self.pool_fd = try sys.memfdCreate("shotlet-shm", sys.MFD_CLOEXEC);
         try sys.ftruncate(self.pool_fd, total);
         self.pool_mem = try sys.mmapRw(self.pool_fd, total);
 
@@ -591,7 +591,7 @@ pub const Window = struct {
         const c = &self.conn;
         const buf_size: usize = cursor_size * cursor_size * 4;
         const total = buf_size * self.cursor_buffers.len;
-        const fd = try sys.memfdCreate("cliptux-cursor", sys.MFD_CLOEXEC);
+        const fd = try sys.memfdCreate("shotlet-cursor", sys.MFD_CLOEXEC);
         // note: flushed before close below; fds travel with the queued bytes
         defer sys.close(fd);
         try sys.ftruncate(fd, total);

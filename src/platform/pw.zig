@@ -1,5 +1,5 @@
 //! Minimal PipeWire screen-capture client. Loads libpipewire-0.3 at runtime
-//! (dlopen) so cliptux keeps building with zero dependencies and falls back
+//! (dlopen) so shotlet keeps building with zero dependencies and falls back
 //! to the Screenshot portal when PipeWire is unavailable. Uses the stable
 //! pw_stream C API; the SPA format pod is built by hand.
 
@@ -358,7 +358,7 @@ pub const Pre = struct {
 pub fn preconnect(fd: i32) !Pre {
     if (!available()) return error.PipeWireUnavailable;
     var pre = Pre{};
-    pre.loop = api.thread_loop_new("cliptux-pw", null) orelse return error.PwLoop;
+    pre.loop = api.thread_loop_new("shotlet-pw", null) orelse return error.PwLoop;
     if (api.thread_loop_start(pre.loop) < 0) {
         api.thread_loop_destroy(pre.loop);
         return error.PwLoop;
@@ -403,7 +403,7 @@ pub fn grabPre(pre: *Pre, node_id: u32, timeout_sec: u32) !Frame {
     };
 
     api.thread_loop_lock(pre.loop);
-    const stream = api.stream_new(pre.core, "cliptux-capture", null);
+    const stream = api.stream_new(pre.core, "shotlet-capture", null);
 
     var pod_buf: [256]u8 align(8) = undefined;
     const pod = buildFormatPod(&pod_buf);

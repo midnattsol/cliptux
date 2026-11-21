@@ -34,13 +34,13 @@ jobs:
 
       - name: Package
         run: |
-          name="cliptux-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
+          name="shotlet-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
           mkdir -p "dist/$name"
-          cp zig-out/bin/cliptux cliptux.desktop cliptux.svg README.md LICENSE "dist/$name/"
+          cp zig-out/bin/shotlet shotlet.desktop shotlet.svg README.md LICENSE "dist/$name/"
           tar -C dist -czf "$name.tar.gz" "$name"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: cliptux-*.tar.gz
+          files: shotlet-*.tar.gz
           generate_release_notes: true

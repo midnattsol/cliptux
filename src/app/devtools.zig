@@ -17,7 +17,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         const window = @import("../ui/window.zig");
         var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
         defer win.deinit();
-        try win.open("cliptux test", .{});
+        try win.open("Shotlet test", .{});
         var elapsed_ms: i64 = 0;
         var frames: u32 = 0;
         outer: while (elapsed_ms < 3000) {
@@ -68,8 +68,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         std.debug.print("frame: {d}x{d} grab={d}ms total={d}ms\n", .{ frame.width, frame.height, t2 - t1, t2 - t0 });
         const out = try png.encode(gpa, frame.pixels, frame.width, frame.height);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/cliptux-grab.png", out);
-        std.debug.print("wrote /tmp/cliptux-grab.png\n", .{});
+        try sys.writeFile("/tmp/shotlet-grab.png", out);
+        std.debug.print("wrote /tmp/shotlet-grab.png\n", .{});
         return true;
     }
     if (std.mem.eql(u8, cmd, "test-font")) {
@@ -85,15 +85,15 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         defer gpa.free(px);
         @memset(px, 0xFF1B1F23);
         var canvas = render.Canvas.init(px, W, H);
-        text.draw(&canvas, 20, 16, 34.0, 0xFFE9ECEF, "cliptux Settings — AaBbGg 0123");
+        text.draw(&canvas, 20, 16, 34.0, 0xFFE9ECEF, "Shotlet Settings — AaBbGg 0123");
         text.draw(&canvas, 20, 70, 22.0, 0xFF4DABF7, "Notification after saving");
-        text.draw(&canvas, 20, 105, 16.0, 0xFF8B939B, "Bind a key to \"cliptux\" — áéíóú ñ ç ü");
+        text.draw(&canvas, 20, 105, 16.0, 0xFF8B939B, "Bind a key to \"shotlet\" — áéíóú ñ ç ü");
         text.draw(&canvas, 20, 140, 13.0, 0xFFE9ECEF, "Small 13px: The quick brown fox jumps over the lazy dog");
         text.draw(&canvas, 20, 170, 11.0, 0xFFE9ECEF, "Tiny 11px: The quick brown fox jumps over the lazy dog");
         const out = try png.encode(gpa, px, W, H);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/cliptux-font.png", out);
-        std.debug.print("wrote /tmp/cliptux-font.png\n", .{});
+        try sys.writeFile("/tmp/shotlet-font.png", out);
+        std.debug.print("wrote /tmp/shotlet-font.png\n", .{});
         return true;
     }
     if (std.mem.eql(u8, cmd, "test-decode")) {
@@ -107,7 +107,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         std.debug.print("decoded {d}x{d}, pixel[0]=0x{x:0>8}\n", .{ img.width, img.height, img.pixels[0] });
         const out = try png.encode(gpa, img.pixels, img.width, img.height);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/cliptux-reencoded.png", out);
+        try sys.writeFile("/tmp/shotlet-reencoded.png", out);
         return true;
     }
     return false;

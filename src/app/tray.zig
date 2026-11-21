@@ -131,9 +131,9 @@ pub const Tray = struct {
         if (eql(u8, prop, "Category")) {
             try m.putVariantString("ApplicationStatus");
         } else if (eql(u8, prop, "Id")) {
-            try m.putVariantString("cliptux");
+            try m.putVariantString("shotlet");
         } else if (eql(u8, prop, "Title")) {
-            try m.putVariantString("cliptux");
+            try m.putVariantString("Shotlet");
         } else if (eql(u8, prop, "Status")) {
             try m.putVariantString("Active");
         } else if (eql(u8, prop, "IconName")) {
@@ -298,7 +298,7 @@ const sni_introspect_xml =
     \\</node>
 ;
 
-/// Draw the cliptux tray icon: scissors snipping a dashed capture corner.
+/// Draw the shotlet tray icon: scissors snipping a dashed capture corner.
 /// Returns ARGB bytes in big-endian order (SNI spec) at the given size.
 pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
     const n: usize = @intCast(size);

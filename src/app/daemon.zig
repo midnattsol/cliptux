@@ -1,6 +1,6 @@
 //! Tray daemon: owns the StatusNotifierItem and spawns capture children.
 //! Detaches from the terminal (double fork + setsid) unless asked to stay
-//! in the foreground; only one instance can own org.midnattsol.cliptux.
+//! in the foreground; only one instance can own org.midnattsol.shotlet.
 
 const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
@@ -34,8 +34,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     defer conn.deinit();
 
     // single instance: lose the name race -> another daemon already runs
-    if (!(conn.requestName("org.midnattsol.cliptux") catch true)) {
-        std.log.warn("cliptux daemon is already running", .{});
+    if (!(conn.requestName("org.midnattsol.shotlet") catch true)) {
+        std.log.warn("shotlet daemon is already running", .{});
         return;
     }
     portal.ensureAppScope(gpa, &conn);
@@ -50,7 +50,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     };
     var tray = try tray_mod.Tray.init(gpa, &conn, &icons);
 
-    std.log.info("cliptux daemon running (tray icon registered)", .{});
+    std.log.info("shotlet daemon running (tray icon registered)", .{});
     while (true) {
         var msg = conn.nextMessage() catch |err| switch (err) {
             error.Disconnected => {
@@ -74,7 +74,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     }
 }
 
-/// Fork+exec a cliptux subcommand child so the daemon stays responsive and
+/// Fork+exec a shotlet subcommand child so the daemon stays responsive and
 /// a crash in the editor can't take down the tray.
 fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
     const linux = std.os.linux;
@@ -90,7 +90,7 @@ fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
     if (pid != 0) return; // parent
 
     // child: exec ourselves with a minimal environment
-    const argv = [_:null]?[*:0]const u8{ "cliptux", subcommand };
+    const argv = [_:null]?[*:0]const u8{ "shotlet", subcommand };
     const envp = [_:null]?[*:0]const u8{
         (std.fmt.allocPrintSentinel(a, "DBUS_SESSION_BUS_ADDRESS={s}", .{env.bus_addr}, 0) catch quitChild()).ptr,
         (std.fmt.allocPrintSentinel(a, "XDG_RUNTIME_DIR={s}", .{env.runtime_dir}, 0) catch quitChild()).ptr,
@@ -117,9 +117,9 @@ fn redirectStdio(env: Env) void {
     sys.mkdir(dir1);
     const dir2 = std.fmt.bufPrint(&buf, "{s}/.local/state", .{env.home}) catch return;
     sys.mkdir(dir2);
-    const dir3 = std.fmt.bufPrint(&buf, "{s}/.local/state/cliptux", .{env.home}) catch return;
+    const dir3 = std.fmt.bufPrint(&buf, "{s}/.local/state/shotlet", .{env.home}) catch return;
     sys.mkdir(dir3);
-    const log_path = std.fmt.bufPrint(&buf, "{s}/.local/state/cliptux/daemon.log", .{env.home}) catch return;
+    const log_path = std.fmt.bufPrint(&buf, "{s}/.local/state/shotlet/daemon.log", .{env.home}) catch return;
     // bounded logging: rotate once past 1 MiB, keeping a single .old file,
     // so the log can never grow beyond ~2 MiB total
     if ((sys.fileSize(log_path) catch 0) > 1024 * 1024) {

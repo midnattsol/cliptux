@@ -5,12 +5,12 @@ const devtools = @import("app/devtools.zig");
 const Env = @import("app/env.zig").Env;
 
 const usage =
-    \\cliptux - Wayland-native screenshot tool with annotation editor
+    \\Shotlet - Wayland-native screenshot tool with annotation editor
     \\
     \\usage:
-    \\  cliptux             capture + editor (copy/save)
-    \\  cliptux --daemon    run the system tray daemon (detaches; -f stays)
-    \\  cliptux --help      show this help
+    \\  shotlet             capture + editor (copy/save)
+    \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
+    \\  shotlet --help      show this help
     \\
 ;
 

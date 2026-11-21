@@ -1,5 +1,5 @@
 //! Persistent configuration: simple key=value file at
-//! ~/.config/cliptux/config, written atomically on change.
+//! ~/.config/shotlet/config, written atomically on change.
 
 const std = @import("std");
 const sys = @import("../platform/sys.zig");
@@ -149,11 +149,30 @@ pub const Config = struct {
 };
 
 fn configPath(home: []const u8, buf: []u8) ![]u8 {
-    return std.fmt.bufPrint(buf, "{s}/.config/cliptux/config", .{home});
+    return std.fmt.bufPrint(buf, "{s}/.config/shotlet/config", .{home});
+}
+
+/// Shotlet was called cliptux. Carry an old ~/.config/cliptux over to the new
+/// place once, so settings, shortcuts and the screencast token survive the
+/// rename. Never overwrites an existing Shotlet configuration.
+fn migrateLegacy(home: []const u8) void {
+    var new_buf: [512]u8 = undefined;
+    const new_cfg = configPath(home, &new_buf) catch return;
+    if (sys.fileSize(new_cfg)) |_| return else |_| {}
+
+    var old_buf: [512]u8 = undefined;
+    const old_dir = std.fmt.bufPrint(&old_buf, "{s}/.config/cliptux", .{home}) catch return;
+    var dir_buf: [512]u8 = undefined;
+    const new_dir = std.fmt.bufPrint(&dir_buf, "{s}/.config/shotlet", .{home}) catch return;
+    // fails harmlessly when there is nothing to migrate, or when the new
+    // directory already holds files
+    sys.rename(old_dir, new_dir) catch return;
+    std.log.info("moved settings from {s} to {s}", .{ old_dir, new_dir });
 }
 
 pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
     var cfg = Config{};
+    migrateLegacy(home);
     var path_buf: [512]u8 = undefined;
     const path = configPath(home, &path_buf) catch return cfg;
     const data = sys.readFileAlloc(alloc, path, 64 * 1024) catch return cfg;
@@ -217,13 +236,13 @@ pub fn save(alloc: std.mem.Allocator, home: []const u8, cfg: *const Config) !voi
     var dir_buf: [512]u8 = undefined;
     const cfg_dir = try std.fmt.bufPrint(&dir_buf, "{s}/.config", .{home});
     sys.mkdir(cfg_dir);
-    const app_dir = try std.fmt.bufPrint(&dir_buf, "{s}/.config/cliptux", .{home});
+    const app_dir = try std.fmt.bufPrint(&dir_buf, "{s}/.config/shotlet", .{home});
     sys.mkdir(app_dir);
 
     var content_list: std.ArrayList(u8) = .empty;
     defer content_list.deinit(alloc);
     const head = try std.fmt.allocPrint(alloc,
-        \\# cliptux configuration
+        \\# shotlet configuration
         \\notify={s}
         \\copy_on_save={s}
         \\default_thickness={d}
@@ -277,11 +296,11 @@ test "bind parse and format roundtrip" {
 
 test "config save/load roundtrip" {
     const alloc = std.testing.allocator;
-    const home = "/tmp/cliptux-test-home";
+    const home = "/tmp/shotlet-test-home";
     sys.mkdir(home);
     defer {
         var buf: [256]u8 = undefined;
-        const p = std.fmt.bufPrint(&buf, "{s}/.config/cliptux/config", .{home}) catch unreachable;
+        const p = std.fmt.bufPrint(&buf, "{s}/.config/shotlet/config", .{home}) catch unreachable;
         sys.unlink(p) catch {};
     }
 
@@ -301,6 +320,28 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(@as(u3, 5), loaded.default_color);
     try std.testing.expect(loaded.binds[@intFromEnum(Action.pen)].matches(33, true, false));
     try std.testing.expectEqualStrings("tok-123", loaded.scToken().?);
+}
+
+test "settings from cliptux are carried over once" {
+    const alloc = std.testing.allocator;
+    const home = "/tmp/shotlet-test-migrate";
+    sys.mkdir(home);
+    sys.mkdir(home ++ "/.config");
+    sys.mkdir(home ++ "/.config/cliptux");
+    defer {
+        sys.unlink(home ++ "/.config/shotlet/config") catch {};
+        sys.unlink(home ++ "/.config/cliptux/config") catch {};
+    }
+    try sys.writeFile(home ++ "/.config/cliptux/config", "default_thickness=11\n");
+
+    const migrated = load(alloc, home);
+    try std.testing.expectEqual(@as(i32, 11), migrated.default_thickness);
+
+    // an existing Shotlet configuration always wins over a leftover cliptux one
+    sys.mkdir(home ++ "/.config/cliptux");
+    try sys.writeFile(home ++ "/.config/cliptux/config", "default_thickness=3\n");
+    const again = load(alloc, home);
+    try std.testing.expectEqual(@as(i32, 11), again.default_thickness);
 }
 
 test "config roundtrip parse" {

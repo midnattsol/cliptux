@@ -49,7 +49,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
     defer img.deinit(gpa);
     const t_capture = nowMs();
 
-    try win.open("cliptux", .{ .fullscreen = true });
+    try win.open("Shotlet", .{ .fullscreen = true });
     const t_open = nowMs();
     std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
     std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
@@ -91,7 +91,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             defer gpa.free(path);
             var buf: [512]u8 = undefined;
             const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
-            if (cfg.notify) portal.notify(gpa, &conn, "cliptux", msg);
+            if (cfg.notify) portal.notify(gpa, &conn, "Shotlet", msg);
             if (win.hasClipboard()) try win.serveClipboard();
         },
     }
@@ -168,7 +168,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
-    try win.open("cliptux", .{ .fullscreen = false, .width = 640, .height = 220 });
+    try win.open("Shotlet", .{ .fullscreen = false, .width = 640, .height = 220 });
 
     var pending: ?portal.Pending = null;
     defer if (pending) |*p| p.deinit(gpa);
@@ -186,7 +186,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
             var canvas = render.Canvas.init(px, win.width, win.height);
             const w: i32 = @intCast(win.width);
             canvas.rectOutline(0, 0, w, @intCast(win.height), 1, 0xFF3A3F44);
-            const title = "cliptux needs screenshot permission";
+            const title = "Shotlet needs screenshot permission";
             canvas.text(@divTrunc(w - render.Canvas.textWidth(2, title), 2), 42, 2, 0xFFE9ECEF, title);
             canvas.text(@divTrunc(w - render.Canvas.textWidth(2, status), 2), 96, 2, 0xFF74B3F2, status);
             const hint = "GNOME remembers this choice    Esc: cancel";
@@ -230,7 +230,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
                     if (!hint_logged) {
                         hint_logged = true;
                         std.log.warn("portal denied the request; manual grant (plain DBus):", .{});
-                        std.log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot cliptux 1 yes", .{});
+                        std.log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot shotlet 1 yes", .{});
                     }
                     pending.?.deinit(gpa);
                     pending = null;
@@ -293,7 +293,7 @@ fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const @import("config.zig").C
     const md = day.calculateMonthDay();
     const ds = es.getDaySeconds();
 
-    const path = try std.fmt.allocPrint(gpa, "{s}/cliptux-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}.png", .{
+    const path = try std.fmt.allocPrint(gpa, "{s}/shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}.png", .{
         dir,
         day.year,
         md.month.numeric(),

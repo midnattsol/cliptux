@@ -1,5 +1,5 @@
 //! Settings window: toggles, defaults and a keyboard reference, persisted
-//! to ~/.config/cliptux/config. Rendered with the system TrueType font.
+//! to ~/.config/shotlet/config. Rendered with the system TrueType font.
 
 const std = @import("std");
 const window = @import("window.zig");
@@ -65,7 +65,7 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
     var win = try Window.init(alloc, runtime_dir, display);
     defer win.deinit();
     win.current_cursor = .arrow;
-    try win.open("cliptux settings", .{ .fullscreen = false, .width = 600, .height = 910 });
+    try win.open("Shotlet settings", .{ .fullscreen = false, .width = 600, .height = 910 });
 
     var regions: std.ArrayList(Region) = .empty;
     defer regions.deinit(alloc);
@@ -337,14 +337,14 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         const card_h = ui.sc(16) + ui.sc(26) + line_h * 4 + ui.sc(12);
         card(&ui, margin, y, w - margin * 2, card_h, "System");
         var ry = y + ui.sc(16) + ui.sc(26);
-        text.draw(c, margin + ui.sc(16), ry, small, ui_fg, "Global shortcut: bind a key to \"cliptux\" in");
+        text.draw(c, margin + ui.sc(16), ry, small, ui_fg, "Global shortcut: bind a key to \"shotlet\" in");
         ry += line_h;
         text.draw(c, margin + ui.sc(16), ry, small, ui_dim, "GNOME Settings > Keyboard > Custom Shortcuts");
         ry += line_h + ui.sc(6);
         const loc = cfg.saveDir() orelse "Save location: system Pictures folder";
         text.draw(c, margin + ui.sc(16), ry, small, ui_fg, loc);
         ry += line_h;
-        text.draw(c, margin + ui.sc(16), ry, small, ui_dim, "Override with save_dir= in ~/.config/cliptux/config");
+        text.draw(c, margin + ui.sc(16), ry, small, ui_dim, "Override with save_dir= in ~/.config/shotlet/config");
         y += card_h + ui.sc(18);
     }
 
@@ -368,7 +368,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
     {
         c.fillRect(0, 0, w, hh, 0xFF20242A);
         c.fillRect(0, hh - 1, w, 1, 0xFF2E3338);
-        const title = "cliptux Settings";
+        const title = "Shotlet Settings";
         text.draw(c, ui.sc(16), @divTrunc(hh - text.height(body), 2), body, ui_fg, title);
 
         // window controls, right to left: close, maximize, minimize

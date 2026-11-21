@@ -1,4 +1,4 @@
-# cliptux
+# Shotlet
 
 Fast screenshot tool for **Linux on Wayland** with a Flameshot-style
 annotation editor. Written in Zig, zero build dependencies — it speaks the
@@ -13,6 +13,9 @@ Wayland and DBus wire protocols directly.
   your Pictures folder. `Enter`/`Ctrl+C` copy, `Ctrl+S` save, `Esc` quits.
 - Tray icon with menu, and a Settings window with rebindable shortcuts.
 
+Shotlet was called **cliptux** until its rename; settings in
+`~/.config/cliptux` are moved to `~/.config/shotlet` on first run.
+
 Built GNOME-first (where grim/slurp/flameshot struggle); any compositor
 with the standard portals should work.
 
@@ -23,9 +26,9 @@ xdg-desktop-portal (PipeWire recommended for fast capture).
 
 ```sh
 zig build -Doptimize=ReleaseSafe
-install -Dm755 zig-out/bin/cliptux ~/.local/bin/cliptux
-install -Dm644 cliptux.desktop ~/.local/share/applications/cliptux.desktop
-install -Dm644 cliptux.svg ~/.local/share/icons/hicolor/scalable/apps/cliptux.svg
+install -Dm755 zig-out/bin/shotlet ~/.local/bin/shotlet
+install -Dm644 shotlet.desktop ~/.local/share/applications/shotlet.desktop
+install -Dm644 shotlet.svg ~/.local/share/icons/hicolor/scalable/apps/shotlet.svg
 ```
 
 Or grab a prebuilt binary (x86_64 / arm64) from the
@@ -35,12 +38,12 @@ any distro from around 2020 onward (Ubuntu 20.04+, Debian 11+, etc.).
 ## Usage
 
 ```sh
-cliptux            # capture + editor
-cliptux --daemon   # tray icon (autostart: copy cliptux.desktop to ~/.config/autostart)
-cliptux settings   # preferences and shortcut bindings
+shotlet            # capture + editor
+shotlet --daemon   # tray icon (autostart: copy shotlet.desktop to ~/.config/autostart)
+shotlet settings   # preferences and shortcut bindings
 ```
 
-Tip: bind a key to `cliptux` in GNOME Settings > Keyboard > Custom Shortcuts.
+Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts.
 
 On GNOME the tray needs the AppIndicator extension. The first capture shows
 a one-time screen-share consent dialog; the choice is remembered.
