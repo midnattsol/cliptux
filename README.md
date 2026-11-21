@@ -117,7 +117,8 @@ Needs `gnome-shell`, `xdg-desktop-portal-gnome`, `pipewire`, `wireplumber`,
 `wl-clipboard`, `python3` and `gdbus`; the IME scenario also uses
 `ibus-hangul` (skipped without it). On Debian/Ubuntu:
 `apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul`.
-`E2E_OUT=dir` keeps the logs and screenshots of a run.
+`E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
+nightly and on demand (`.github/workflows/e2e.yml`), never on pull requests.
 
 ## License
 

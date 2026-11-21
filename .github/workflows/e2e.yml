@@ -1,0 +1,62 @@
+name: E2E
+
+# The end-to-end suite runs shotlet in a private headless GNOME session
+# (tools/e2e.sh). It is slow and depends on the distribution's GNOME, so it
+# never gates pull requests: it runs nightly and on demand.
+on:
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "Scenarios to run (space separated; empty: all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: End-to-end (headless GNOME)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # actions are pinned to commit SHAs (tags can be moved)
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Install GNOME, PipeWire and the portals
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gnome-shell mutter xdg-desktop-portal xdg-desktop-portal-gnome \
+            nautilus pipewire wireplumber libpipewire-0.3-0 libxkbcommon0 \
+            wl-clipboard ibus ibus-hangul dbus-daemon dbus-bin \
+            libglib2.0-bin python3 mesa-utils libgl1-mesa-dri \
+            fonts-noto-core fonts-noto-cjk
+
+      - name: Build
+        run: zig build e2e-driver
+
+      - name: Run the e2e suite
+        env:
+          E2E_OUT: ${{ runner.temp }}/e2e-out
+        run: zig build e2e -- ${{ github.event.inputs.scenarios }}
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-out
+          path: ${{ runner.temp }}/e2e-out
+          if-no-files-found: ignore
+          retention-days: 14
