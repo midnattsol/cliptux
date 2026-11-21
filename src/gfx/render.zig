@@ -3,6 +3,12 @@
 
 const std = @import("std");
 const font = @import("font.zig");
+const utf8 = @import("utf8.zig");
+
+/// Bitmap-font byte for a codepoint: ASCII as is, anything else '?'.
+fn bitmapChar(cp: u21) u8 {
+    return if (cp >= 32 and cp <= 126) @intCast(cp) else '?';
+}
 
 pub const Canvas = struct {
     px: []u32,
@@ -544,8 +550,10 @@ pub const Canvas = struct {
             return;
         }
         var pen_x = x0;
-        for (s) |c| {
-            const g = font.glyphFor(c);
+        var it = utf8.Iterator.init(s);
+        while (it.next()) |cp| {
+            if (pen_x >= self.w) break;
+            const g = font.glyphFor(bitmapChar(cp));
             for (g, 0..) |row, gy| {
                 var gx: u3 = 0;
                 while (gx < font.glyph_w) : (gx += 1) {
@@ -560,7 +568,7 @@ pub const Canvas = struct {
                     }
                 }
             }
-            pen_x += (font.glyph_w + 1) * scale;
+            pen_x +|= (font.glyph_w + 1) * scale;
         }
     }
 
@@ -571,8 +579,10 @@ pub const Canvas = struct {
         const ha = scale - @divTrunc(scale, 2); // first subcell (ceil)
         const hb = scale - ha; // second subcell
         var pen_x = x0;
-        for (s) |c| {
-            const g = font.glyphFor(c);
+        var it = utf8.Iterator.init(s);
+        while (it.next()) |cp| {
+            if (pen_x >= self.w) break;
+            const g = font.glyphFor(bitmapChar(cp));
             const src = struct {
                 fn at(glyph: *const font.Glyph, gx: i32, gy: i32) bool {
                     if (gx < 0 or gy < 0 or gx >= font.glyph_w or gy >= font.glyph_h) return false;
@@ -602,12 +612,13 @@ pub const Canvas = struct {
                     if (q[3]) self.fillRect(bx + ha, by + ha, hb, hb, color);
                 }
             }
-            pen_x += (font.glyph_w + 1) * scale;
+            pen_x +|= (font.glyph_w + 1) * scale;
         }
     }
 
     pub fn textWidth(scale: i32, s: []const u8) i32 {
-        return @as(i32, @intCast(s.len)) * (font.glyph_w + 1) * scale;
+        const n: i64 = @intCast(utf8.count(s));
+        return @intCast(@min(std.math.maxInt(i32), n * (font.glyph_w + 1) * scale));
     }
 
     pub fn textHeight(scale: i32) i32 {
