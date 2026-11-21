@@ -136,6 +136,7 @@ test {
     _ = @import("app/config.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
+    _ = @import("ui/textbox.zig");
     _ = @import("ui/shapes.zig");
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");

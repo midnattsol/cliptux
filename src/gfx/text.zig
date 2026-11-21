@@ -812,6 +812,47 @@ pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []cons
     wrap_next = (wrap_next + 1) % wrap_cache.len;
 }
 
+/// Where the characters in byte range [a, b) of line `s` are drawn: up to
+/// `out.len` horizontal spans [x0, x1) from the line's left edge, in
+/// visual order, adjacent glyphs merged. Mixed-direction text gives
+/// several spans. A ligature partly inside the range counts as inside.
+pub fn rangeSpans(size_px: f64, style: Style, s: []const u8, a: usize, b: usize, dir: bidi.Direction, out: [][2]i32) usize {
+    if (a >= b or out.len == 0) return 0;
+    const st = if (state) |*p| p else {
+        const sc = bitmapScale(size_px);
+        out[0] = .{ Canvas.textWidth(sc, s[0..@min(a, s.len)]), Canvas.textWidth(sc, s[0..@min(b, s.len)]) };
+        return 1;
+    };
+    if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
+    const items = layout(st, size_px, style, s, dir) orelse return 0;
+    var n: usize = 0;
+    var cur: ?[2]f64 = null;
+    for (items) |it| {
+        if (it.adv <= 0) continue;
+        const inside = it.start < b and it.end > a;
+        if (inside) {
+            if (cur) |*c| {
+                if (@abs(it.x - c[1]) < 0.5) {
+                    c[1] = it.x + it.adv;
+                    continue;
+                }
+            }
+        }
+        if (cur) |c| {
+            if (n == out.len) return n;
+            out[n] = .{ @intFromFloat(@round(c[0])), @intFromFloat(@round(c[1])) };
+            n += 1;
+            cur = null;
+        }
+        if (inside) cur = .{ it.x, it.x + it.adv };
+    }
+    if (cur) |c| if (n < out.len) {
+        out[n] = .{ @intFromFloat(@round(c[0])), @intFromFloat(@round(c[1])) };
+        n += 1;
+    };
+    return n;
+}
+
 fn bitmapOffsetForX(size_px: f64, s: []const u8, x: i32) usize {
     const cell = Canvas.textWidth(bitmapScale(size_px), "x");
     var it = utf8.Iterator.init(s);
@@ -947,6 +988,15 @@ test "bidi layout: visual order, carets and shaping" {
     }
     try std.testing.expectEqual(@as(usize, 3), visible);
     try std.testing.expectEqual(@as(u32, 6), ai[0].start); // meem, leftmost
+    // a range across both directions highlights each part where it is
+    // "bc א" in "abc אבג def": the Hebrew letter is drawn apart from "bc "
+    const mixed = "abc \u{5D0}\u{5D1}\u{5D2} def";
+    var spans: [4][2]i32 = undefined;
+    const ns = rangeSpans(16, .regular, mixed, 1, 6, .ltr, &spans);
+    try std.testing.expectEqual(@as(usize, 2), ns);
+    var covered: i32 = 0;
+    for (spans[0..ns]) |sp| covered += sp[1] - sp[0];
+    try std.testing.expect(@abs(covered - width(16, "bc ") - width(16, "\u{5D0}")) <= 2);
     // mixed text with numbers and invalid bytes never crashes
     var px: [64 * 32]u32 = @splat(0);
     var c = Canvas.init(&px, 64, 32);

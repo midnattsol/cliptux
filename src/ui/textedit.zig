@@ -81,6 +81,15 @@ pub const TextEdit = struct {
         }
     }
 
+    /// Put the caret at `c` (computed by the caller, e.g. by visual
+    /// line); `extend` grows the selection, otherwise it collapses.
+    pub fn moveTo(self: *TextEdit, c: usize, extend: bool) void {
+        if (extend) {
+            if (self.anchor == null) self.anchor = self.caret;
+        } else self.anchor = null;
+        self.caret = c;
+    }
+
     fn setCaret(self: *TextEdit, c: usize) void {
         self.caret = c;
     }
