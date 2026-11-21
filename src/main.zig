@@ -30,6 +30,9 @@ const usage =
     \\                      floating windows
     \\  shotlet gnome-integration shortcut [KEY...|none]
     \\                      its capture shortcut (default Print)
+    \\  shotlet permissions [reset [--dry-run]]
+    \\                      what Shotlet captures with and what it remembered;
+    \\                      reset forgets it, so the next capture asks again
     \\  shotlet --help      show this help
     \\
 ;
@@ -117,6 +120,8 @@ fn dispatch(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void 
         if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
     } else if (eql(u8, cmd, "gnome-integration")) {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
+    } else if (eql(u8, cmd, "permissions")) {
+        try @import("app/permissions.zig").run(gpa, env, args[2..]);
     } else if (eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
     } else if (eql(u8, cmd, "toast") and args.len > 2) {
@@ -279,6 +284,7 @@ test {
     _ = @import("app/modes/cli.zig");
     _ = @import("app/scroll/capture.zig");
     _ = @import("app/gsettings.zig");
+    _ = @import("app/permissions.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/clipimg.zig");
     _ = @import("app/binds.zig");
