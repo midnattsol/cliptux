@@ -6,15 +6,21 @@ Wayland and DBus wire protocols directly.
 
 - Instant capture (~0.3s) via the ScreenCast portal + PipeWire, with a
   Screenshot-portal fallback. One consent dialog ever.
+- Multi-monitor: every monitor you share in the picker is captured and
+  laid out as on your desktop, at the sharpest monitor's pixel density.
 - Region selection, then annotate: pencil, line, arrow, rectangle, ellipse,
   highlighter, pixelate, counter badges, text. Undo/redo, 8 colors,
   mouse-wheel thickness.
-- Copies straight to the clipboard (nothing written to disk) or saves to
-  your Pictures folder. `Enter`/`Ctrl+C` copy, `Ctrl+S` save, `Esc` quits.
+- Copies straight to the clipboard (nothing written to disk), saves to
+  your Pictures folder, or asks where to save (Save As, through the
+  desktop's file chooser). `Enter`/`Ctrl+C` copy, `Ctrl+S` save, `Esc`
+  quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
+  time and never overwrite an existing file (`-2`, `-3`, ... are added).
 - Tray icon with menu, and a Settings window with rebindable shortcuts.
 
 Shotlet was called **cliptux** until its rename; settings in
-`~/.config/cliptux` are moved to `~/.config/shotlet` on first run.
+`~/.config/cliptux` (or `$XDG_CONFIG_HOME/cliptux`) are moved to the new
+place on first run.
 
 Built GNOME-first (where grim/slurp/flameshot struggle); any compositor
 with the standard portals should work.
@@ -46,7 +52,19 @@ shotlet settings   # preferences and shortcut bindings
 Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts.
 
 On GNOME the tray needs the AppIndicator extension. The first capture shows
-a one-time screen-share consent dialog; the choice is remembered.
+a one-time screen-share picker: select every monitor you want captured.
+The choice is remembered. Cancelling the picker just ends the capture.
+
+## Files
+
+| What | Where |
+| --- | --- |
+| Settings | `$XDG_CONFIG_HOME/shotlet/config` (default `~/.config/shotlet/config`), mode 0600 |
+| Daemon log | `$XDG_STATE_HOME/shotlet/daemon.log` (default `~/.local/state/shotlet`), rotated at 1 MiB |
+| Screenshots | the `save_dir` setting, else your XDG Pictures folder (`XDG_PICTURES_DIR` / `user-dirs.dirs`), else `~/Pictures` |
+
+The settings file is plain `key=value`. Shotlet only rewrites the keys it
+changes, so editing it by hand while Shotlet runs is safe.
 
 ## License
 

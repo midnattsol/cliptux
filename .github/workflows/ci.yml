@@ -13,15 +13,19 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      # actions are pinned to commit SHAs (tags can be moved)
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Set up Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.17.0
 
@@ -29,7 +33,9 @@ jobs:
         run: zig fmt --check src build.zig
 
       - name: Run tests
-        run: zig build test
+        # includes a portal integration test on a private dbus-daemon
+        # (skipped automatically where dbus-daemon is missing)
+        run: zig build test --summary all
 
       - name: Build (native, safe)
         run: zig build -Doptimize=safe

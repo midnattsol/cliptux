@@ -6,7 +6,8 @@ const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
 const portal = @import("../platform/portal.zig");
 const sys = @import("../platform/sys.zig");
-const Env = @import("env.zig").Env;
+const env_mod = @import("env.zig");
+const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     const tray_mod = @import("tray.zig");
@@ -51,18 +52,29 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     var tray = try tray_mod.Tray.init(gpa, &conn, &icons);
 
     std.log.info("shotlet daemon running (tray icon registered)", .{});
+    var log = LogFile.init(env, foreground);
     while (true) {
-        var msg = conn.nextMessage() catch |err| switch (err) {
-            error.Disconnected => {
+        // wake up now and then to keep the log bounded: children write to
+        // it through the stderr they inherit
+        const maybe = conn.nextMessageDeadline(sys.monoMs() + 60_000) catch |err| {
+            if (err == error.Disconnected) {
                 std.log.warn("session bus closed; exiting daemon", .{});
                 return;
-            },
-            else => return err,
+            }
+            if (dbus.isFatal(err)) return err;
+            // one malformed message must never take the tray down
+            std.log.warn("dropped malformed bus message: {t}", .{err});
+            continue;
         };
+        log.check();
+        var msg = maybe orelse continue;
         defer msg.deinit(gpa);
 
         const action = tray.handleMessage(&msg) catch |err| blk: {
             std.log.warn("tray message error: {t}", .{err});
+            if (msg.type == .method_call) {
+                conn.replyError(&msg, "org.freedesktop.DBus.Error.InvalidArgs", "malformed arguments") catch {};
+            }
             break :blk .none;
         };
         switch (action) {
@@ -78,10 +90,6 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
 /// a crash in the editor can't take down the tray.
 fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
     const linux = std.os.linux;
-    var stack_buf: [8 * 4096]u8 = undefined; // env strings live on our stack until execve
-    var fba = std.heap.FixedBufferAllocator.init(&stack_buf);
-    const a = fba.allocator();
-
     const pid = linux.fork();
     if (linux.errno(pid) != .SUCCESS) {
         std.log.err("fork failed", .{});
@@ -89,15 +97,10 @@ fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
     }
     if (pid != 0) return; // parent
 
-    // child: exec ourselves with a minimal environment
+    // child: exec ourselves with the daemon's own environment, so locale,
+    // XDG dirs, TZ, PATH and the rest reach the editor unchanged
     const argv = [_:null]?[*:0]const u8{ "shotlet", subcommand };
-    const envp = [_:null]?[*:0]const u8{
-        (std.fmt.allocPrintSentinel(a, "DBUS_SESSION_BUS_ADDRESS={s}", .{env.bus_addr}, 0) catch quitChild()).ptr,
-        (std.fmt.allocPrintSentinel(a, "XDG_RUNTIME_DIR={s}", .{env.runtime_dir}, 0) catch quitChild()).ptr,
-        (std.fmt.allocPrintSentinel(a, "WAYLAND_DISPLAY={s}", .{env.wayland_display}, 0) catch quitChild()).ptr,
-        (std.fmt.allocPrintSentinel(a, "HOME={s}", .{env.home}, 0) catch quitChild()).ptr,
-    };
-    _ = linux.execve("/proc/self/exe", &argv, &envp);
+    _ = linux.execve("/proc/self/exe", &argv, env.envp);
     quitChild();
 }
 
@@ -111,25 +114,76 @@ fn redirectStdio(env: Env) void {
         sys.dup2(null_fd, 0);
         if (null_fd > 2) sys.close(null_fd);
     } else |_| {}
-
-    var buf: [512]u8 = undefined;
-    const dir1 = std.fmt.bufPrint(&buf, "{s}/.local", .{env.home}) catch return;
-    sys.mkdir(dir1);
-    const dir2 = std.fmt.bufPrint(&buf, "{s}/.local/state", .{env.home}) catch return;
-    sys.mkdir(dir2);
-    const dir3 = std.fmt.bufPrint(&buf, "{s}/.local/state/shotlet", .{env.home}) catch return;
-    sys.mkdir(dir3);
-    const log_path = std.fmt.bufPrint(&buf, "{s}/.local/state/shotlet/daemon.log", .{env.home}) catch return;
-    // bounded logging: rotate once past 1 MiB, keeping a single .old file,
-    // so the log can never grow beyond ~2 MiB total
-    if ((sys.fileSize(log_path) catch 0) > 1024 * 1024) {
-        var old_buf: [512]u8 = undefined;
-        if (std.fmt.bufPrint(&old_buf, "{s}.old", .{log_path})) |old_path| {
-            sys.rename(log_path, old_path) catch {};
-        } else |_| {}
-    }
-    const log_fd = sys.openAppend(log_path) catch return;
-    sys.dup2(log_fd, 1);
-    sys.dup2(log_fd, 2);
-    if (log_fd > 2) sys.close(log_fd);
+    var log = LogFile.init(env, false);
+    log.rotateIfBig();
+    log.reopen();
 }
+
+/// The daemon log in $XDG_STATE_HOME/shotlet (0600). Rotated past
+/// `max_bytes` into a single .old file, checked at start and while running,
+/// so it stays around 2 * max_bytes even with chatty children.
+const LogFile = struct {
+    path_buf: [1024]u8 = undefined,
+    path_len: usize = 0,
+    enabled: bool = false,
+    last_check_ms: i64 = 0,
+
+    const max_bytes = 1024 * 1024;
+
+    fn init(env: Env, foreground: bool) LogFile {
+        var self = LogFile{};
+        if (foreground) return self; // logging to the terminal
+        var dir_buf: [1024]u8 = undefined;
+        const dir = env_mod.stateDir(&dir_buf, env.home) catch return self;
+        sys.mkdirAll(dir, 0o700);
+        const p = std.fmt.bufPrint(&self.path_buf, "{s}/daemon.log", .{dir}) catch return self;
+        self.path_len = p.len;
+        self.enabled = true;
+        return self;
+    }
+
+    fn path(self: *const LogFile) []const u8 {
+        return self.path_buf[0..self.path_len];
+    }
+
+    /// Point stdout/stderr at a fresh handle on the log file.
+    fn reopen(self: *LogFile) void {
+        if (!self.enabled) return;
+        const log_fd = sys.openAppend(self.path()) catch return;
+        sys.fchmod(log_fd, 0o600); // older versions created it 0644
+        sys.dup2(log_fd, 1);
+        sys.dup2(log_fd, 2);
+        if (log_fd > 2) sys.close(log_fd);
+    }
+
+    fn rotateIfBig(self: *LogFile) void {
+        if (!self.enabled) return;
+        if ((sys.fileSize(self.path()) catch 0) <= max_bytes) return;
+        var old_buf: [1100]u8 = undefined;
+        const old_path = std.fmt.bufPrint(&old_buf, "{s}.old", .{self.path()}) catch return;
+        sys.rename(self.path(), old_path) catch {};
+    }
+
+    /// Called from the main loop; cheap, rate-limited to every few seconds.
+    fn check(self: *LogFile) void {
+        if (!self.enabled) return;
+        const now = sys.monoMs();
+        if (now - self.last_check_ms < 5_000) return;
+        self.last_check_ms = now;
+        const size = sys.fdSize(2) catch return;
+        if (size <= max_bytes) return;
+        self.rotateIfBig();
+        self.reopen();
+        // children started before the rotation keep appending to .old;
+        // cut it if one of them is very chatty
+        var old_buf: [1100]u8 = undefined;
+        const old_path = std.fmt.bufPrint(&old_buf, "{s}.old", .{self.path()}) catch return;
+        if ((sys.fileSize(old_path) catch 0) > 4 * max_bytes) {
+            if (sys.openRw(old_path)) |fd| {
+                sys.ftruncateFd(fd, 0);
+                sys.close(fd);
+            } else |_| {}
+        }
+        std.log.info("daemon log rotated", .{});
+    }
+};

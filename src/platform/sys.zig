@@ -15,6 +15,12 @@ fn check(rc: usize) !usize {
         .CONNRESET => error.ConnectionReset,
         .INTR => error.Interrupted,
         .NOENT => error.NotFound, // expected for optional files; no logging
+        .EXIST => error.PathAlreadyExists, // expected with O_EXCL
+        .ACCES, .PERM => error.AccessDenied,
+        .CONNREFUSED => error.ConnectionRefused,
+        .NOTDIR => error.NotDir,
+        .NOTEMPTY => error.DirNotEmpty,
+        .TIMEDOUT => error.Timeout,
         else => {
             std.log.err("syscall failed: {t}", .{e});
             return error.SyscallFailed;
@@ -32,6 +38,70 @@ pub fn connectUnix(fd: fd_t, path: []const u8) !void {
     if (path.len >= sa.path.len) return error.PathTooLong;
     @memcpy(sa.path[0..path.len], path);
     _ = try check(linux.connect(fd, @ptrCast(&sa), @sizeOf(linux.sockaddr.un)));
+}
+
+/// Connect to a socket in the Linux abstract namespace. The name has no
+/// terminator and its length is part of the address, so the address length
+/// must cover exactly the leading NUL plus the name.
+pub fn connectUnixAbstract(fd: fd_t, name: []const u8) !void {
+    var sa: linux.sockaddr.un = .{ .family = linux.AF.UNIX, .path = @splat(0) };
+    if (name.len + 1 > sa.path.len) return error.PathTooLong;
+    @memcpy(sa.path[1..][0..name.len], name);
+    const len = @offsetOf(linux.sockaddr.un, "path") + 1 + name.len;
+    _ = try check(linux.connect(fd, @ptrCast(&sa), @intCast(len)));
+}
+
+/// A connected pair of unix stream sockets (close-on-exec).
+pub fn socketPair() ![2]fd_t {
+    var fds: [2]fd_t = undefined;
+    _ = try check(linux.socketpair(linux.AF.UNIX, linux.SOCK.STREAM | linux.SOCK.CLOEXEC, 0, &fds));
+    return fds;
+}
+
+/// Milliseconds on the monotonic clock; for deadlines.
+pub fn monoMs() i64 {
+    var ts: linux.timespec = undefined;
+    _ = linux.clock_gettime(.MONOTONIC, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+}
+
+/// Seconds since the epoch (UTC).
+pub fn realtimeSec() i64 {
+    var ts: linux.timespec = undefined;
+    _ = linux.clock_gettime(.REALTIME, &ts);
+    return ts.sec;
+}
+
+/// Fill `buf` from the kernel CSPRNG.
+pub fn getRandom(buf: []u8) void {
+    var off: usize = 0;
+    while (off < buf.len) {
+        const rc = linux.getrandom(buf[off..].ptr, buf.len - off, 0);
+        if (linux.errno(rc) != .SUCCESS) {
+            // only fails on pre-3.17 kernels; fall back to the clock
+            const t: u64 = @bitCast(monoMs() ^ (realtimeSec() << 20));
+            for (buf[off..], 0..) |*b, i| b.* = @truncate(t >> @intCast((i % 8) * 8));
+            return;
+        }
+        off += rc;
+    }
+}
+
+/// Poll timeout until `deadline_ms` (monotonic), or -1 when there is none.
+pub fn timeoutUntil(deadline_ms: ?i64) i32 {
+    const d = deadline_ms orelse return -1;
+    const left = d - monoMs();
+    if (left <= 0) return 0;
+    return @intCast(@min(left, std.math.maxInt(i32)));
+}
+
+/// Wait until `fd` is readable or the deadline passes. Returns false on
+/// timeout. Hang-up and errors count as readable so the next read reports
+/// them.
+pub fn waitReadable(fd: fd_t, deadline_ms: ?i64) !bool {
+    var fds = [_]linux.pollfd{.{ .fd = fd, .events = linux.POLL.IN, .revents = 0 }};
+    const n = try poll(&fds, timeoutUntil(deadline_ms));
+    return n > 0;
 }
 
 pub fn read(fd: fd_t, buf: []u8) !usize {
@@ -221,6 +291,65 @@ pub fn createWrite(path: []const u8) !fd_t {
     return @intCast(rc);
 }
 
+/// Create a new file that must not exist yet (O_EXCL, no symlink
+/// following). Fails with error.PathAlreadyExists otherwise.
+pub fn createExclusive(path: []const u8, mode: u32) !fd_t {
+    var pathz: [4096]u8 = undefined;
+    if (path.len >= pathz.len) return error.PathTooLong;
+    @memcpy(pathz[0..path.len], path);
+    pathz[path.len] = 0;
+    const rc = try check(linux.openat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, .{
+        .ACCMODE = .WRONLY,
+        .CREAT = true,
+        .EXCL = true,
+        .NOFOLLOW = true,
+        .CLOEXEC = true,
+    }, mode));
+    return @intCast(rc);
+}
+
+/// Write a whole new file with O_EXCL; removes the partial file on error.
+pub fn writeFileExclusive(path: []const u8, data: []const u8, mode: u32) !void {
+    const fd = try createExclusive(path, mode);
+    errdefer unlink(path) catch {};
+    defer close(fd);
+    try writeAll(fd, data);
+}
+
+pub fn fsync(fd: fd_t) void {
+    _ = linux.fsync(fd);
+}
+
+/// Open a directory for flock() or fsync().
+pub fn openDir(path: []const u8) !fd_t {
+    var pathz: [4096]u8 = undefined;
+    if (path.len >= pathz.len) return error.PathTooLong;
+    @memcpy(pathz[0..path.len], path);
+    pathz[path.len] = 0;
+    const rc = try check(linux.openat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY, .DIRECTORY = true, .CLOEXEC = true }, 0));
+    return @intCast(rc);
+}
+
+/// Exclusive advisory lock; released by closing the fd.
+pub fn lockExclusive(fd: fd_t) !void {
+    while (true) {
+        const rc = linux.flock(fd, 2); // LOCK_EX
+        if (linux.errno(rc) == .INTR) continue;
+        _ = try check(rc);
+        return;
+    }
+}
+
+/// Identity of an open file (device + inode).
+pub const FileId = struct { dev_major: u32, dev_minor: u32, ino: u64 };
+
+pub fn fileId(fd: fd_t) ?FileId {
+    var stx: linux.Statx = undefined;
+    const rc = linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .INO = true }, &stx);
+    if (linux.errno(rc) != .SUCCESS) return null;
+    return .{ .dev_major = stx.dev_major, .dev_minor = stx.dev_minor, .ino = stx.ino };
+}
+
 pub fn unlink(path: []const u8) !void {
     var pathz: [4096]u8 = undefined;
     if (path.len >= pathz.len) return error.PathTooLong;
@@ -230,11 +359,96 @@ pub fn unlink(path: []const u8) !void {
 }
 
 pub fn mkdir(path: []const u8) void {
+    mkdirMode(path, 0o755);
+}
+
+/// Best-effort mkdir with an explicit mode (existing directories are fine).
+pub fn mkdirMode(path: []const u8, mode: u32) void {
     var pathz: [4096]u8 = undefined;
     if (path.len >= pathz.len) return;
     @memcpy(pathz[0..path.len], path);
     pathz[path.len] = 0;
-    _ = linux.mkdirat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, 0o755);
+    _ = linux.mkdirat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, mode);
+}
+
+/// mkdir -p: creates missing parents (0755) and the leaf with `mode`.
+pub fn mkdirAll(path: []const u8, mode: u32) void {
+    var i: usize = 1;
+    while (i < path.len) : (i += 1) {
+        if (path[i] == '/') mkdirMode(path[0..i], 0o755);
+    }
+    mkdirMode(path, mode);
+}
+
+/// Create a fresh private directory `<TMPDIR or /tmp>/<prefix>-<random>`.
+/// Used by tests so parallel or repeated runs never share state.
+pub fn makeTempDir(alloc: std.mem.Allocator, base: []const u8, prefix: []const u8) ![]u8 {
+    var attempt: usize = 0;
+    while (attempt < 16) : (attempt += 1) {
+        var rnd: [8]u8 = undefined;
+        getRandom(&rnd);
+        const path = try std.fmt.allocPrint(alloc, "{s}/{s}-{x}", .{ base, prefix, std.mem.readInt(u64, &rnd, .little) });
+        var pathz: [4096]u8 = undefined;
+        if (path.len >= pathz.len) {
+            alloc.free(path);
+            return error.PathTooLong;
+        }
+        @memcpy(pathz[0..path.len], path);
+        pathz[path.len] = 0;
+        const rc = linux.mkdirat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, 0o700);
+        if (linux.errno(rc) == .SUCCESS) return path;
+        alloc.free(path);
+        if (linux.errno(rc) != .EXIST) return error.CannotCreateTempDir;
+    }
+    return error.CannotCreateTempDir;
+}
+
+/// rm -rf for a directory we created (tests only; does not follow symlinks).
+pub fn removeTree(path: []const u8) void {
+    removeTreeDepth(path, 0);
+}
+
+fn removeTreeDepth(path: []const u8, depth: usize) void {
+    if (depth > 16) return;
+    const dfd = openDir(path) catch {
+        unlink(path) catch {};
+        return;
+    };
+    var buf: [4096]u8 align(8) = undefined;
+    var names: [64][256]u8 = undefined;
+    var lens: [64]usize = undefined;
+    var dirs: [64]bool = undefined;
+    while (true) {
+        // collect a batch, close nothing yet; then delete and re-read
+        const n = linux.getdents64(dfd, &buf, buf.len);
+        if (linux.errno(n) != .SUCCESS or n == 0) break;
+        var count: usize = 0;
+        var off: usize = 0;
+        while (off < n and count < names.len) {
+            const ent: *const linux.dirent64 = @ptrCast(@alignCast(&buf[off]));
+            const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&buf[off + @offsetOf(linux.dirent64, "name")])), 0);
+            off += ent.reclen;
+            if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+            if (name.len >= 256) continue;
+            @memcpy(names[count][0..name.len], name);
+            lens[count] = name.len;
+            dirs[count] = ent.type == 4; // DT_DIR
+            count += 1;
+        }
+        if (count == 0) continue;
+        for (0..count) |i| {
+            var child: [4096]u8 = undefined;
+            const cp = std.fmt.bufPrint(&child, "{s}/{s}", .{ path, names[i][0..lens[i]] }) catch continue;
+            if (dirs[i]) removeTreeDepth(cp, depth + 1) else unlink(cp) catch {};
+        }
+        _ = linux.lseek(dfd, 0, 0); // SEEK_SET: rescan after deletions
+    }
+    close(dfd);
+    var pathz: [4096]u8 = undefined;
+    if (path.len >= pathz.len) return;
+    @memcpy(pathz[0..path.len], path);
+    pathz[path.len] = 0;
+    _ = linux.unlinkat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, linux.AT.REMOVEDIR);
 }
 
 pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) ![]u8 {
@@ -297,8 +511,23 @@ pub fn openAppend(path: []const u8) !fd_t {
     if (path.len >= pathz.len) return error.PathTooLong;
     @memcpy(pathz[0..path.len], path);
     pathz[path.len] = 0;
-    const rc = try check(linux.openat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true }, 0o644));
+    const rc = try check(linux.openat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .APPEND = true, .CLOEXEC = true }, 0o600));
     return @intCast(rc);
+}
+
+/// Size of an open file.
+pub fn fdSize(fd: fd_t) !u64 {
+    var stx: linux.Statx = undefined;
+    _ = try check(linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .SIZE = true }, &stx));
+    return stx.size;
+}
+
+pub fn fchmod(fd: fd_t, mode: u32) void {
+    _ = linux.fchmod(fd, mode);
+}
+
+pub fn ftruncateFd(fd: fd_t, len: u64) void {
+    _ = linux.ftruncate(fd, @intCast(len));
 }
 
 pub fn dup2(old_fd: fd_t, new_fd: fd_t) void {

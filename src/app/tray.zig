@@ -91,7 +91,13 @@ pub const Tray = struct {
                 const prop = try r.readString();
                 var m = dbus.Marshal.init(alloc);
                 defer m.deinit();
-                try self.putProperty(&m, prop);
+                self.putProperty(&m, prop) catch |err| switch (err) {
+                    error.UnknownProperty => {
+                        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownProperty", "no such property");
+                        return .none;
+                    },
+                    else => return err,
+                };
                 try conn.replyTo(msg, "v", m.buf.items);
                 return .none;
             }
@@ -99,8 +105,7 @@ pub const Tray = struct {
                 var m = dbus.Marshal.init(alloc);
                 defer m.deinit();
                 const arr = try m.beginArray(8);
-                const props = [_][]const u8{ "Category", "Id", "Title", "Status", "IconName", "IconPixmap", "Menu", "ItemIsMenu" };
-                for (props) |p| {
+                for (sni_props) |p| {
                     try m.beginStruct();
                     try m.putString(p);
                     try self.putProperty(&m, p);
@@ -123,8 +128,17 @@ pub const Tray = struct {
         if (std.mem.eql(u8, path, menu_path)) {
             return self.handleMenuMessage(msg);
         }
+        // callers block until they get an answer: never leave one hanging
+        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownObject", "no such object");
         return .none;
     }
+
+    const sni_props = [_][]const u8{
+        "Category",          "Id",                "Title",               "Status",
+        "WindowId",          "IconName",          "IconPixmap",          "OverlayIconName",
+        "OverlayIconPixmap", "AttentionIconName", "AttentionIconPixmap", "AttentionMovieName",
+        "ToolTip",           "IconThemePath",     "Menu",                "ItemIsMenu",
+    };
 
     fn putProperty(self: *Tray, m: *dbus.Marshal, prop: []const u8) !void {
         const eql = std.mem.eql;
@@ -136,8 +150,27 @@ pub const Tray = struct {
             try m.putVariantString("Shotlet");
         } else if (eql(u8, prop, "Status")) {
             try m.putVariantString("Active");
+        } else if (eql(u8, prop, "WindowId")) {
+            try m.putVariantI32(0);
         } else if (eql(u8, prop, "IconName")) {
             try m.putVariantString(""); // force hosts to use IconPixmap
+        } else if (eql(u8, prop, "OverlayIconName") or eql(u8, prop, "AttentionIconName") or
+            eql(u8, prop, "AttentionMovieName") or eql(u8, prop, "IconThemePath"))
+        {
+            try m.putVariantString("");
+        } else if (eql(u8, prop, "OverlayIconPixmap") or eql(u8, prop, "AttentionIconPixmap")) {
+            try m.putSignature("a(iiay)");
+            const arr = try m.beginArray(8);
+            m.endArray(arr);
+        } else if (eql(u8, prop, "ToolTip")) {
+            // (icon name, icon pixmaps, title, description)
+            try m.putSignature("(sa(iiay)ss)");
+            try m.beginStruct();
+            try m.putString("");
+            const arr = try m.beginArray(8);
+            m.endArray(arr);
+            try m.putString("Shotlet");
+            try m.putString("Take a screenshot");
         } else if (eql(u8, prop, "IconPixmap")) {
             try m.putSignature("a(iiay)");
             const arr = try m.beginArray(8);
@@ -156,7 +189,7 @@ pub const Tray = struct {
         } else if (eql(u8, prop, "ItemIsMenu")) {
             try m.putVariantBool(false);
         } else {
-            try m.putVariantString("");
+            return error.UnknownProperty;
         }
     }
 
@@ -287,8 +320,16 @@ const sni_introspect_xml =
     \\  <property name="Id" type="s" access="read"/>
     \\  <property name="Title" type="s" access="read"/>
     \\  <property name="Status" type="s" access="read"/>
+    \\  <property name="WindowId" type="i" access="read"/>
     \\  <property name="IconName" type="s" access="read"/>
     \\  <property name="IconPixmap" type="a(iiay)" access="read"/>
+    \\  <property name="OverlayIconName" type="s" access="read"/>
+    \\  <property name="OverlayIconPixmap" type="a(iiay)" access="read"/>
+    \\  <property name="AttentionIconName" type="s" access="read"/>
+    \\  <property name="AttentionIconPixmap" type="a(iiay)" access="read"/>
+    \\  <property name="AttentionMovieName" type="s" access="read"/>
+    \\  <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
+    \\  <property name="IconThemePath" type="s" access="read"/>
     \\  <property name="Menu" type="o" access="read"/>
     \\  <property name="ItemIsMenu" type="b" access="read"/>
     \\  <method name="Activate"><arg name="x" type="i" direction="in"/><arg name="y" type="i" direction="in"/></method>
@@ -350,4 +391,78 @@ pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
         out[i * 4 + 3] = @truncate(p);
     }
     return out;
+}
+
+fn testCall(path: []const u8, iface: []const u8, member: []const u8, body: []const u8) dbus.Message {
+    return .{ .type = .method_call, .serial = 77, .path = path, .interface = iface, .member = member, .sender = ":1.9", .body = body };
+}
+
+test "tray answers with the declared types, and errors for unknown objects" {
+    const alloc = std.testing.allocator;
+    const fds = try @import("../platform/sys.zig").socketPair();
+    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    defer host.deinit();
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    defer ours.deinit();
+    var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
+
+    const Want = struct { prop: []const u8, sig: []const u8 };
+    for ([_]Want{
+        .{ .prop = "ToolTip", .sig = "(sa(iiay)ss)" },
+        .{ .prop = "WindowId", .sig = "i" },
+        .{ .prop = "IconPixmap", .sig = "a(iiay)" },
+        .{ .prop = "Menu", .sig = "o" },
+    }) |w| {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putString(sni_iface);
+        try m.putString(w.prop);
+        var call = testCall(sni_path, props_iface, "Get", m.buf.items);
+        _ = try tray.handleMessage(&call);
+        var reply = try host.readMessage();
+        defer reply.deinit(alloc);
+        try std.testing.expectEqual(dbus.MessageType.method_return, reply.type);
+        var r = reply.reader();
+        try std.testing.expectEqualStrings(w.sig, try r.readSignature());
+        try r.skipValue(w.sig);
+        try std.testing.expectEqual(reply.body.len, r.pos);
+    }
+
+    // GetAll is a valid a{sv} the reader can walk to the end
+    {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putString(sni_iface);
+        var call = testCall(sni_path, props_iface, "GetAll", m.buf.items);
+        _ = try tray.handleMessage(&call);
+        var reply = try host.readMessage();
+        defer reply.deinit(alloc);
+        var r = reply.reader();
+        var it = try r.readDictSV();
+        var n: usize = 0;
+        while (try it.next()) |_| n += 1;
+        try std.testing.expectEqual(Tray.sni_props.len, n);
+    }
+
+    // unknown property and unknown object path both get an error reply
+    {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putString(sni_iface);
+        try m.putString("Nope");
+        var call = testCall(sni_path, props_iface, "Get", m.buf.items);
+        _ = try tray.handleMessage(&call);
+        var reply = try host.readMessage();
+        defer reply.deinit(alloc);
+        try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownProperty", reply.error_name.?);
+    }
+    {
+        var call = testCall("/not/here", "org.example", "Do", &.{});
+        _ = try tray.handleMessage(&call);
+        var reply = try host.readMessage();
+        defer reply.deinit(alloc);
+        try std.testing.expectEqual(dbus.MessageType.@"error", reply.type);
+        try std.testing.expectEqual(@as(?u32, 77), reply.reply_serial);
+        try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownObject", reply.error_name.?);
+    }
 }

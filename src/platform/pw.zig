@@ -4,9 +4,11 @@
 //! pw_stream C API; the SPA format pod is built by hand.
 
 const std = @import("std");
+const sys = @import("sys.zig");
 
 // --- SPA / PipeWire ABI constants (stable since 0.3) ---
 const SPA_TYPE_Id: u32 = 3;
+const SPA_TYPE_Int: u32 = 4;
 const SPA_TYPE_Object: u32 = 15;
 const SPA_TYPE_Choice: u32 = 19;
 const SPA_TYPE_Rectangle: u32 = 10;
@@ -15,6 +17,13 @@ const SPA_TYPE_Fraction: u32 = 11;
 const SPA_TYPE_OBJECT_Format: u32 = 0x40003;
 const SPA_PARAM_EnumFormat: u32 = 3;
 const SPA_PARAM_Format: u32 = 4;
+const SPA_PARAM_Meta: u32 = 6;
+const SPA_TYPE_OBJECT_ParamMeta: u32 = 0x40005;
+const SPA_PARAM_META_type: u32 = 1;
+const SPA_PARAM_META_size: u32 = 2;
+const SPA_META_VideoCrop: u32 = 2;
+
+const SPA_CHUNK_FLAG_CORRUPTED: i32 = 1 << 0;
 
 const SPA_FORMAT_mediaType: u32 = 1;
 const SPA_FORMAT_mediaSubtype: u32 = 2;
@@ -60,10 +69,24 @@ const SpaData = extern struct {
     chunk: ?*SpaChunk,
 };
 
+const SpaMeta = extern struct {
+    type: u32,
+    size: u32,
+    data: ?*anyopaque,
+};
+
+/// spa_meta_region: a spa_region (position + size)
+const SpaMetaRegion = extern struct {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+};
+
 const SpaBuffer = extern struct {
     n_metas: u32,
     n_datas: u32,
-    metas: ?*anyopaque,
+    metas: ?[*]SpaMeta,
     datas: ?[*]SpaData,
 };
 
@@ -122,6 +145,7 @@ const Api = struct {
     stream_connect: *const fn (?*anyopaque, c_uint, u32, c_uint, [*]const [*]const u8, u32) callconv(.c) c_int,
     stream_dequeue_buffer: *const fn (?*anyopaque) callconv(.c) ?*PwBuffer,
     stream_queue_buffer: *const fn (?*anyopaque, *PwBuffer) callconv(.c) c_int,
+    stream_update_params: *const fn (?*anyopaque, [*]const [*]const u8, u32) callconv(.c) c_int,
 };
 
 var lib: ?std.DynLib = null;
@@ -158,87 +182,157 @@ fn loadApi(l: *std.DynLib) ?Api {
     return out;
 }
 
-// --- format pod ---
+// --- pods ---
 
-fn putU32(buf: []u8, pos: *usize, v: u32) void {
-    std.mem.writeInt(u32, buf[pos.*..][0..4], v, .little);
-    pos.* += 4;
-}
+/// Little-endian u32 writer for hand-built SPA pods; refuses to overflow.
+const PodWriter = struct {
+    buf: []u8,
+    pos: usize = 0,
+    overflow: bool = false,
+
+    fn put(self: *PodWriter, v: u32) void {
+        if (self.pos + 4 > self.buf.len) {
+            self.overflow = true;
+            return;
+        }
+        std.mem.writeInt(u32, self.buf[self.pos..][0..4], v, .little);
+        self.pos += 4;
+    }
+
+    /// Patch the leading pod size and return the pod, or null on overflow.
+    fn finish(self: *PodWriter) ?[]const u8 {
+        if (self.overflow or self.pos < 8) return null;
+        std.mem.writeInt(u32, self.buf[0..4], @intCast(self.pos - 8), .little);
+        return self.buf[0..self.pos];
+    }
+};
 
 /// Build the EnumFormat pod: raw video in BGRA/BGRx/RGBA/RGBx at any size.
-fn buildFormatPod(buf: []u8) []const u8 {
-    var pos: usize = 0;
-    putU32(buf, &pos, 0); // body size, patched below
-    putU32(buf, &pos, SPA_TYPE_Object);
-    putU32(buf, &pos, SPA_TYPE_OBJECT_Format);
-    putU32(buf, &pos, SPA_PARAM_EnumFormat);
+fn buildFormatPod(buf: []u8) ?[]const u8 {
+    var w = PodWriter{ .buf = buf };
+    w.put(0); // body size, patched by finish
+    w.put(SPA_TYPE_Object);
+    w.put(SPA_TYPE_OBJECT_Format);
+    w.put(SPA_PARAM_EnumFormat);
 
     // mediaType = video
-    putU32(buf, &pos, SPA_FORMAT_mediaType);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 4);
-    putU32(buf, &pos, SPA_TYPE_Id);
-    putU32(buf, &pos, SPA_MEDIA_TYPE_video);
-    putU32(buf, &pos, 0); // pad
+    w.put(SPA_FORMAT_mediaType);
+    w.put(0);
+    w.put(4);
+    w.put(SPA_TYPE_Id);
+    w.put(SPA_MEDIA_TYPE_video);
+    w.put(0); // pad
 
     // mediaSubtype = raw
-    putU32(buf, &pos, SPA_FORMAT_mediaSubtype);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 4);
-    putU32(buf, &pos, SPA_TYPE_Id);
-    putU32(buf, &pos, SPA_MEDIA_SUBTYPE_raw);
-    putU32(buf, &pos, 0); // pad
+    w.put(SPA_FORMAT_mediaSubtype);
+    w.put(0);
+    w.put(4);
+    w.put(SPA_TYPE_Id);
+    w.put(SPA_MEDIA_SUBTYPE_raw);
+    w.put(0); // pad
 
     // format: enum choice over the 32-bit formats we can swizzle
-    putU32(buf, &pos, SPA_FORMAT_VIDEO_format);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 36); // choice body: 8 meta + 8 child + 5*4 values
-    putU32(buf, &pos, SPA_TYPE_Choice);
-    putU32(buf, &pos, SPA_CHOICE_Enum);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 4); // child size
-    putU32(buf, &pos, SPA_TYPE_Id);
-    putU32(buf, &pos, @backingInt(VideoFormat.BGRA)); // default
-    putU32(buf, &pos, @backingInt(VideoFormat.BGRA));
-    putU32(buf, &pos, @backingInt(VideoFormat.BGRx));
-    putU32(buf, &pos, @backingInt(VideoFormat.RGBA));
-    putU32(buf, &pos, @backingInt(VideoFormat.RGBx));
-    putU32(buf, &pos, 0); // pad to 8
+    w.put(SPA_FORMAT_VIDEO_format);
+    w.put(0);
+    w.put(36); // choice body: 8 meta + 8 child + 5*4 values
+    w.put(SPA_TYPE_Choice);
+    w.put(SPA_CHOICE_Enum);
+    w.put(0);
+    w.put(4); // child size
+    w.put(SPA_TYPE_Id);
+    w.put(@backingInt(VideoFormat.BGRA)); // default
+    w.put(@backingInt(VideoFormat.BGRA));
+    w.put(@backingInt(VideoFormat.BGRx));
+    w.put(@backingInt(VideoFormat.RGBA));
+    w.put(@backingInt(VideoFormat.RGBx));
+    w.put(0); // pad to 8
 
     // size: range 1x1 .. 16384x16384
-    putU32(buf, &pos, SPA_FORMAT_VIDEO_size);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 40); // 8 meta + 8 child + 3*8 rect values
-    putU32(buf, &pos, SPA_TYPE_Choice);
-    putU32(buf, &pos, SPA_CHOICE_Range);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 8);
-    putU32(buf, &pos, SPA_TYPE_Rectangle);
-    putU32(buf, &pos, 1920);
-    putU32(buf, &pos, 1080);
-    putU32(buf, &pos, 1);
-    putU32(buf, &pos, 1);
-    putU32(buf, &pos, 16384);
-    putU32(buf, &pos, 16384);
+    w.put(SPA_FORMAT_VIDEO_size);
+    w.put(0);
+    w.put(40); // 8 meta + 8 child + 3*8 rect values
+    w.put(SPA_TYPE_Choice);
+    w.put(SPA_CHOICE_Range);
+    w.put(0);
+    w.put(8);
+    w.put(SPA_TYPE_Rectangle);
+    w.put(1920);
+    w.put(1080);
+    w.put(1);
+    w.put(1);
+    w.put(16384);
+    w.put(16384);
 
     // framerate: range 0/1 .. 1000/1 (variable)
-    putU32(buf, &pos, SPA_FORMAT_VIDEO_framerate);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 40);
-    putU32(buf, &pos, SPA_TYPE_Choice);
-    putU32(buf, &pos, SPA_CHOICE_Range);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 8);
-    putU32(buf, &pos, SPA_TYPE_Fraction);
-    putU32(buf, &pos, 25);
-    putU32(buf, &pos, 1);
-    putU32(buf, &pos, 0);
-    putU32(buf, &pos, 1);
-    putU32(buf, &pos, 1000);
-    putU32(buf, &pos, 1);
+    w.put(SPA_FORMAT_VIDEO_framerate);
+    w.put(0);
+    w.put(40);
+    w.put(SPA_TYPE_Choice);
+    w.put(SPA_CHOICE_Range);
+    w.put(0);
+    w.put(8);
+    w.put(SPA_TYPE_Fraction);
+    w.put(25);
+    w.put(1);
+    w.put(0);
+    w.put(1);
+    w.put(1000);
+    w.put(1);
 
-    std.mem.writeInt(u32, buf[0..4], @intCast(pos - 8), .little);
-    return buf[0..pos];
+    return w.finish();
+}
+
+/// Build a Meta param asking the producer to attach VideoCrop regions.
+fn buildCropMetaPod(buf: []u8) ?[]const u8 {
+    var w = PodWriter{ .buf = buf };
+    w.put(0);
+    w.put(SPA_TYPE_Object);
+    w.put(SPA_TYPE_OBJECT_ParamMeta);
+    w.put(SPA_PARAM_Meta);
+
+    w.put(SPA_PARAM_META_type);
+    w.put(0);
+    w.put(4);
+    w.put(SPA_TYPE_Id);
+    w.put(SPA_META_VideoCrop);
+    w.put(0); // pad
+
+    w.put(SPA_PARAM_META_size);
+    w.put(0);
+    w.put(4);
+    w.put(SPA_TYPE_Int);
+    w.put(@sizeOf(SpaMetaRegion));
+    w.put(0); // pad
+
+    return w.finish();
+}
+
+/// Walk an object pod and call `visit(key, value_type, value_bytes)` for
+/// each property, unwrapping fixated Choice values. Bounds-checked.
+fn forEachProp(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
+    if (pod.len < 16) return;
+    const body_size = std.mem.readInt(u32, pod[0..4], .little);
+    const pod_type = std.mem.readInt(u32, pod[4..8], .little);
+    if (pod_type != SPA_TYPE_Object or body_size < 8) return;
+    const end: usize = @min(pod.len, 8 + @as(usize, body_size));
+    var pos: usize = 16; // skip pod header + object type/id
+    while (pos + 16 <= end) {
+        const key = std.mem.readInt(u32, pod[pos..][0..4], .little);
+        const vsize: usize = std.mem.readInt(u32, pod[pos + 8 ..][0..4], .little);
+        const vtype = std.mem.readInt(u32, pod[pos + 12 ..][0..4], .little);
+        const vdata = pos + 16;
+        if (vsize > end - vdata) break;
+        // values may arrive wrapped in a Choice pod (None = fixated);
+        // the payload then starts after choice meta (8) + child header (8)
+        var val = pod[vdata..][0..vsize];
+        var vt = vtype;
+        if (vtype == SPA_TYPE_Choice and vsize >= 20) {
+            vt = std.mem.readInt(u32, pod[vdata + 12 ..][0..4], .little); // child type
+            val = pod[vdata + 16 .. vdata + vsize];
+        }
+        visit(ctx, key, vt, val);
+        pos = vdata + std.mem.alignForward(usize, vsize, 8);
+    }
 }
 
 // --- frame grab ---
@@ -261,43 +355,39 @@ const Ctx = struct {
     width: u32 = 0,
     height: u32 = 0,
     format: u32 = 0,
+    /// tight 4-byte pixels of the (cropped) frame; page_allocator
     pixels: ?[]u32 = null,
+    out_w: u32 = 0,
+    out_h: u32 = 0,
     done: bool = false,
     failed: bool = false,
 };
+
+fn visitFormat(ctx: *Ctx, key: u32, vt: u32, val: []const u8) void {
+    if (key == SPA_FORMAT_VIDEO_format and vt == SPA_TYPE_Id and val.len >= 4) {
+        ctx.format = std.mem.readInt(u32, val[0..4], .little);
+    } else if (key == SPA_FORMAT_VIDEO_size and vt == SPA_TYPE_Rectangle and val.len >= 8) {
+        ctx.width = std.mem.readInt(u32, val[0..4], .little);
+        ctx.height = std.mem.readInt(u32, val[4..8], .little);
+    }
+}
 
 fn onParamChanged(data: ?*anyopaque, id: u32, param: ?*const anyopaque) callconv(.c) void {
     const ctx: *Ctx = @ptrCast(@alignCast(data orelse return));
     std.log.debug("pw param_changed id={d} param={}", .{ id, param != null });
     if (id != SPA_PARAM_Format or param == null) return;
     // parse the negotiated format object pod
-    const pod: [*]const u8 = @ptrCast(param.?);
-    const body_size = std.mem.readInt(u32, pod[0..4], .little);
-    const pod_type = std.mem.readInt(u32, pod[4..8], .little);
-    if (pod_type != SPA_TYPE_Object or body_size < 8) return;
-    var pos: usize = 16; // skip pod header + object type/id
-    const end: usize = 8 + body_size;
-    while (pos + 16 <= end) {
-        const key = std.mem.readInt(u32, pod[pos..][0..4], .little);
-        const vsize = std.mem.readInt(u32, pod[pos + 8 ..][0..4], .little);
-        const vtype = std.mem.readInt(u32, pod[pos + 12 ..][0..4], .little);
-        const vdata = pos + 16;
-        if (vdata + vsize > end) break;
-        // values may arrive wrapped in a Choice pod (None = fixated);
-        // the payload then starts after choice meta (8) + child header (8)
-        var val = vdata;
-        var vt = vtype;
-        if (vtype == SPA_TYPE_Choice and vsize >= 20) {
-            vt = std.mem.readInt(u32, pod[vdata + 12 ..][0..4], .little); // child type
-            val = vdata + 16;
-        }
-        if (key == SPA_FORMAT_VIDEO_format and vt == SPA_TYPE_Id) {
-            ctx.format = std.mem.readInt(u32, pod[val..][0..4], .little);
-        } else if (key == SPA_FORMAT_VIDEO_size and vt == SPA_TYPE_Rectangle) {
-            ctx.width = std.mem.readInt(u32, pod[val..][0..4], .little);
-            ctx.height = std.mem.readInt(u32, pod[val + 4 ..][0..4], .little);
-        }
-        pos = vdata + std.mem.alignForward(usize, vsize, 8);
+    const head: [*]const u8 = @ptrCast(param.?);
+    const body_size = std.mem.readInt(u32, head[0..4], .little);
+    if (body_size > 64 * 1024) return;
+    forEachProp(head[0 .. 8 + @as(usize, body_size)], ctx, visitFormat);
+
+    // ask for crop regions: some producers send a larger buffer and mark
+    // the valid area with SPA_META_VideoCrop
+    var meta_buf: [96]u8 align(8) = undefined;
+    if (buildCropMetaPod(&meta_buf)) |meta| {
+        const params = [_][*]const u8{meta.ptr};
+        _ = api.stream_update_params(ctx.stream, &params, 1);
     }
 }
 
@@ -311,8 +401,24 @@ fn onStateChanged(data: ?*anyopaque, old: c_int, new: c_int, msg: ?[*:0]const u8
     }
 }
 
+/// The valid area of a buffer: its VideoCrop region when the producer
+/// attached a sensible one, else the whole negotiated frame.
+fn cropRegion(sb: *const SpaBuffer, width: u32, height: u32) SpaMetaRegion {
+    const full = SpaMetaRegion{ .x = 0, .y = 0, .width = width, .height = height };
+    const metas = sb.metas orelse return full;
+    for (metas[0..sb.n_metas]) |m| {
+        if (m.type != SPA_META_VideoCrop or m.size < @sizeOf(SpaMetaRegion)) continue;
+        const r: *const SpaMetaRegion = @ptrCast(@alignCast(m.data orelse continue));
+        if (r.width == 0 or r.height == 0 or r.x < 0 or r.y < 0) return full;
+        const x: u32 = @intCast(r.x);
+        const y: u32 = @intCast(r.y);
+        if (x >= width or y >= height or r.width > width - x or r.height > height - y) return full;
+        return r.*;
+    }
+    return full;
+}
+
 fn onProcess(data: ?*anyopaque) callconv(.c) void {
-    std.log.debug("pw process", .{});
     const ctx: *Ctx = @ptrCast(@alignCast(data orelse return));
     const stream = ctx.stream orelse return;
     const b = api.stream_dequeue_buffer(stream) orelse return;
@@ -323,26 +429,41 @@ fn onProcess(data: ?*anyopaque) callconv(.c) void {
     if (sb.n_datas < 1) return;
     const d = sb.datas.?[0];
     const chunk = d.chunk orelse return;
+    // an empty or corrupted buffer is skipped; the next one will do
+    if (chunk.size == 0 or (chunk.flags & SPA_CHUNK_FLAG_CORRUPTED) != 0) {
+        std.log.debug("pw: skipping empty/corrupted buffer", .{});
+        return;
+    }
     const src_base: [*]const u8 = @ptrCast(d.data orelse return);
     if (ctx.width == 0 or ctx.height == 0) return;
     const stride: usize = if (chunk.stride > 0) @intCast(chunk.stride) else ctx.width * 4;
-    // never read past the mapped buffer, whatever the chunk claims
-    const needed = @as(usize, chunk.offset) + (@as(usize, ctx.height) - 1) * stride + @as(usize, ctx.width) * 4;
-    if (needed > d.maxsize) return;
+    if (stride < @as(usize, ctx.width) * 4) return;
+    const crop = cropRegion(sb, ctx.width, ctx.height);
+    // never read past the mapped buffer or the chunk, whatever they claim
+    const avail = @min(@as(usize, d.maxsize), @as(usize, chunk.offset) + chunk.size);
+    const first = @as(usize, chunk.offset) + @as(usize, @intCast(crop.y)) * stride + @as(usize, @intCast(crop.x)) * 4;
+    const needed = first + (@as(usize, crop.height) - 1) * stride + @as(usize, crop.width) * 4;
+    if (needed > avail) {
+        std.log.debug("pw: buffer smaller than the frame ({d} < {d}); skipping", .{ avail, needed });
+        return;
+    }
 
-    const n: usize = @as(usize, ctx.width) * ctx.height;
+    const n: usize = @as(usize, crop.width) * crop.height;
     const pixels = std.heap.page_allocator.alloc(u32, n) catch {
         ctx.failed = true;
         api.thread_loop_signal(ctx.loop, false);
         return;
     };
     const dst_bytes = std.mem.sliceAsBytes(pixels);
+    const row_bytes = @as(usize, crop.width) * 4;
     var y: usize = 0;
-    while (y < ctx.height) : (y += 1) {
-        const src_row = src_base[chunk.offset + y * stride ..][0 .. ctx.width * 4];
-        @memcpy(dst_bytes[y * ctx.width * 4 ..][0 .. ctx.width * 4], src_row);
+    while (y < crop.height) : (y += 1) {
+        const src_row = src_base[first + y * stride ..][0..row_bytes];
+        @memcpy(dst_bytes[y * row_bytes ..][0..row_bytes], src_row);
     }
     ctx.pixels = pixels;
+    ctx.out_w = crop.width;
+    ctx.out_h = crop.height;
     ctx.done = true;
     api.thread_loop_signal(ctx.loop, false);
 }
@@ -354,26 +475,47 @@ pub const Pre = struct {
     core: ?*anyopaque = null,
 };
 
-/// Connect to the PipeWire daemon over the portal fd. Takes ownership of fd.
+/// Connect to the PipeWire daemon over the portal fd. Always takes
+/// ownership of fd: it is either handed to PipeWire or closed here, on
+/// every path, so callers never close it themselves.
 /// Safe to run on a separate thread (no shared allocator use).
 pub fn preconnect(fd: i32) !Pre {
-    if (!available()) return error.PipeWireUnavailable;
+    if (!available()) {
+        _ = std.os.linux.close(fd);
+        return error.PipeWireUnavailable;
+    }
     var pre = Pre{};
-    pre.loop = api.thread_loop_new("shotlet-pw", null) orelse return error.PwLoop;
+    pre.loop = api.thread_loop_new("shotlet-pw", null) orelse {
+        _ = std.os.linux.close(fd);
+        return error.PwLoop;
+    };
     if (api.thread_loop_start(pre.loop) < 0) {
         api.thread_loop_destroy(pre.loop);
+        _ = std.os.linux.close(fd);
         return error.PwLoop;
     }
     api.thread_loop_lock(pre.loop);
     pre.context = api.context_new(api.thread_loop_get_loop(pre.loop), null, 0);
-    if (pre.context == null) {
-        // fd ownership only transfers to a successful connect
+    if (pre.context != null) {
+        // pw_context_connect_fd closes the fd on some failure paths and not
+        // on others (e.g. when allocating the core fails). Remember what the
+        // fd refers to, and close it ourselves only if it still refers to
+        // that same socket afterwards.
+        const id_before = sys.fileId(fd);
+        pre.core = api.context_connect_fd(pre.context, fd, null, 0);
+        if (pre.core == null) {
+            if (id_before) |before| {
+                if (sys.fileId(fd)) |after| {
+                    if (std.meta.eql(before, after)) _ = std.os.linux.close(fd);
+                }
+            }
+        }
+    } else {
         _ = std.os.linux.close(fd);
     }
-    pre.core = if (pre.context != null) api.context_connect_fd(pre.context, fd, null, 0) else null;
     api.thread_loop_unlock(pre.loop);
     if (pre.core == null) {
-        teardown(&pre, null);
+        teardown(&pre, &.{});
         return error.PwConnect;
     }
     return pre;
@@ -381,64 +523,107 @@ pub fn preconnect(fd: i32) !Pre {
 
 /// Discard a pre-established connection without grabbing.
 pub fn discard(pre: *Pre) void {
-    teardown(pre, null);
+    teardown(pre, &.{});
 }
 
-fn teardown(pre: *Pre, stream: ?*anyopaque) void {
+fn teardown(pre: *Pre, streams: []const ?*anyopaque) void {
     if (pre.loop != null) api.thread_loop_stop(pre.loop);
-    if (stream != null) api.stream_destroy(stream);
+    for (streams) |s| if (s != null) api.stream_destroy(s);
     if (pre.core != null) _ = api.core_disconnect(pre.core);
     if (pre.context != null) api.context_destroy(pre.context);
     if (pre.loop != null) api.thread_loop_destroy(pre.loop);
     pre.* = .{};
 }
 
-/// Grab one frame using a pre-established connection; consumes it.
-pub fn grabPre(pre: *Pre, node_id: u32, timeout_sec: u32) !Frame {
-    var ctx = Ctx{ .loop = pre.loop };
-    var hook = SpaHook{};
-    var events = StreamEvents{
+pub const max_nodes = 16;
+
+/// Grab one frame from each node using a pre-established connection;
+/// consumes it. Streams run concurrently so N monitors cost about as much
+/// as one. On success, frames[i] belongs to node_ids[i]; on error no frames
+/// are returned.
+pub fn grabNodes(pre: *Pre, node_ids: []const u32, frames: []Frame, timeout_ms: u32) !void {
+    std.debug.assert(frames.len >= node_ids.len);
+    if (node_ids.len == 0 or node_ids.len > max_nodes) {
+        teardown(pre, &.{});
+        return error.BadNodeCount;
+    }
+    var ctxs: [max_nodes]Ctx = @splat(.{});
+    var hooks: [max_nodes]SpaHook = @splat(.{});
+    var streams: [max_nodes]?*anyopaque = @splat(null);
+    const events = StreamEvents{
         .state_changed = onStateChanged,
         .param_changed = onParamChanged,
         .process = onProcess,
     };
 
-    api.thread_loop_lock(pre.loop);
-    const stream = api.stream_new(pre.core, "shotlet-capture", null);
-
     var pod_buf: [256]u8 align(8) = undefined;
-    const pod = buildFormatPod(&pod_buf);
-    var params = [_][*]const u8{pod.ptr};
+    const pod = buildFormatPod(&pod_buf) orelse unreachable;
+    const params = [_][*]const u8{pod.ptr};
 
-    var connect_rc: c_int = -1;
-    if (stream != null) {
-        ctx.stream = stream;
-        api.stream_add_listener(stream, &hook, &events, &ctx);
-        connect_rc = api.stream_connect(
-            stream,
+    api.thread_loop_lock(pre.loop);
+    var connect_ok = true;
+    for (node_ids, 0..) |node, i| {
+        ctxs[i].loop = pre.loop;
+        // PW_KEY_TARGET_OBJECT would be the modern way, but it expects an
+        // object serial or name; the portal hands out node ids, which only
+        // target_id addresses without relying on session-manager fallbacks
+        streams[i] = api.stream_new(pre.core, "shotlet-capture", null);
+        if (streams[i] == null) {
+            connect_ok = false;
+            break;
+        }
+        ctxs[i].stream = streams[i];
+        api.stream_add_listener(streams[i], &hooks[i], &events, &ctxs[i]);
+        if (api.stream_connect(
+            streams[i],
             PW_DIRECTION_INPUT,
-            node_id,
+            node,
             PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS,
             &params,
             1,
-        );
+        ) < 0) {
+            connect_ok = false;
+            break;
+        }
     }
-    if (connect_rc >= 0) {
-        var waited: u32 = 0;
-        while (!ctx.done and !ctx.failed and waited < timeout_sec) {
+    if (connect_ok) {
+        const deadline = sys.monoMs() + timeout_ms;
+        while (sys.monoMs() < deadline) {
+            var all_done = true;
+            var any_failed = false;
+            for (ctxs[0..node_ids.len]) |*c| {
+                all_done = all_done and c.done;
+                any_failed = any_failed or c.failed;
+            }
+            if (all_done or any_failed) break;
             _ = api.thread_loop_timed_wait(pre.loop, 1);
-            waited += 1;
         }
     }
     api.thread_loop_unlock(pre.loop);
-    teardown(pre, stream);
+    teardown(pre, streams[0..node_ids.len]);
 
-    if (connect_rc < 0) return error.PwConnect;
-    if (!ctx.done or ctx.pixels == null) {
-        if (ctx.pixels) |p| std.heap.page_allocator.free(p);
-        return error.NoFrame;
+    var ok = connect_ok;
+    for (ctxs[0..node_ids.len]) |*c| ok = ok and c.done and c.pixels != null;
+    if (!ok) {
+        for (ctxs[0..node_ids.len]) |*c| if (c.pixels) |p| std.heap.page_allocator.free(p);
+        return if (connect_ok) error.NoFrame else error.PwConnect;
     }
-    return finishFrame(&ctx);
+    var n_done: usize = 0;
+    errdefer for (frames[0..n_done]) |*f| f.deinit();
+    for (ctxs[0..node_ids.len], 0..) |*c, i| {
+        frames[i] = finishFrame(c) catch |err| {
+            for (ctxs[i + 1 .. node_ids.len]) |*rest| if (rest.pixels) |p| std.heap.page_allocator.free(p);
+            return err;
+        };
+        n_done += 1;
+    }
+}
+
+/// Grab one frame using a pre-established connection; consumes it.
+pub fn grabPre(pre: *Pre, node_id: u32, timeout_sec: u32) !Frame {
+    var frame: [1]Frame = undefined;
+    try grabNodes(pre, &.{node_id}, &frame, timeout_sec * 1000);
+    return frame[0];
 }
 
 fn finishFrame(ctx: *Ctx) !Frame {
@@ -456,7 +641,7 @@ fn finishFrame(ctx: *Ctx) !Frame {
             return error.UnsupportedFormat;
         },
     }
-    return .{ .width = ctx.width, .height = ctx.height, .pixels = pixels };
+    return .{ .width = ctx.out_w, .height = ctx.out_h, .pixels = pixels };
 }
 
 /// Grab a single frame from the portal-provided PipeWire stream.
@@ -464,4 +649,86 @@ fn finishFrame(ctx: *Ctx) !Frame {
 pub fn grabFrame(fd: i32, node_id: u32, timeout_sec: u32) !Frame {
     var pre = try preconnect(fd);
     return grabPre(&pre, node_id, timeout_sec);
+}
+
+/// Grab one frame from each node over the portal fd (consumes fd).
+pub fn grabFrames(fd: i32, node_ids: []const u32, frames: []Frame, timeout_ms: u32) !void {
+    var pre = try preconnect(fd);
+    return grabNodes(&pre, node_ids, frames, timeout_ms);
+}
+
+test "format pod is a well-formed EnumFormat object" {
+    var buf: [256]u8 align(8) = undefined;
+    const pod = buildFormatPod(&buf).?;
+    try std.testing.expectEqual(@as(usize, 0), pod.len % 8);
+    try std.testing.expectEqual(@as(u32, @intCast(pod.len - 8)), std.mem.readInt(u32, pod[0..4], .little));
+    try std.testing.expectEqual(SPA_TYPE_Object, std.mem.readInt(u32, pod[4..8], .little));
+    try std.testing.expectEqual(SPA_TYPE_OBJECT_Format, std.mem.readInt(u32, pod[8..12], .little));
+    try std.testing.expectEqual(SPA_PARAM_EnumFormat, std.mem.readInt(u32, pod[12..16], .little));
+
+    // walking it finds every property at an 8-aligned offset
+    const Seen = struct {
+        keys: [8]u32 = undefined,
+        n: usize = 0,
+        fn visit(self: *@This(), key: u32, vt: u32, val: []const u8) void {
+            _ = vt;
+            _ = val;
+            self.keys[self.n] = key;
+            self.n += 1;
+        }
+    };
+    var seen = Seen{};
+    forEachProp(pod, &seen, Seen.visit);
+    try std.testing.expectEqual(@as(usize, 5), seen.n);
+    try std.testing.expectEqualSlices(u32, &.{
+        SPA_FORMAT_mediaType,
+        SPA_FORMAT_mediaSubtype,
+        SPA_FORMAT_VIDEO_format,
+        SPA_FORMAT_VIDEO_size,
+        SPA_FORMAT_VIDEO_framerate,
+    }, seen.keys[0..5]);
+
+    // a negotiated format pod (choices unwrapped) feeds the ctx
+    var ctx = Ctx{};
+    forEachProp(pod, &ctx, visitFormat);
+    try std.testing.expectEqual(@as(u32, @backingInt(VideoFormat.BGRA)), ctx.format);
+    try std.testing.expectEqual(@as(u32, 1920), ctx.width);
+    try std.testing.expectEqual(@as(u32, 1080), ctx.height);
+
+    // too small a buffer is reported, never overrun
+    var tiny: [40]u8 align(8) = undefined;
+    try std.testing.expect(buildFormatPod(&tiny) == null);
+}
+
+test "crop meta pod and crop region validation" {
+    var buf: [64]u8 align(8) = undefined;
+    const pod = buildCropMetaPod(&buf).?;
+    try std.testing.expectEqual(@as(usize, 64), pod.len);
+    try std.testing.expectEqual(SPA_TYPE_OBJECT_ParamMeta, std.mem.readInt(u32, pod[8..12], .little));
+    try std.testing.expectEqual(SPA_META_VideoCrop, std.mem.readInt(u32, pod[32..36], .little));
+
+    var region = SpaMetaRegion{ .x = 10, .y = 20, .width = 100, .height = 50 };
+    var metas = [_]SpaMeta{.{ .type = SPA_META_VideoCrop, .size = @sizeOf(SpaMetaRegion), .data = &region }};
+    var sb = SpaBuffer{ .n_metas = 1, .n_datas = 0, .metas = &metas, .datas = null };
+    const r = cropRegion(&sb, 200, 100);
+    try std.testing.expectEqual(@as(u32, 100), r.width);
+    try std.testing.expectEqual(@as(i32, 20), r.y);
+    // out of bounds falls back to the full frame
+    region.width = 300;
+    try std.testing.expectEqual(@as(u32, 200), cropRegion(&sb, 200, 100).width);
+}
+
+test "truncated or garbage pods are walked safely" {
+    var buf: [256]u8 align(8) = undefined;
+    const pod = buildFormatPod(&buf).?;
+    var ctx = Ctx{};
+    var cut: usize = 0;
+    while (cut < pod.len) : (cut += 4) forEachProp(pod[0..cut], &ctx, visitFormat);
+    var junk: [128]u8 = undefined;
+    var prng = std.Random.DefaultPrng.init(7);
+    for (0..2000) |_| {
+        prng.random().bytes(&junk);
+        std.mem.writeInt(u32, junk[4..8], SPA_TYPE_Object, .little);
+        forEachProp(&junk, &ctx, visitFormat);
+    }
 }
