@@ -20,6 +20,7 @@ const shapes_mod = @import("shapes.zig");
 const doc_mod = @import("doc.zig");
 const view_mod = @import("view.zig");
 const textedit = @import("textedit.zig");
+const textbox = @import("textbox.zig");
 const ui = @import("editor_ui.zig");
 
 const Window = window.Window;
@@ -68,6 +69,8 @@ pub const DragMode = union(enum) {
     picking: ui.PickPart,
     /// dragging inside the text being edited
     text_select,
+    /// dragging a text box's width handle
+    text_width: struct { idx: usize, orig_w: i32, orig_x: i32, orig_box_w: i32, rtl: bool, editing: bool },
 };
 
 const TextState = struct {
@@ -76,6 +79,10 @@ const TextState = struct {
     is_new: bool,
     /// the text before this edit, to tell whether anything changed
     orig: []u8,
+    /// the caret shows at the end of the line above a soft wrap
+    upstream: bool = false,
+    /// x kept across Up/Down presses
+    goal_x: ?i32 = null,
 };
 
 /// A small set of dirty rectangles; overflows merge into one bounding box.
@@ -796,14 +803,56 @@ pub const Editor = struct {
                 try self.applyPickerColor();
             },
             .text_select => if (self.text) |*t| {
-                t.te.caret = caretAt(&self.doc.shapes.items[t.idx], ip);
+                const h = caretAt(&self.doc.shapes.items[t.idx], ip);
+                t.te.caret = h.off;
+                t.upstream = h.upstream;
+                self.needs_render = true;
+            },
+            .text_width => |tw| {
+                const s = &self.doc.shapes.items[tw.idx];
+                const pad = s.textPad();
+                const minw = textbox.minWidth(s.fontPx());
+                if (tw.rtl) {
+                    // the right edge stays, the left one follows the pointer
+                    const right = tw.orig_x + tw.orig_w;
+                    const left = @min(ip.x + pad, right - minw);
+                    s.p0.x = left;
+                    s.box_w = right - left;
+                } else {
+                    s.box_w = std.math.clamp(ip.x - pad - s.p0.x, minw, 1 << 20);
+                }
                 self.needs_render = true;
             },
         }
     }
 
+    /// The width handle of text shape `i`, in buffer pixels: the middle
+    /// of its right edge, or the left one for right-to-left text.
+    pub fn textWidthHandle(self: *const Editor, i: usize) Point {
+        const s = &self.doc.shapes.items[i];
+        const f = self.pn().view.rectToBuf(s.frame()).expand(self.sc(3));
+        return .{ .x = if (s.textRtl()) f.x else f.right() - 1, .y = f.y + @divTrunc(f.h, 2) };
+    }
+
+    /// The text shape that shows a width handle (being edited, or
+    /// selected), if any.
+    pub fn textHandleShape(self: *const Editor) ?usize {
+        const i = if (self.text) |t| t.idx else self.selected orelse return null;
+        if (i >= self.doc.shapes.items.len or self.doc.shapes.items[i].tool != .text) return null;
+        return i;
+    }
+
+    fn textHandleAt(self: *const Editor, m: Point) ?usize {
+        const i = self.textHandleShape() orelse return null;
+        const h = self.textWidthHandle(i);
+        const r = self.handleRadius();
+        if (@abs(m.x - h.x) <= r and @abs(m.y - h.y) <= r) return i;
+        return null;
+    }
+
     fn cursorFor(self: *Editor, m: Point) window.Cursor {
         if (self.onToolbar(m) or self.help_open) return .arrow;
+        if (self.textHandleAt(m) != null) return .resize_ew;
         if (self.picker.open and (self.mouse_pane == self.tb_pane and self.picker.rect.contains(m.x, m.y))) return .crosshair;
         if (self.selected) |i| {
             if (self.shapeHandleAt(i, m) != null) return .move;
@@ -845,6 +894,36 @@ pub const Editor = struct {
                 return shapes_mod.handleAt(f, m, r);
             },
         }
+    }
+
+    fn pressTextHandle(self: *Editor, i: usize, double: bool) !void {
+        const s = &self.doc.shapes.items[i];
+        const editing = self.text != null;
+        self.needs_render = true;
+        if (double) {
+            if (s.box_w == 0) return;
+            if (!editing) try self.doc.checkpoint();
+            const before = s.bounds();
+            const rtl = s.textRtl();
+            const right = s.p0.x + s.frame().w - 2 * s.textPad();
+            s.box_w = 0;
+            // right-to-left text keeps its right edge
+            if (rtl) s.p0.x = right - (s.frame().w - 2 * s.textPad());
+            if (!editing) try self.recompose(Rect.unite(before, s.bounds()));
+            return;
+        }
+        if (!editing) {
+            try self.doc.checkpoint();
+            try self.lift(i);
+        }
+        self.drag = .{ .text_width = .{
+            .idx = i,
+            .orig_w = s.frame().w - 2 * s.textPad(),
+            .orig_x = s.p0.x,
+            .orig_box_w = s.box_w,
+            .rtl = s.textRtl(),
+            .editing = editing,
+        } };
     }
 
     fn dismissHint(self: *Editor) void {
@@ -890,16 +969,23 @@ pub const Editor = struct {
         self.last_click_ms = now;
         self.last_click = m;
 
+        // a text box's width handle: drag to fix the width (lines wrap),
+        // double-click to go back to fitting the text
+        if (self.textHandleAt(m)) |i| return self.pressTextHandle(i, double);
+
         if (self.text) |*t| {
             const s = &self.doc.shapes.items[t.idx];
             if (self.pn().view.rectToBuf(s.frame()).expand(self.sc(4)).contains(m.x, m.y)) {
                 const at = caretAt(s, ip);
+                t.goal_x = null;
                 if (double) {
-                    t.te.selectWord(s.str.items, at);
+                    t.te.selectWord(s.str.items, at.off);
+                    t.upstream = false;
                 } else {
                     // Shift+click extends; a drag selects
-                    if (!self.mod_shift) t.te.anchor = at else if (t.te.anchor == null) t.te.anchor = t.te.caret;
-                    t.te.caret = at;
+                    if (!self.mod_shift) t.te.anchor = at.off else if (t.te.anchor == null) t.te.anchor = t.te.caret;
+                    t.te.caret = at.off;
+                    t.upstream = at.upstream;
                     self.drag = .text_select;
                 }
                 self.needs_render = true;
@@ -1160,6 +1246,11 @@ pub const Editor = struct {
                 orig.deinit(self.alloc);
                 try self.unlift();
             },
+            .text_width => |tw| if (!tw.editing) {
+                const s = &self.doc.shapes.items[tw.idx];
+                if (s.box_w == tw.orig_box_w and s.p0.x == tw.orig_x) self.doc.dropCheckpoint();
+                try self.unlift();
+            },
             .picking, .text_select, .none => {},
         }
         self.needs_render = true;
@@ -1205,12 +1296,27 @@ pub const Editor = struct {
             self.picker.open = false;
             return true;
         }
+        if (self.drag == .text_width) {
+            const tw = self.drag.text_width;
+            self.drag = .none;
+            if (tw.editing) {
+                const s = &self.doc.shapes.items[tw.idx];
+                s.box_w = tw.orig_box_w;
+                s.p0.x = tw.orig_x;
+                return true;
+            }
+            self.lifted = null;
+            try self.doc.revert();
+            self.selected = null;
+            try self.recomposeAll();
+            return true;
+        }
         if (self.text != null) {
             try self.endText();
             return true;
         }
         switch (self.drag) {
-            .none, .picking, .text_select => {},
+            .none, .picking, .text_select, .text_width => {},
             .drawing => {
                 if (self.cur) |*s| s.deinit(self.alloc);
                 self.cur = null;
@@ -1303,7 +1409,8 @@ pub const Editor = struct {
         }
         const s = &self.doc.shapes.items[i];
         const orig = try self.alloc.dupe(u8, s.str.items);
-        self.text = .{ .idx = i, .te = .{ .caret = if (is_new) 0 else caretAt(s, ip) }, .is_new = is_new, .orig = orig };
+        const at: textbox.Hit = if (is_new) .{ .off = 0 } else caretAt(s, ip);
+        self.text = .{ .idx = i, .te = .{ .caret = at.off }, .is_new = is_new, .orig = orig, .upstream = at.upstream };
         self.selected = null;
         if (!is_new) self.selectShape(i);
         self.selected = null;
@@ -1332,6 +1439,7 @@ pub const Editor = struct {
             const before = self.doc.undo_stack.items[self.doc.undo_stack.items.len - 1];
             const same = before.len == self.doc.shapes.items.len and before[t.idx].color == s.color and
                 before[t.idx].thickness == s.thickness and before[t.idx].pill == s.pill and
+                before[t.idx].box_w == s.box_w and
                 before[t.idx].p0.x == s.p0.x and before[t.idx].p0.y == s.p0.y;
             if (same) self.doc.dropCheckpoint();
         }
@@ -1343,6 +1451,11 @@ pub const Editor = struct {
         const s = &self.doc.shapes.items[t.idx];
         const buf = &s.str;
         self.needs_render = true;
+        // only Up/Down keep the goal x, only End (and clicks) the affinity
+        const goal = t.goal_x;
+        const upstream = t.upstream;
+        t.goal_x = null;
+        t.upstream = false;
         switch (k.code) {
             window.KEY_ESC => try self.endText(),
             window.KEY_ENTER, KEY_KPENTER => {
@@ -1352,10 +1465,27 @@ pub const Editor = struct {
             window.KEY_DELETE => t.te.delete(buf),
             KEY_LEFT => t.te.move(buf.items, if (k.ctrl) .word_left else .left, k.shift),
             KEY_RIGHT => t.te.move(buf.items, if (k.ctrl) .word_right else .right, k.shift),
-            KEY_UP => t.te.move(buf.items, .up, k.shift),
-            KEY_DOWN => t.te.move(buf.items, .down, k.shift),
-            KEY_HOME => t.te.move(buf.items, if (k.ctrl) .doc_start else .home, k.shift),
-            KEY_END => t.te.move(buf.items, if (k.ctrl) .doc_end else .end, k.shift),
+            KEY_UP, KEY_DOWN, KEY_HOME, KEY_END => {
+                if (k.ctrl and (k.code == KEY_HOME or k.code == KEY_END)) {
+                    t.te.move(buf.items, if (k.code == KEY_HOME) .doc_start else .doc_end, k.shift);
+                    return;
+                }
+                // by visual line, across wrapped lines
+                var lay = try textbox.Layout.init(self.alloc, buf.items, s.fontPx(), s.box_w);
+                defer lay.deinit(self.alloc);
+                const cur: textbox.Hit = .{ .off = t.te.caret, .upstream = upstream };
+                const h = switch (k.code) {
+                    KEY_HOME => lay.home(cur),
+                    KEY_END => lay.end(cur),
+                    else => blk: {
+                        const gx = goal orelse lay.caretX(buf.items, cur);
+                        t.goal_x = gx;
+                        break :blk lay.vertical(buf.items, cur, gx, k.code == KEY_DOWN);
+                    },
+                };
+                t.te.moveTo(h.off, k.shift);
+                t.upstream = h.upstream;
+            },
             KEY_A => if (k.ctrl) t.te.selectAll(buf.items) else try self.typeText(k),
             KEY_C, KEY_X => if (k.ctrl) try self.copyTextSelection(k.code == KEY_X) else try self.typeText(k),
             KEY_MINUS, KEY_EQUAL => if (k.ctrl) try self.setThickness(self.thickness + @as(i32, if (k.code == KEY_EQUAL) 1 else -1)) else try self.typeText(k),
@@ -1399,6 +1529,8 @@ pub const Editor = struct {
         const t = &self.text.?;
         const txt = k.text();
         if (txt.len == 0) return;
+        t.upstream = false;
+        t.goal_x = null;
         try t.te.insert(self.alloc, &self.doc.shapes.items[t.idx].str, txt);
     }
 
@@ -1867,14 +1999,13 @@ pub const Editor = struct {
         const t = self.text orelse return null;
         const s = &self.doc.shapes.items[t.idx];
         const fs = s.fontPx();
-        const str = s.str.items;
-        const ls = textedit.lineStart(str, t.te.caret);
-        var line: i32 = 0;
-        for (str[0..ls]) |c| line += @intFromBool(c == '\n');
         const lh = text_mod.height(fs);
-        const line_str = str[ls..textedit.lineEnd(str, t.te.caret)];
-        const indent = shapes_mod.lineIndent(fs, line_str, shapes_mod.textBoxWidth(fs, str));
-        const p = Point{ .x = s.p0.x + indent + text_mod.xForOffset(fs, .regular, line_str, t.te.caret - ls), .y = s.p0.y + line * lh };
+        var buf: [8192]u8 = undefined;
+        var bfa: std.heap.BufferFirstAllocator = .init(&buf, self.alloc);
+        var lay = textbox.Layout.init(bfa.allocator(), s.str.items, fs, s.box_w) catch return null;
+        defer lay.deinit(bfa.allocator());
+        const c = lay.caretPoint(s.str.items, .{ .off = t.te.caret, .upstream = t.upstream });
+        const p = Point{ .x = s.p0.x + c.x, .y = s.p0.y + c.y };
         const b = self.pn().view.toBuf(p);
         return .{ .x = b.x, .y = b.y, .w = @max(1, self.sc(2)), .h = @max(1, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(lh)) * self.pn().view.scale)))) };
     }
@@ -1886,7 +2017,7 @@ pub const Editor = struct {
             if (s.tool != .pen and s.tool != .highlight) shapes_mod.drawShape(canvas, self.alloc, s, xf, null);
         }
         if (self.lifted) |i| {
-            const cursor: ?shapes_mod.TextCursor = if (self.text) |t| .{ .caret = t.te.caret, .sel = t.te.selection() } else null;
+            const cursor: ?shapes_mod.TextCursor = if (self.text) |t| .{ .caret = t.te.caret, .sel = t.te.selection(), .upstream = t.upstream } else null;
             shapes_mod.drawShape(canvas, self.alloc, &self.doc.shapes.items[i], xf, cursor);
         }
     }
@@ -2078,6 +2209,28 @@ pub const Editor = struct {
             try self.handle(.{ .resize = .{ .w = 0, .h = 0, .surface = try std.fmt.parseInt(u8, arg, 10) } });
         } else if (eql(u8, op, "surface")) {
             self.script_surface = try std.fmt.parseInt(u8, arg, 10);
+        } else if (eql(u8, op, "textwidth")) {
+            // textwidth DX: drag the width handle of the text being edited
+            // (or the selected one) DX pixels; textwidth auto: double-click it
+            const i = self.textHandleShape() orelse return error.NoText;
+            self.pane_i = self.script_surface;
+            const h = self.textWidthHandle(i);
+            self.pane_i = self.mouse_pane;
+            var buf: [64]u8 = undefined;
+            if (eql(u8, arg, "auto")) {
+                const c = try std.fmt.bufPrint(&buf, "click {d},{d}", .{ h.x, h.y });
+                try self.runCommand(c);
+                try self.runCommand(c);
+            } else {
+                const dx = try std.fmt.parseInt(i32, arg, 10);
+                try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = @floatFromInt(h.x), .y = @floatFromInt(h.y) } });
+                try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = true, .x = @floatFromInt(h.x), .y = @floatFromInt(h.y) } });
+                for (1..9) |k| {
+                    const x = @as(f64, @floatFromInt(h.x)) + @as(f64, @floatFromInt(dx)) * @as(f64, @floatFromInt(k)) / 8.0;
+                    try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = x, .y = @floatFromInt(h.y) } });
+                }
+                try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = false, .x = @floatFromInt(h.x + dx), .y = @floatFromInt(h.y) } });
+            }
         } else if (eql(u8, op, "export")) {
             self.dumpExport(arg);
         } else if (eql(u8, op, "quit")) {
@@ -2194,27 +2347,15 @@ fn parseKey(spec: []const u8) !window.Key {
     return k;
 }
 
-/// Byte offset in text shape `s` nearest to image point `p`.
-pub fn caretAt(s: *const Shape, p: Point) usize {
-    const fs = s.fontPx();
-    const lh = @max(1, text_mod.height(fs));
-    const str = s.str.items;
-    var line_no = @divFloor(p.y - s.p0.y, lh);
-    if (line_no < 0) line_no = 0;
-    var start: usize = 0;
-    var it = std.mem.splitScalar(u8, str, '\n');
-    var i: i32 = 0;
-    var line: []const u8 = "";
-    while (it.next()) |l| : (i += 1) {
-        line = l;
-        if (i == line_no) break;
-        if (it.peek() == null) break;
-        start += l.len + 1;
-    }
-    // bidi-aware: on right-to-left text the nearest offset is found in
-    // visual order
-    const indent = shapes_mod.lineIndent(fs, line, shapes_mod.textBoxWidth(fs, str));
-    return start + @min(line.len, text_mod.offsetForX(fs, .regular, line, p.x - s.p0.x - indent));
+/// Caret in text shape `s` nearest to image point `p` (bidi-aware and
+/// across wrapped lines).
+pub fn caretAt(s: *const Shape, p: Point) textbox.Hit {
+    var buf: [8192]u8 = undefined;
+    var bfa: std.heap.BufferFirstAllocator = .init(&buf, std.heap.page_allocator);
+    const a = bfa.allocator();
+    var lay = textbox.Layout.init(a, s.str.items, s.fontPx(), s.box_w) catch return .{ .off = s.str.items.len };
+    defer lay.deinit(a);
+    return lay.hit(s.str.items, p.x - s.p0.x, p.y - s.p0.y);
 }
 
 test "caret lands on the nearest character" {
@@ -2222,12 +2363,12 @@ test "caret lands on the nearest character" {
     var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
     defer s.deinit(alloc);
     try s.str.appendSlice(alloc, "abc\ndefgh");
-    try std.testing.expectEqual(@as(usize, 0), caretAt(&s, .{ .x = 0, .y = 0 }));
-    try std.testing.expectEqual(@as(usize, 3), caretAt(&s, .{ .x = 10000, .y = 100 }));
+    try std.testing.expectEqual(@as(usize, 0), caretAt(&s, .{ .x = 0, .y = 0 }).off);
+    try std.testing.expectEqual(@as(usize, 3), caretAt(&s, .{ .x = 10000, .y = 100 }).off);
     const lh = text_mod.height(s.fontPx());
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }));
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100000 }));
-    try std.testing.expectEqual(@as(usize, 4), caretAt(&s, .{ .x = 100, .y = 100 + lh + 1 }));
+    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
+    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100000 }).off);
+    try std.testing.expectEqual(@as(usize, 4), caretAt(&s, .{ .x = 100, .y = 100 + lh + 1 }).off);
 }
 
 test "dirty rect list merges on overflow" {
@@ -2261,4 +2402,21 @@ test "scripted keys parse" {
     const q = try parseKey("?");
     try std.testing.expectEqualStrings("?", q.text());
     try std.testing.expectEqual(@as(u32, KEY_LEFT), (try parseKey("alt+left")).code);
+}
+
+test "caret across wrapped lines of a fixed-width text" {
+    const alloc = std.testing.allocator;
+    text_mod.init(alloc);
+    defer text_mod.deinit();
+    var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
+    defer s.deinit(alloc);
+    try s.str.appendSlice(alloc, "alpha beta gamma");
+    const fs = s.fontPx();
+    s.box_w = text_mod.width(fs, "alpha beta") + 2;
+    const lh = text_mod.height(fs);
+    // second visual line starts at "gamma"
+    try std.testing.expectEqual(@as(usize, 11), caretAt(&s, .{ .x = 0, .y = 100 + lh + 1 }).off);
+    try std.testing.expectEqual(@as(usize, 16), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
+    // right of the first line: before its hanging space
+    try std.testing.expectEqual(@as(usize, 10), caretAt(&s, .{ .x = 10000, .y = 101 }).off);
 }

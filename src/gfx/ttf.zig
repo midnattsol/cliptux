@@ -2,7 +2,8 @@
 //! and 12), glyf (simple + composite), CFF outlines ('OTTO' fonts, via
 //! cff.zig), loca, hmtx, and .ttc collections. Outlines are flattened and
 //! filled with a 4x supersampled nonzero-winding scanline, producing 8-bit
-//! coverage bitmaps. Enough for crisp UI text; no hinting, no kerning.
+//! coverage bitmaps. Enough for crisp UI text; no hinting. The layout
+//! tables (GSUB/GPOS/GDEF) are only located here; otl.zig applies them.
 //!
 //! Font files are untrusted: every table read is bounds-checked, and a
 //! malformed glyph rasterizes as empty instead of failing the whole font.
@@ -11,6 +12,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const sys = @import("../platform/sys.zig");
 const cff_mod = @import("cff.zig");
+const otl = @import("otl.zig");
 
 pub const LoadError = error{
     Truncated,
@@ -87,6 +89,8 @@ pub const Font = struct {
     cmap12: []const u8 = &.{}, // format-12 subtable (preferred: covers > U+FFFF)
     hmtx: []const u8,
     cff: ?cff_mod.Cff = null,
+    /// GSUB/GPOS/GDEF, for shaping (otl.zig)
+    layout: otl.Tables = .{},
     num_h_metrics: u16,
     num_glyphs: u16,
     units_per_em: f64,
@@ -141,6 +145,7 @@ pub const Font = struct {
         var hhea: []const u8 = &.{};
         var hmtx: []const u8 = &.{};
         var cff_tab: []const u8 = &.{};
+        var layout: otl.Tables = .{};
 
         var i: usize = 0;
         while (i < num_tables) : (i += 1) {
@@ -157,6 +162,9 @@ pub const Font = struct {
             if (std.mem.eql(u8, tag, "hhea")) hhea = slice;
             if (std.mem.eql(u8, tag, "hmtx")) hmtx = slice;
             if (std.mem.eql(u8, tag, "CFF ")) cff_tab = slice;
+            if (std.mem.eql(u8, tag, "GSUB")) layout.gsub = slice;
+            if (std.mem.eql(u8, tag, "GPOS")) layout.gpos = slice;
+            if (std.mem.eql(u8, tag, "GDEF")) layout.gdef = slice;
         }
         if (head.len < 54 or maxp.len < 6 or cmap.len < 4 or hhea.len < 36) return error.MissingTables;
 
@@ -177,6 +185,7 @@ pub const Font = struct {
             .loca = loca,
             .hmtx = hmtx,
             .cff = cff,
+            .layout = layout,
             .num_h_metrics = try beU16(hhea, 34),
             .num_glyphs = try beU16(maxp, 4),
             .units_per_em = @floatFromInt(upem),
@@ -301,6 +310,11 @@ pub const Font = struct {
         const gid = beU16(d, addr) catch return 0;
         if (gid == 0) return 0;
         return gid +% delta;
+    }
+
+    /// Advance width of glyph `gid` in font units.
+    pub fn advanceUnits(self: *const Font, gid: u16) f64 {
+        return self.advanceOf(gid);
     }
 
     fn advanceOf(self: *const Font, gid: u16) f64 {
@@ -843,6 +857,7 @@ test "otf with cff outlines" {
 
 test {
     _ = @import("cff.zig");
+    _ = @import("otl.zig");
 }
 
 /// Build a tiny valid TrueType font: .notdef, a simple glyph for 'A' (a

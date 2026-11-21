@@ -100,11 +100,34 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     }
     if (std.mem.eql(u8, cmd, "test-font")) {
 
-        // internal development tool: render sample text to a PNG
+        // internal development tool: render sample text to a PNG;
+        // `test-font "line|line..." [out.png]` renders the given lines
         const text = @import("../gfx/text.zig");
         const render = @import("../gfx/render.zig");
         text.init(gpa);
         defer text.deinit();
+        if (args.len >= 3) {
+            const W = 1000;
+            const n_lines = std.mem.count(u8, args[2], "|") + 1;
+            const H = 20 + 64 * n_lines;
+            const px = try gpa.alloc(u32, W * H);
+            defer gpa.free(px);
+            @memset(px, 0xFFFFFFFF);
+            var canvas = render.Canvas.init(px, W, @intCast(H));
+            var it = std.mem.splitScalar(u8, args[2], '|');
+            var y: i32 = 10;
+            while (it.next()) |line| : (y += 64) {
+                const w = text.width(44.0, line);
+                canvas.fillRect(20, y, w, text.height(44.0), 0xFFE7F0FF);
+                text.draw(&canvas, 20, y, 44.0, 0xFF101010, line);
+            }
+            const out = try png.encode(gpa, px, W, @intCast(H));
+            defer gpa.free(out);
+            if (args.len >= 4) {
+                try sys.writeFile(args[3], out);
+            } else try writeDebug(gpa, env, "shotlet-font.png", out);
+            return true;
+        }
         const W = 900;
         const H = 240;
         const px = try gpa.alloc(u32, W * H);

@@ -614,3 +614,18 @@ test "region recompose matches a full redraw" {
     try composeRegion(alloc, part, img, w, h, d.shapes.items[1..2], 0, d.imageRect());
     try testing.expectEqualSlices(u32, img, part);
 }
+
+test "undo covers a text box's width" {
+    const alloc = testing.allocator;
+    var d = Document.init(alloc, 100, 100);
+    defer d.deinit();
+    try d.checkpoint();
+    const i = try d.add(.{ .tool = .text, .color = 1, .thickness = 2 });
+    try d.shapes.items[i].str.appendSlice(alloc, "hello world");
+    try d.checkpoint();
+    d.shapes.items[i].box_w = 40;
+    try testing.expect(try d.undo());
+    try testing.expectEqual(@as(i32, 0), d.shapes.items[i].box_w);
+    try testing.expect(try d.redo());
+    try testing.expectEqual(@as(i32, 40), d.shapes.items[i].box_w);
+}

@@ -461,14 +461,62 @@ pub fn reorder(levels: []const u8, order: []u32) void {
 
 const Joining = enum { U, R, D, C, T };
 
+/// Unicode joining type (ArabicShaping.txt) for Arabic, Arabic Supplement
+/// and Extended-A, Syriac and NKo; everything else is non-joining.
 fn joining(cp: u21) Joining {
     return switch (cp) {
         0x0622...0x0625, 0x0627, 0x0629, 0x062F...0x0632, 0x0648, 0x0671...0x0673, 0x0675...0x0677, 0x0688...0x0699, 0x06C0, 0x06C3...0x06CB, 0x06CD, 0x06CF, 0x06D2, 0x06D3, 0x06D5, 0x06EE, 0x06EF => .R,
         0x0620, 0x0626, 0x0628, 0x062A...0x062E, 0x0633...0x063F, 0x0641...0x0647, 0x0649, 0x064A, 0x066E, 0x066F, 0x0678...0x0687, 0x069A...0x06BF, 0x06C1, 0x06C2, 0x06CC, 0x06CE, 0x06D0, 0x06D1, 0x06FA...0x06FC, 0x06FF => .D,
+        // Syriac
+        0x0710, 0x0715...0x0719, 0x071E, 0x0728, 0x072A, 0x072C, 0x072F, 0x074D => .R,
+        0x0712...0x0714, 0x071A...0x071D, 0x071F...0x0727, 0x0729, 0x072B, 0x072D, 0x072E, 0x074E...0x074F => .D,
+        // Arabic Supplement
+        0x0759...0x075B, 0x076B, 0x076C, 0x0771, 0x0773, 0x0774, 0x0778, 0x0779 => .R,
+        0x0750...0x0758, 0x075C...0x076A, 0x076D...0x0770, 0x0772, 0x0775...0x0777, 0x077A...0x077F => .D,
+        // NKo
+        0x07CA...0x07EA => .D,
+        0x07FA => .C,
+        // Arabic Extended-A
+        0x08AA...0x08AC, 0x08AE, 0x08B1, 0x08B2, 0x08B9 => .R,
+        0x08A0...0x08A9, 0x08AF, 0x08B0, 0x08B3, 0x08B4, 0x08B6...0x08B8, 0x08BA...0x08C8 => .D,
         0x0640, 0x200D => .C,
         0x0610...0x061A, 0x064B...0x065F, 0x0670, 0x06D6...0x06DC, 0x06DF...0x06E4, 0x06E7, 0x06E8, 0x06EA...0x06ED => .T,
+        0x070F, 0x0711, 0x0730...0x074A, 0x07EB...0x07F3, 0x07FD, 0x08CA...0x08E1, 0x08E3...0x08FF => .T,
+        0x0300...0x036F, 0x200B, 0x2060, 0xFE00...0xFE0F => .T,
         else => .U,
     };
+}
+
+/// Contextual joining form of every character (logical order), as OpenType
+/// feature masks: 1 isol, 2 fina, 4 medi, 8 init, 0 none. ZWJ joins,
+/// ZWNJ and anything non-joining breaks the chain, marks are transparent.
+pub fn joiningMasks(cps: []const u21, out: []u8) void {
+    const joins_prev: u8 = 0x10;
+    const joins_next: u8 = 0x20;
+    @memset(out, 0);
+    var prev: ?usize = null;
+    var prev_jt: Joining = .U;
+    for (cps, 0..) |cp, i| {
+        const jt = joining(cp);
+        if (jt == .T) continue;
+        if (prev) |p| {
+            if ((prev_jt == .D or prev_jt == .C) and (jt == .D or jt == .R or jt == .C)) {
+                out[p] |= joins_next;
+                out[i] |= joins_prev;
+            }
+        }
+        prev = i;
+        prev_jt = jt;
+    }
+    for (cps, out) |cp, *m| {
+        const p = m.* & joins_prev != 0;
+        const n = m.* & joins_next != 0;
+        m.* = switch (joining(cp)) {
+            .D => if (p and n) 4 else if (p) 2 else if (n) 8 else 1,
+            .R => if (p) 2 else 1,
+            else => 0,
+        };
+    }
 }
 
 /// Presentation forms: isolated, final, initial, medial (0 = none).
@@ -587,6 +635,28 @@ pub fn baseLetter(cp: u21) u21 {
         0xFEF5, 0xFEF6, 0xFEF7, 0xFEF8, 0xFEF9, 0xFEFA, 0xFEFB, 0xFEFC => 0x0644,
         else => cp,
     };
+}
+
+test "joining masks: forms, transparent marks, non-joiners" {
+    const isol = 1;
+    const fina = 2;
+    const medi = 4;
+    const init = 8;
+    var m: [8]u8 = undefined;
+    // بيت
+    joiningMasks(&u32s("بيت"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ init, medi, fina }, m[0..3]);
+    // ڈ (right-joining, Urdu) after ٹ: ٹ init, ڈ final; then ے isolated after it
+    joiningMasks(&u32s("ٹڈے"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ init, fina, isol }, m[0..3]);
+    // a mark between two letters keeps them joined
+    joiningMasks(&u32s("بَت"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ init, 0, fina }, m[0..3]);
+    // ZWNJ breaks, ZWJ joins
+    joiningMasks(&u32s("ب\u{200C}ب"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ isol, 0, isol }, m[0..3]);
+    joiningMasks(&u32s("ب\u{200D}"), m[0..2]);
+    try std.testing.expectEqual(@as(u8, init), m[0]);
 }
 
 test "bidi classes" {

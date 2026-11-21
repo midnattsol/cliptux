@@ -11,6 +11,7 @@ const text_mod = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
 const bidi = @import("../gfx/bidi.zig");
 const utf8 = @import("../gfx/utf8.zig");
+const textbox = @import("textbox.zig");
 
 const Canvas = render.Canvas;
 
@@ -138,6 +139,9 @@ pub const Shape = struct {
     rounded: bool = false,
     /// text: coloured rounded background behind the text
     pill: bool = false,
+    /// text: fixed box width in image pixels, lines wrap to it; 0 = as
+    /// wide as the longest line
+    box_w: i32 = 0,
 
     pub fn deinit(self: *Shape, alloc: std.mem.Allocator) void {
         self.points.deinit(alloc);
@@ -197,6 +201,18 @@ pub const Shape = struct {
         return @intFromFloat(@round(self.fontPx() * 0.3));
     }
 
+    /// How far the text's frame extends past its text box.
+    pub fn textPad(self: *const Shape) i32 {
+        return if (self.pill) self.pillPad() else 0;
+    }
+
+    /// Whether the text box hugs the right edge (its first paragraph is
+    /// right-to-left), so its width handle is on the left.
+    pub fn textRtl(self: *const Shape) bool {
+        const s = self.str.items;
+        return textbox.paragraphRtl(s[0 .. std.mem.indexOfScalar(u8, s, '\n') orelse s.len]);
+    }
+
     /// The box handles edit: corners for boxes, the text block, the badge.
     pub fn frame(self: *const Shape) Rect {
         switch (self.tool) {
@@ -218,11 +234,8 @@ pub const Shape = struct {
                 return .{ .x = self.p0.x - r, .y = self.p0.y - r, .w = 2 * r, .h = 2 * r };
             },
             .text => {
-                const fs = self.fontPx();
-                const lh = text_mod.height(fs);
-                const lines: i32 = @intCast(std.mem.count(u8, self.str.items, "\n") + 1);
-                const pad = if (self.pill) self.pillPad() else 0;
-                return (Rect{ .x = self.p0.x, .y = self.p0.y, .w = textBoxWidth(fs, self.str.items), .h = lines * lh }).expand(pad);
+                const wh = textbox.size(self.str.items, self.fontPx(), self.box_w);
+                return (Rect{ .x = self.p0.x, .y = self.p0.y, .w = wh[0], .h = wh[1] }).expand(self.textPad());
             },
             else => return Rect.fromCorners(self.p0, self.p1),
         }
@@ -435,52 +448,27 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
                 label,
             );
         },
-        .text => drawText(canvas, s, xf, cursor),
+        .text => drawText(canvas, alloc, s, xf, cursor),
         .select => {},
     }
-}
-
-/// Width of a text box at font size `fs`: its widest line, with room for
-/// the caret when it is empty.
-pub fn textBoxWidth(fs: f64, str: []const u8) i32 {
-    var wmax: i32 = 0;
-    var it = std.mem.splitScalar(u8, str, '\n');
-    while (it.next()) |line| wmax = @max(wmax, text_mod.width(fs, line));
-    return @max(wmax, @as(i32, @intFromFloat(fs * 0.4)));
-}
-
-/// Where a line starts inside its text box: lines whose first strong
-/// character is right-to-left (Hebrew, Arabic...) align to the right edge,
-/// as in any editor.
-pub fn lineIndent(fs: f64, line: []const u8, box_w: i32) i32 {
-    var it = utf8.Iterator.init(line);
-    const rtl = while (it.next()) |cp| {
-        switch (bidi.class(cp)) {
-            .L => break false,
-            .R, .AL => break true,
-            else => {},
-        }
-    } else false;
-    if (!rtl) return 0;
-    return @max(0, box_w - text_mod.width(fs, line));
-}
-
-test "right-to-left lines align to the right of the box" {
-    try std.testing.expectEqual(@as(i32, 0), lineIndent(20, "hello", 500));
-    try std.testing.expectEqual(@as(i32, 0), lineIndent(20, "123 hello", 500));
-    try std.testing.expect(lineIndent(20, "\u{5E9}\u{5DC}\u{5D5}\u{5DD}", 500) > 0);
-    try std.testing.expect(lineIndent(20, "123 \u{645}\u{631}\u{62D}\u{628}\u{627}", 500) > 0);
 }
 
 /// Caret (byte offset) and selected byte range of a text being edited.
 pub const TextCursor = struct {
     caret: usize,
     sel: ?[2]usize = null,
+    /// the caret sits at the end of the line above a soft break
+    upstream: bool = false,
 };
 
 pub const selection_color: u32 = 0x804DABF7;
 
-fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
+fn drawText(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
+    const str = s.str.items;
+    // line breaks come from the image-size layout, so the preview at any
+    // zoom wraps exactly like the export
+    var lay = textbox.Layout.init(alloc, str, s.fontPx(), s.box_w) catch return;
+    defer lay.deinit(alloc);
     const fs = s.fontPx() * xf.scale;
     const lh = text_mod.height(fs);
     const fg = if (s.pill) contrastColor(s.color) else s.color;
@@ -489,38 +477,40 @@ fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) vo
         canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, fs * 0.35, s.color);
     }
     const box_x: i32 = @intFromFloat(@round(xf.fx(s.p0.x)));
-    const box_w = textBoxWidth(fs, s.str.items);
+    const box_w: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(lay.w)) * xf.scale));
     var y: i32 = @intFromFloat(@round(xf.fy(s.p0.y)));
-    var start: usize = 0;
-    var it = std.mem.splitScalar(u8, s.str.items, '\n');
-    while (it.next()) |line| {
-        const x0 = box_x + lineIndent(fs, line, box_w);
+    const caret_line: ?usize = if (cursor) |c| lay.lineOf(.{ .off = c.caret, .upstream = c.upstream }) else null;
+    for (lay.lines.items, 0..) |l, i| {
+        const vis = str[l.start..l.vis_end];
+        const dir = l.dir();
+        const x0 = box_x + lay.indentAt(str, i, fs, box_w);
         if (cursor) |cur| if (cur.sel) |sel| {
-            // the part of the selection on this line (+ a sliver for its newline)
-            const a = @max(sel[0], start);
-            const b = @min(sel[1], start + line.len + 1);
+            // the part of the selection on this line (+ a sliver for its
+            // newline or hanging spaces)
+            const a = @max(sel[0], l.start);
+            const b = @min(sel[1], l.end + @intFromBool(!l.soft and l.end < str.len));
             if (a < b) {
-                // positions in visual order, so right-to-left text highlights
-                // under the right glyphs (a mixed-direction range is shown
-                // as one span from its leftmost to its rightmost edge)
-                const xa = text_mod.xForOffset(fs, .regular, line, a - start);
-                const xb = text_mod.xForOffset(fs, .regular, line, @min(b, start + line.len) - start);
-                const sx = x0 + @min(xa, xb);
-                const ex = x0 + @max(xa, xb) +
-                    (if (b > start + line.len) @as(i32, @intFromFloat(@round(fs * 0.25))) else 0);
-                canvas.fillRect(sx, y, ex - sx, lh, selection_color);
+                // the glyphs' own extents, so a range across both
+                // directions highlights each part where it is drawn
+                var spans: [16][2]i32 = undefined;
+                const ns = text_mod.rangeSpans(fs, .regular, vis, @min(a, l.vis_end) - l.start, @min(b, l.vis_end) - l.start, dir, &spans);
+                for (spans[0..ns]) |sp| canvas.fillRect(x0 + sp[0], y, sp[1] - sp[0], lh, selection_color);
+                if (b > l.vis_end) {
+                    // a sliver for the newline or the hanging spaces, at
+                    // the paragraph's end side
+                    const sliver: i32 = @intFromFloat(@round(fs * 0.25));
+                    const ex = if (l.rtl) x0 - sliver else x0 + text_mod.widthDir(fs, .regular, vis, dir);
+                    canvas.fillRect(ex, y, sliver, lh, selection_color);
+                }
             }
         };
-        text_mod.draw(canvas, x0, y, fs, fg, line);
-        if (cursor) |cur| {
-            const c = cur.caret;
-            if (c >= start and c <= start + line.len) {
-                const cx = x0 + text_mod.xForOffset(fs, .regular, line, c - start);
-                const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));
-                canvas.fillRect(cx, y, cw, lh, fg);
-            }
+        text_mod.drawDir(canvas, x0, y, fs, fg, .regular, vis, dir);
+        if (caret_line == i) {
+            const c = std.math.clamp(cursor.?.caret, l.start, l.vis_end);
+            const cx = x0 + text_mod.xForOffsetDir(fs, .regular, vis, c - l.start, dir);
+            const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));
+            canvas.fillRect(cx, y, cw, lh, fg);
         }
-        start += line.len + 1;
         y += lh;
     }
 }
@@ -856,4 +846,39 @@ test "drawing through a transform scales shapes" {
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[19 * 40 + 19]);
     try std.testing.expectEqual(@as(u32, 0xFF000000), px[20 * 40 + 20]);
     try std.testing.expectEqual(@as(u32, 0xFF000000), px[9 * 40 + 9]);
+}
+
+test "fixed-width text wraps: frame, drawing and preview match the export" {
+    const alloc = std.testing.allocator;
+    text_mod.init(alloc);
+    defer text_mod.deinit();
+    var s = Shape{ .tool = .text, .color = 0xFFFF0000, .thickness = 2, .p0 = .{ .x = 10, .y = 10 } };
+    defer s.deinit(alloc);
+    try s.str.appendSlice(alloc, "one two three four five six\n\u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD} \u{645}\u{631}\u{62D}\u{628}\u{627}");
+    const fs = s.fontPx();
+    const lh = text_mod.height(fs);
+    const auto = s.frame();
+    try std.testing.expectEqual(2 * lh, auto.h);
+    s.box_w = text_mod.width(fs, "one two three") + 1;
+    const f = s.frame();
+    try std.testing.expectEqual(s.box_w, f.w);
+    try std.testing.expect(f.h >= 4 * lh);
+    // too narrow for anything: clamped, still draws
+    s.box_w = 1;
+    try std.testing.expectEqual(textbox.minWidth(fs), s.frame().w);
+    s.box_w = text_mod.width(fs, "one two three") + 1;
+    // drawing with a cursor and a selection across lines and directions,
+    // at export scale and zoomed out
+    var px: [400 * 300]u32 = @splat(0xFF000000);
+    var c = Canvas.init(&px, 400, 300);
+    for ([_]f64{ 1.0, 0.5 }) |sc| {
+        drawShape(&c, alloc, &s, .{ .scale = sc }, .{ .caret = 14, .sel = .{ 4, 40 } });
+        drawShape(&c, alloc, &s, .{ .scale = sc }, .{ .caret = 8, .upstream = true });
+    }
+    // RTL text puts its width handle on the left
+    try std.testing.expect(!s.textRtl());
+    var r = Shape{ .tool = .text, .color = 0xFFFF0000, .thickness = 2 };
+    defer r.deinit(alloc);
+    try r.str.appendSlice(alloc, "123 \u{5D0}\u{5D1}");
+    try std.testing.expect(r.textRtl());
 }

@@ -269,6 +269,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.selected) |i| {
         if (shapeChromeRect(self, i)) |r| addOutline(list, r, chromePad(self));
     }
+    if (self.textHandleShape()) |i| list.add(textHandleRect(self, i).expand(2));
     if (self.selBuf()) |s| {
         addOutline(list, s, chromePad(self));
         list.add(dimsPillRect(self, s).expand(1));
@@ -302,6 +303,7 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
         if (self.isMousePane()) drawPreedit(self, canvas);
     }
     if (self.selected) |i| drawShapeChrome(self, canvas, i);
+    if (self.textHandleShape()) |i| drawTextHandle(self, canvas, i);
     drawSelectionChrome(self, canvas);
     if (self.isMousePane()) drawLoupe(self, canvas);
     if (!self.isTbPane()) return;
@@ -347,6 +349,25 @@ fn dashedRect(canvas: *Canvas, r: Rect, a: u32, b: u32) void {
         canvas.blend(r.x, y, c);
         canvas.blend(r.right() - 1, y, c);
     }
+}
+
+/// Footprint of a text box's width handle: a short vertical pill.
+fn textHandleRect(self: *const Editor, i: usize) Rect {
+    const h = self.textWidthHandle(i);
+    const hw: i32 = @intFromFloat(@ceil(3.5 * self.uf()));
+    const hh: i32 = @intFromFloat(@ceil(9.0 * self.uf()));
+    return .{ .x = h.x - hw, .y = h.y - hh, .w = 2 * hw, .h = 2 * hh };
+}
+
+/// The width handle: drag to fix the box width, double-click for auto.
+/// Filled when the width is fixed, hollow when the box fits its text.
+fn drawTextHandle(self: *Editor, canvas: *Canvas, i: usize) void {
+    const r = textHandleRect(self, i);
+    const fixed = self.doc.shapes.items[i].box_w > 0;
+    const rad = @as(f64, @floatFromInt(r.w)) / 2.0;
+    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, 0xB3000000);
+    const in = @max(1, self.sc(1));
+    canvas.fillRoundRectAA(r.x + in, r.y + in, r.w - 2 * in, r.h - 2 * in, rad - 1, if (fixed) ui_accent else 0xFFFFFFFF);
 }
 
 fn drawShapeChrome(self: *Editor, canvas: *Canvas, i: usize) void {
@@ -821,6 +842,7 @@ const help_lines = [_][2][]const u8{
     .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
     .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
     .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },
+    .{ "Text: side handle", "Drag to wrap at a width; double-click: fit text" },
     .{ "B", "Beautify frame (padding, background, shadow)" },
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
     .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
