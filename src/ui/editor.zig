@@ -1241,8 +1241,16 @@ pub const Editor = struct {
             }
         }
         if (self.text != null) {
-            try self.onTextKey(k);
-            return;
+            const editing_chord = switch (k.code) {
+                window.KEY_ENTER, KEY_KPENTER, window.KEY_BACKSPACE, window.KEY_DELETE, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_MINUS, KEY_EQUAL => true,
+                else => false,
+            };
+            // other Ctrl chords (copy, save, undo...) end the edit and run
+            if (!k.ctrl or editing_chord) {
+                try self.onTextKey(k);
+                return;
+            }
+            try self.endText();
         }
 
         // fixed chords that must win over configurable binds
