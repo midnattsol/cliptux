@@ -30,6 +30,14 @@ Wayland and DBus wire protocols directly.
   the bottom-left corner for a few seconds: copy it again, save it, drag
   it into any app, annotate it again, pin it to the screen. Every copied
   or saved capture is kept in a Recent captures panel.
+- Tools beyond annotations: a colour picker (`#RRGGBB` or `rgb()` to
+  the clipboard), a ruler that snaps to edges, a spotlight that dims the
+  rest, crop with aspect ratios, Copy text (OCR), and Redact sensitive
+  data (e-mails, phone and card numbers, IBANs, IPs, API keys and tokens,
+  found locally). See [Editor tools](#editor-tools).
+- Opens images too: `shotlet edit FILE` (PNG, JPEG, WebP), an image
+  dropped on the editor, a thumbnail or the history panel; `shotlet pin`
+  pins the clipboard's image.
 - Tray icon with menu, and a Settings window (general, editor and
   shortcut views) with rebindable shortcuts and a save folder picker.
 
@@ -89,7 +97,9 @@ Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts
 
 ```sh
 shotlet history                       # Recent captures (history clear: forget them)
-shotlet pin FILE.png                  # pin an image to the screen
+shotlet pin [FILE]                    # pin an image (PNG, JPEG, WebP; default: the clipboard's)
+shotlet text                          # select a region: its text goes to the clipboard
+shotlet edit FILE                     # open an image in the editor
 shotlet gnome-integration install     # GNOME: no prompts; thumbnail and pins above
 shotlet gnome-integration shortcut '<Shift><Super>s'   # its capture key
 ```
@@ -227,6 +237,9 @@ the editor for the full list.
 | `N` `T` | counter badge, text |
 | `F` | outline / filled / rounded (text: background) |
 | `B` | beautify frame |
+| `I` `U` `S` `C` | colour picker, ruler, spotlight, crop |
+| `Ctrl+Shift+C` / `Ctrl+Shift+R` | copy the text (OCR) / redact sensitive data |
+| `Ctrl+P` | pin to the screen |
 | `1`-`8`, `9` | preset colours, custom colour |
 | wheel, `-` `=` | size |
 | `Shift` while drawing | square, circle, 45° lines and arrows (`Alt`: from the centre) |
@@ -235,6 +248,53 @@ the editor for the full list.
 | `Ctrl+Z` / `Ctrl+Shift+Z`, `Ctrl+Y` | undo / redo |
 | `Tab`, `Enter` | move through the toolbar, activate |
 | Text: `Ctrl+Enter` or `Esc` | finish editing (`Enter` is a new line) |
+
+## Editor tools
+
+- **Colour picker** (`I`, or the eyedropper on the toolbar): a loupe shows
+  the pixel grid and the colour under the pointer; a click copies
+  `#RRGGBB`, `Shift`+click `rgb(r, g, b)`, `Alt`+click makes it the
+  annotation colour. The last six picked colours wait in the colour
+  popover, one click to use one.
+- **Ruler** (`U`): drag to measure, in image pixels, and in logical
+  pixels (pt) when the monitor's scale is not 1: length and width ×
+  height on its label. Its ends snap to colour edges near the pointer
+  (`Alt`: no snapping), `Shift` keeps it horizontal or vertical. Rulers
+  are annotations: the colour popover says whether they go into the
+  export ("In export") or stay on screen ("Screen only").
+- **Spotlight** (`S`): a rectangle or ellipse stays as it is and the rest
+  is dimmed (light, medium or strong, in the popover); exported.
+- **Crop** (`C`, or the toolbar's crop button): the selection becomes a
+  crop frame with handles and free, 1:1, 16:9 or 4:3 ratios; `Enter`
+  applies, `Esc` cancels. The picture itself is cut: annotations keep
+  their place on it, beautify frames what is left, `Ctrl+Z` undoes it.
+- **Copy text** (`Ctrl+Shift+C`, More menu) reads the selection with
+  Tesseract, in the desktop's language plus English
+  (`SHOTLET_OCR_LANG=eng+spa` for others), and copies it as plain text:
+  lines that only wrapped are joined into paragraphs, hyphenated words
+  mended, lists, code and columns kept apart. `shotlet text` (also in
+  the tray menu; bind a key to it in your desktop's keyboard settings)
+  captures, reads the region you select, copies its text and closes,
+  with a small toast showing its first line.
+- **Redact sensitive data** (`Ctrl+Shift+R`, More menu) reads the
+  selection and covers e-mail addresses, phone numbers, card numbers
+  (Luhn-checked), IBANs (mod 97), IP addresses, JSON Web Tokens, API keys
+  (`sk-`, `ghp_`, `AKIA`, `xoxb-`... and other long random-looking
+  tokens) with ordinary redaction boxes (solid, or blur or pixelate when
+  that tool is selected), one undo step, to review, move or delete.
+  Nothing leaves the computer.
+- **Pin** (`Ctrl+P`, More menu) pins what Copy would copy and closes.
+- **Open an image**: drop an image file (or image) on the editor and it
+  replaces the picture; drop one on a thumbnail or the Recent captures
+  panel and it opens in a new editor.
+
+Copy text and Redact need Tesseract (`libtesseract.so.5` or `.so.4`
+and its language data); without it they say so and how to install it:
+`apt install tesseract-ocr` (Debian, Ubuntu; `tesseract-ocr-spa` and so
+on for more languages), `dnf install tesseract` (Fedora), `pacman -S
+tesseract tesseract-data-eng` (Arch). JPEG files are read by Shotlet's
+own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
+`libwebp`, both loaded only when present.
 
 ## Files
 
@@ -284,7 +344,12 @@ program refused, uninstall restoring GNOME's keys), `shell-owner`
 and 1, checked across the seam), `shell-tray` (the tray's Activate and
 menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
 and the portal when the extension cannot capture). The portal scenarios
-run without the extension. On Debian/Ubuntu:
+run without the extension. `tools` (`tools/e2e/tools.sh`) checks the
+editor's tools on a known picture: the colour picker's copies (read back
+with `wl-paste`), the ruler's snapped length, the spotlight's dimming and
+crop (and its undo) in the copies, `shotlet edit FILE`, `shotlet pin`
+from the clipboard, and a PNG file dragged from a GTK window onto the
+editor. On Debian/Ubuntu:
 `apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul python3-gi gir1.2-gtk-4.0`.
 `E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
 nightly and on demand (`.github/workflows/e2e.yml`), never on pull requests.
@@ -303,7 +368,9 @@ permission-check overrides), two outputs at mixed scales and rotated or
 flipped outputs; the portal path (`xdg-desktop-portal-wlr` with direct
 capture turned off by `SHOTLET_NO_DIRECT=1`, `xdg-desktop-portal-kde` when
 Shotlet is not installed and KWin refuses it) with restore tokens; and the
-text search with Tesseract (English and Spanish). Scenarios count the
+text search with Tesseract (English and Spanish), and the editor's text
+tools with it (`sway:ocr-tools`: `shotlet text`, Copy text, Redact
+sensitive data finding an e-mail address and a token). Scenarios count the
 consent prompts: zero on the direct path. Shotlet is installed in each
 container with `install.sh`. Each scenario runs in a throwaway
 container (Debian trixie, `--rm`, no network) with its own session bus,
