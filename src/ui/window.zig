@@ -199,13 +199,13 @@ pub const Window = struct {
                 synced = true;
             } else if (ev.object == self.registry and ev.opcode == wl.wl_registry.ev_global) {
                 var r = wl.ArgReader{ .data = ev.body };
-                const name = r.uint();
-                const iface = r.string();
-                const version = r.uint();
+                const name = try r.uint();
+                const iface = try r.string();
+                const version = try r.uint();
                 try self.handleGlobal(name, iface, version);
             } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
                 var r = wl.ArgReader{ .data = ev.body };
-                self.seat_caps = r.uint();
+                self.seat_caps = try r.uint();
             }
         }
         if (self.compositor == 0 or self.shm == 0 or self.wm_base == 0)
@@ -411,7 +411,7 @@ pub const Window = struct {
     pub fn nextEventTimeout(self: *Window, timeout_ms: i32) !?InputEvent {
         while (self.queue.items.len == 0) {
             try self.conn.flush();
-            if (self.conn.pollEvent()) |ev| {
+            if (try self.conn.pollEvent()) |ev| {
                 try self.handleEvent(ev);
                 continue;
             }
@@ -426,7 +426,7 @@ pub const Window = struct {
     /// Read and dispatch all events already buffered in the Wayland socket
     /// without blocking. Call before rendering to get the latest input state.
     pub fn drainPending(self: *Window) !void {
-        while (self.conn.pollEvent()) |ev| {
+        while (try self.conn.pollEvent()) |ev| {
             try self.handleEvent(ev);
         }
     }
@@ -443,27 +443,27 @@ pub const Window = struct {
         if (ev.object == wl.wl_display.id) {
             switch (ev.opcode) {
                 wl.wl_display.ev_error => {
-                    const obj = r.uint();
-                    const code = r.uint();
-                    const msg = r.string();
+                    const obj = try r.uint();
+                    const code = try r.uint();
+                    const msg = try r.string();
                     std.log.err("wayland protocol error on object {d} code {d}: {s}", .{ obj, code, msg });
                     return error.ProtocolError;
                 },
                 else => {}, // delete_id: ids are not recycled
             }
         } else if (ev.object == self.wm_base and ev.opcode == wl.xdg_wm_base.ev_ping) {
-            const serial = r.uint();
+            const serial = try r.uint();
             try c.request(self.wm_base, wl.xdg_wm_base.pong, &.{.{ .uint = serial }});
             try c.flush();
         } else if (ev.object == self.toplevel) {
             switch (ev.opcode) {
                 wl.xdg_toplevel.ev_configure => {
-                    const w_ = r.int();
-                    const h_ = r.int();
+                    const w_ = try r.int();
+                    const h_ = try r.int();
                     self.pending_w = @intCast(@max(0, w_));
                     self.pending_h = @intCast(@max(0, h_));
                     self.maximized = false;
-                    const states = r.array();
+                    const states = try r.array();
                     var si: usize = 0;
                     while (si + 4 <= states.len) : (si += 4) {
                         const st = std.mem.readInt(u32, states[si..][0..4], .little);
@@ -472,13 +472,13 @@ pub const Window = struct {
                 },
                 wl.xdg_toplevel.ev_close => try self.queue.append(self.alloc, .close),
                 2 => { // configure_bounds
-                    self.bounds_w = @intCast(@max(0, r.int()));
-                    self.bounds_h = @intCast(@max(0, r.int()));
+                    self.bounds_w = @intCast(@max(0, try r.int()));
+                    self.bounds_h = @intCast(@max(0, try r.int()));
                 },
                 else => {},
             }
         } else if (ev.object == self.xdg_surf and ev.opcode == wl.xdg_surface.ev_configure) {
-            const serial = r.uint();
+            const serial = try r.uint();
             try c.request(self.xdg_surf, wl.xdg_surface.ack_configure, &.{.{ .uint = serial }});
             var want_w = if (self.pending_w > 0) self.pending_w else if (self.logical_w > 0) self.logical_w else self.default_w;
             var want_h = if (self.pending_h > 0) self.pending_h else if (self.logical_h > 0) self.logical_h else self.default_h;
@@ -491,7 +491,7 @@ pub const Window = struct {
             self.configured = true;
             try c.flush();
         } else if (ev.object != 0 and ev.object == self.fs_obj and ev.opcode == wl.wp_fractional_scale_v1.ev_preferred_scale) {
-            const new_scale = r.uint();
+            const new_scale = try r.uint();
             if (new_scale != self.scale120 and new_scale > 0) {
                 self.scale120 = new_scale;
                 if (self.configured) {
@@ -505,7 +505,7 @@ pub const Window = struct {
         } else if (ev.object != 0 and ev.object == self.clipboard_source) {
             try self.handleClipboardSource(ev.opcode, &r);
         } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
-            self.seat_caps = r.uint();
+            self.seat_caps = try r.uint();
             try self.updateSeatDevices();
             try c.flush();
         } else if (ev.object != 0 and ev.object == self.pointer) {
@@ -547,18 +547,18 @@ pub const Window = struct {
     fn handlePointer(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
             wl.wl_pointer.ev_enter => {
-                self.enter_serial = r.uint();
-                _ = r.uint(); // surface
+                self.enter_serial = try r.uint();
+                _ = try r.uint(); // surface
                 const f = self.pointerScale();
-                self.ptr_x = r.fixed() * f;
-                self.ptr_y = r.fixed() * f;
+                self.ptr_x = (try r.fixed()) * f;
+                self.ptr_y = (try r.fixed()) * f;
                 try self.applyCursor();
             },
             wl.wl_pointer.ev_motion => {
-                _ = r.uint(); // time
+                _ = try r.uint(); // time
                 const f = self.pointerScale();
-                self.ptr_x = r.fixed() * f;
-                self.ptr_y = r.fixed() * f;
+                self.ptr_x = (try r.fixed()) * f;
+                self.ptr_y = (try r.fixed()) * f;
                 if (self.queue.items.len > 0 and
                     self.queue.items[self.queue.items.len - 1] == .pointer_motion)
                 {
@@ -569,10 +569,10 @@ pub const Window = struct {
                 }
             },
             wl.wl_pointer.ev_button => {
-                const serial = r.uint();
-                _ = r.uint(); // time
-                const button = r.uint();
-                const state = r.uint();
+                const serial = try r.uint();
+                _ = try r.uint(); // time
+                const button = try r.uint();
+                const state = try r.uint();
                 self.input_serial = serial;
                 try self.queue.append(self.alloc, .{ .pointer_button = .{
                     .button = button,
@@ -582,9 +582,9 @@ pub const Window = struct {
                 } });
             },
             wl.wl_pointer.ev_axis => {
-                _ = r.uint(); // time
-                const axis = r.uint();
-                const value = r.fixed();
+                _ = try r.uint(); // time
+                const axis = try r.uint();
+                const value = try r.fixed();
                 if (axis == 0) { // vertical
                     try self.queue.append(self.alloc, .{ .pointer_axis = .{ .value = value } });
                 }
@@ -604,10 +604,10 @@ pub const Window = struct {
                 if (self.conn.takeFd()) |fd| sys.close(fd);
             },
             wl.wl_keyboard.ev_key => {
-                const serial = r.uint();
-                _ = r.uint(); // time
-                const code = r.uint();
-                const state = r.uint();
+                const serial = try r.uint();
+                _ = try r.uint(); // time
+                const code = try r.uint();
+                const state = try r.uint();
                 self.input_serial = serial;
                 switch (code) {
                     KEY_LEFTCTRL, KEY_RIGHTCTRL => self.ctrl = state == 1,
@@ -628,14 +628,14 @@ pub const Window = struct {
                 try self.queue.append(self.alloc, .{ .key = key });
             },
             wl.wl_keyboard.ev_modifiers => {
-                _ = r.uint(); // serial
-                const depressed = r.uint();
+                _ = try r.uint(); // serial
+                const depressed = try r.uint();
                 // conventional xkb modifier bit positions
                 self.ctrl = (depressed & (1 << 2)) != 0;
                 self.shift = (depressed & (1 << 0)) != 0;
             },
             wl.wl_keyboard.ev_enter => {
-                self.input_serial = r.uint();
+                self.input_serial = try r.uint();
             },
             else => {},
         }
@@ -858,7 +858,7 @@ pub const Window = struct {
     fn handleClipboardSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
             wl.wl_data_source.ev_send => {
-                _ = r.string(); // mime
+                _ = try r.string(); // mime
                 if (self.conn.takeFd()) |fd| {
                     defer sys.close(fd);
                     const clipboard_data = if (self.clipboard_image) |image| image.waitPng() catch |err| {
