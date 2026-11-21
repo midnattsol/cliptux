@@ -22,7 +22,7 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMAGE=${CTR_IMAGE:-shotlet-e2e:trixie}
 
-scenarios_sway="capture multimon rotated portal quick pin history ocr modes ocr-tools"
+scenarios_sway="capture multimon rotated portal record quick pin history ocr modes ocr-tools"
 scenarios_labwc="capture multimon portal quick pin history"
 scenarios_kwin="capture multimon portal quick pin history modes"
 

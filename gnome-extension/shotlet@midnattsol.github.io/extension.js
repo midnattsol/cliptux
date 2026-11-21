@@ -50,6 +50,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {RECORDER_IFACE, Recorder} from './recorder.js';
 import {MODES, ModeShortcuts, countdown, modeArgs} from './modes.js';
 import {captureWindow, pickWindow} from './windowpick.js';
 import {ScrollSessions} from './scroll.js';
@@ -66,6 +67,7 @@ const IFACE = `<node>
     <method name="Capture">
       <arg type="b" name="started" direction="out"/>
     </method>
+    ${RECORDER_IFACE}
     <method name="CaptureMode">
       <arg type="s" name="mode" direction="in"/>
       <arg type="u" name="delay" direction="in"/>
@@ -151,9 +153,12 @@ export default class ShotletExtension extends Extension {
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
         this._nameId = Gio.bus_own_name_on_connection(Gio.DBus.session,
             BUS_NAME, Gio.BusNameOwnerFlags.NONE, null, null);
+        this._recorder = new Recorder(this);
     }
 
     disable() {
+        this._recorder.destroy();
+        this._recorder = null;
         this._scroll.destroy();
         this._scroll = null;
         this._modes.destroy();
@@ -386,7 +391,7 @@ export default class ShotletExtension extends Extension {
 
     // Take the screenshot (of every monitor, or of the window picked) and
     // start shotlet on it, after `delay` seconds.
-    async _capture(t0, fromBus, mode = 'area', delay = 0) {
+    async _capture(t0, fromBus, mode = 'area', delay = 0, extra = []) {
         if (this._busy)
             throw new CaptureError('Busy', 'a capture is under way');
         if (Main.sessionMode.isLocked)
@@ -435,7 +440,7 @@ export default class ShotletExtension extends Extension {
             await Promise.all(shots);
             const t1 = monotonicMs();
             Util.trySpawn([exe, '--from-shell', id, '--monitors', plan.monitors,
-                '--pieces', plan.piecesArg, '--t0', `${t0}`, ...modeArgs(mode)]);
+                '--pieces', plan.piecesArg, '--t0', `${t0}`, ...modeArgs(mode), ...extra]);
             console.log(`Shotlet: captured ${plan.pieces.length} areas in ${t1 - t0} ms, started shotlet`);
             files.length = 0;
         } finally {
@@ -550,22 +555,23 @@ export default class ShotletExtension extends Extension {
 
     _place(win) {
         const st = this._windows.get(win);
-        if (!st || st.role !== 'quick')
+        if (!st || (st.role !== 'quick' && st.role !== 'rec'))
             return;
         const r = win.get_frame_rect();
         if (r.width === 0 || r.height === 0)
             return;
         const monitors = global.display.get_n_monitors();
         const area = win.get_work_area_for_monitor(Math.min(st.monitor, monitors - 1));
-        const x = area.x + EDGE;
-        const y = area.y + area.height - r.height - EDGE;
+        // a recording's control: "shotlet:rec:X:Y", where Shotlet wants it
+        const [x, y] = st.role === 'rec' ? win.get_title().split(':').slice(2, 4).map(Number)
+            : [area.x + EDGE, area.y + area.height - r.height - EDGE];
         if (r.x !== x || r.y !== y)
             win.move_frame(true, x, y);
     }
 
     _onFocus(win) {
         const st = this._windows.get(win);
-        if (!st || st.role !== 'quick')
+        if (!st || (st.role !== 'quick' && st.role !== 'rec'))
             return;
         const now = GLib.get_monotonic_time() / 1000;
         if (st.handed_back || now - st.born > FOCUS_ON_MAP_MS)

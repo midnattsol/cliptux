@@ -180,7 +180,7 @@ run_scenario() {
         skip "KWin without a GPU render node composites with QPainter: no screenshots, no screencasts"
         return
     fi
-    if [ "$1" = portal ] && [ -z "${CTR_RENDER_NODE:-}" ]; then
+    if { [ "$1" = portal ] || [ "$1" = record ]; } && [ -z "${CTR_RENDER_NODE:-}" ]; then
         # xdg-desktop-portal-wlr needs dmabuf-capable screencopy (GLES2 on
         # a render node)
         skip "the portal's screencast needs a GPU render node (/dev/dri/renderD*)"
@@ -293,6 +293,29 @@ run_scenario() {
             n2=$(wc -l <"$HOME/chooser.log" 2>/dev/null || echo 0)
             check "  ... silently: the restore token skipped the chooser" eq "$n2" "$n1"
         fi
+        ;;
+    record)
+        # a GIF recording through xdg-desktop-portal-wlr (the image has no
+        # ffmpeg): one chooser, then none (restore token); the file checked
+        # byte by byte
+        rec_gif() {
+            run_shotlet "$1" record --region 100,100,320,200 --seconds 2 --no-countdown --no-control --gif
+            local x
+            for x in 150 200 250 300 350 300 250; do drv move 0 "$x" 180; drv sleep 200; done
+            wait_exit 30
+        }
+        rec_gif rec-first
+        n1=$(wc -l <"$HOME/chooser.log" 2>/dev/null || echo 0)
+        check "a recording goes through the portal" grep -q "recording: source ScreenCast portal" "$SHOT_LOG"
+        f=$(grep -o "recording: saved [^ ]*" "$SHOT_LOG" | cut -d' ' -f3)
+        check "  ... into a GIF" eq "$(head -c 6 "$f" 2>/dev/null)" GIF89a
+        check "  ... of the area's size" eq "$(od -An -tu2 -j6 -N4 "$f" | tr -s ' ')" " 320 200"
+        check "  ... with several pictures" test "$(grep -c $'\x21\xf9\x04' "$f" 2>/dev/null)" -ge 2
+        check "  ... after one output chooser" test "$n1" -ge 1
+        rec_gif rec-second
+        n2=$(wc -l <"$HOME/chooser.log" 2>/dev/null || echo 0)
+        check "a second recording asks nothing (restore token)" eq "$n2" "$n1"
+        check "  ... and records" grep -q "recording: saved" "$SHOT_LOG"
         ;;
     quick)
         quick_cfg

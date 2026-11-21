@@ -23,11 +23,11 @@ const settings_modes = @import("settings_modes.zig");
 const Canvas = render.Canvas;
 const Window = window.Window;
 const Theme = theme_mod.Theme;
-
-const View = enum { general, editor, shortcuts };
+const View = enum { general, editor, shortcuts, recording };
 
 pub const Hit = union(enum) {
     view: View,
+    rec: u8, // recui/settings_rec.zig
     toggle_notify,
     toggle_copy_on_save,
     /// forget the ScreenCast restore token so the next capture asks again
@@ -67,9 +67,6 @@ fn gnomeState(alloc: std.mem.Allocator, bus: ?*dbus.Connection) GnomeState {
 }
 
 const steps = @import("settings_steps.zig");
-const stepSeconds = steps.stepSeconds;
-const stepCount = steps.stepCount;
-const stepMb = steps.stepMb;
 
 fn headerHeight(win: *const Window) i32 {
     return @intFromFloat(@round(52.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0));
@@ -419,6 +416,7 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
             st.dirty = true;
             return false;
         },
+        .rec => |r| @import("recui/settings_rec.zig").activate(alloc, home, r),
         .toggle_notify => cfg.notify = !cfg.notify,
         .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
         .forget_monitors => {
@@ -452,10 +450,10 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
         },
         .reset_binds => cfg.binds = config.default_binds,
         .toggle_quick => cfg.quick_access = !cfg.quick_access,
-        .quick_minus, .quick_plus => cfg.quick_access_seconds = stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
+        .quick_minus, .quick_plus => cfg.quick_access_seconds = steps.stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
         .toggle_history => cfg.history = !cfg.history,
-        .hist_minus, .hist_plus => cfg.history_max = stepCount(cfg.history_max, hit == .hist_plus),
-        .hist_mb_minus, .hist_mb_plus => cfg.history_max_mb = stepMb(cfg.history_max_mb, hit == .hist_mb_plus),
+        .hist_minus, .hist_plus => cfg.history_max = steps.stepCount(cfg.history_max, hit == .hist_plus),
+        .hist_mb_minus, .hist_mb_plus => cfg.history_max_mb = steps.stepMb(cfg.history_max_mb, hit == .hist_mb_plus),
         .open_history => {
             keep.spawnSelf(st.env, &.{"history"});
             return false;
@@ -684,6 +682,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             }
             y = endCard(&card) + ui.sc(26);
         },
+        .recording => y = try @import("recui/settings_rec.zig").draw(&ui, alloc, cx, y, col_w),
         .shortcuts => {
             y = try settings_modes.drawShortcuts(&ui, cx, y, col_w, &st.modes);
             y = try groupTitle(&ui, cx, y, col_w, "Editor shortcuts", "Reset to defaults");
@@ -755,6 +754,7 @@ fn drawHeader(ui: *Ui, st: *const State) !void {
         .{ .general, "General", .gear },
         .{ .editor, "Editor", .pen },
         .{ .shortcuts, "Shortcuts", .keyboard },
+        .{ .recording, "Recording", .background },
     };
     const th_h = ui.sc(34);
     const gap = ui.sc(4);
@@ -859,7 +859,7 @@ pub fn rowTitle(ui: *Ui, r: Row, title: []const u8, subtitle: ?[]const u8) void 
     } else ui.label(x, r.y, r.h, 15, ui.th.text, .regular, title);
 }
 
-fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8, on: bool, hit: Hit) !void {
+pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8, on: bool, hit: Hit) !void {
     const r = rowBegin(ui, card, ui.sc(theme_mod.row_h));
     const th = ui.th;
     rowTitle(ui, r, title, subtitle);
@@ -972,7 +972,7 @@ fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i32) 
 }
 
 /// - value + on the right of row `r`.
-fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
+pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
     const th = ui.th;
     const bs = ui.sc(34);
     const val_w = @max(ui.sc(64), ui.width(15, .regular, value) + ui.sc(20));

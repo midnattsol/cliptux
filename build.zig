@@ -121,6 +121,7 @@ pub fn build(b: *std.Build) void {
 fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
     const dir = "gnome-extension/shotlet@midnattsol.github.io/";
     m.addAnonymousImport("gnome_ext_js", .{ .root_source_file = b.path(dir ++ "extension.js") });
+    m.addAnonymousImport("gnome_ext_recorder_js", .{ .root_source_file = b.path(dir ++ "recorder.js") });
     m.addAnonymousImport("gnome_ext_metadata", .{ .root_source_file = b.path(dir ++ "metadata.json") });
     // the capture modes' modules (imported by extension.js)
     for ([_][]const u8{ "modes", "windowpick", "scroll", "util" }) |name| {

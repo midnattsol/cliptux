@@ -22,6 +22,8 @@ const usage =
     \\                      goes to the clipboard
     \\  shotlet edit FILE   open a PNG, JPEG or WebP in the editor
     \\  shotlet history     recent captures (history clear: forget them)
+    \\  shotlet record      record an area or the screen (MP4 or GIF);
+    \\                      again (or --stop, --pause, --resume) stops it
     \\  shotlet pin [FILE]  pin an image (default: the clipboard's) to the screen
     \\  shotlet gnome-integration [status|install|uninstall]
     \\                      the GNOME Shell extension: prompt-free captures,
@@ -87,6 +89,7 @@ pub fn main(init: std.process.Init) !void {
         var t0: ?i64 = null;
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
+        var then_record = false;
         var req: @import("app/modes/mode.zig").Request = .{};
         var i: usize = if (shell_launch) 1 else 2;
         while (i + 1 < args.len) : (i += 2) {
@@ -101,6 +104,9 @@ pub fn main(init: std.process.Init) !void {
                 shell_monitors = args[i + 1];
             } else if (std.mem.eql(u8, args[i], "--pieces")) {
                 shell_pieces = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--then")) {
+                // the extension's record shortcut: the picker on this capture
+                if (std.mem.eql(u8, args[i + 1], "record")) then_record = true;
             } else if (std.mem.eql(u8, args[i], "--mode")) {
                 req.withModeArg(args[i + 1]);
             } else if (std.mem.eql(u8, args[i], "--pointer")) {
@@ -123,6 +129,7 @@ pub fn main(init: std.process.Init) !void {
             fs.pieces = shell_pieces;
             fs.t0_ms = t0;
         }
+        if (then_record and from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, from_shell.?);
         try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell, .req = req }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
@@ -148,6 +155,12 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("app/history_ui.zig").run(gpa, env, smoke);
+    } else if (std.mem.eql(u8, cmd, "quick-video") and args.len > 3) {
+        try @import("record/quickvid.zig").run(gpa, env, args[2], args[3]);
+    } else if (std.mem.eql(u8, cmd, "trim") and args.len > 3) {
+        try @import("ui/recui/trimui.zig").run(gpa, env, args[2], args[3], args[4..]);
+    } else if (std.mem.eql(u8, cmd, "record")) {
+        try @import("record/cli.zig").main(gpa, env, args[2..]);
     } else if (std.mem.eql(u8, cmd, "pin")) {
         if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
     } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
@@ -282,4 +295,5 @@ test {
     _ = @import("ui/motion.zig");
     _ = @import("ui/icons.zig");
     _ = @import("gfx/path.zig");
+    _ = @import("record/tests.zig");
 }

@@ -2199,7 +2199,7 @@ pub const Window = struct {
         self.clipboard_text = data;
     }
 
-    fn claimClipboardSource(self: *Window, mimes: []const []const u8) !void {
+    pub fn claimClipboardSource(self: *Window, mimes: []const []const u8) !void {
         if (self.ddm == 0 or self.data_device == 0) return error.NoDataDevice;
         const c = &self.conn;
         const source = c.newId();
@@ -2359,10 +2359,10 @@ pub const Window = struct {
     fn handleClipboardSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
             wl.wl_data_source.ev_send => {
-                _ = try r.string(); // mime
+                const mime = try r.string(); // video/*: the file in clipboard_png, the rest its uri in clipboard_text
                 if (self.conn.takeFd()) |fd| {
                     defer sys.close(fd);
-                    const clipboard_data = if (self.clipboard_text.len > 0) self.clipboard_text else if (self.clipboard_image) |image| image.waitPng() catch |err| {
+                    const clipboard_data = if (self.clipboard_text.len > 0 and !std.mem.startsWith(u8, mime, "video/") and !std.mem.startsWith(u8, mime, "image/gif")) self.clipboard_text else if (self.clipboard_image) |image| image.waitPng() catch |err| {
                         std.log.warn("clipboard encode failed: {t}", .{err});
                         return;
                     } else self.clipboard_png;

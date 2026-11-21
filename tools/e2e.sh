@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -1160,7 +1160,7 @@ if [ "${1:-}" = "--inner" ]; then
     tools) . "$ROOT/tools/e2e/tools.sh" ;; # the editor's extra tools
     modes-*) . "$ROOT/tools/e2e/modes.sh" ;; # the capture modes
     *)
-        skip "unknown scenario"
+        case $scenario in rec-*) . "$ROOT/tools/e2e/record.sh" ;; *) skip "unknown scenario" ;; esac
         ;;
     esac
     stop_shotlet
@@ -1239,7 +1239,7 @@ for s in $want; do
     sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
-    case $s in quick | annotate | history | shell* | modes-*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
+    case $s in quick | annotate | history | shell* | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
     HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |

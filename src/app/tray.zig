@@ -13,6 +13,7 @@ const props_iface = "org.freedesktop.DBus.Properties";
 
 pub const MenuAction = enum {
     capture,
+    record,
     history,
     settings,
     quit,
@@ -235,6 +236,7 @@ pub const Tray = struct {
         .{ .id = 8, .label = "Scrolling capture", .separator = false },
         .{ .id = 9, .label = "Timer…", .separator = false },
         .{ .id = 10, .label = "Capture text", .separator = false },
+        .{ .id = 20, .label = "Record screen / stop recording", .separator = false },
         .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
@@ -320,6 +322,7 @@ pub const Tray = struct {
                 return switch (id) {
                     1 => .capture,
                     10 => .capture_text,
+                    20 => .record,
                     5 => .history,
                     2 => .settings,
                     4 => .quit,

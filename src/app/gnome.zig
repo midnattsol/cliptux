@@ -131,7 +131,7 @@ pub fn writeBundled(home: []const u8) ![]const u8 {
     var p: [1100]u8 = undefined;
     try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/extension.js", .{dir}), ext_js);
     try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/metadata.json", .{dir}), ext_metadata);
-    for (ext_modules) |mod| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, mod[0] }), mod[1]);
+    for (ext_modules ++ @import("gnome_bundle.zig").modules) |mod| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, mod[0] }), mod[1]);
     const schemas = try std.fmt.bufPrint(&p, "{s}/schemas", .{dir});
     sys.mkdirAll(schemas, 0o755);
     var q: [1200]u8 = undefined;
