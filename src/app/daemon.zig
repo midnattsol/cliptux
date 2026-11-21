@@ -11,27 +11,12 @@ const env_mod = @import("env.zig");
 const gnome = @import("gnome.zig");
 const Env = env_mod.Env;
 
+const tray_mod = @import("tray.zig");
+const linux = std.os.linux;
+
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
-    const tray_mod = @import("tray.zig");
-    const linux = std.os.linux;
-
-    if (!foreground) {
-        // first fork: parent returns control to the shell immediately
-        if ((sys.fork() catch 0) != 0) sys.exitProcess(0);
-        sys.setsid(); // drop the controlling terminal
-        // second fork: can never reacquire a tty
-        if ((sys.fork() catch 0) != 0) sys.exitProcess(0);
-        sys.chdirRoot();
-        redirectStdio(env);
-    }
-
-    // auto-reap capture children
-    var sa: linux.Sigaction = .{
-        .handler = .{ .handler = linux.SIG.IGN },
-        .mask = linux.sigemptyset(),
-        .flags = 0,
-    };
-    _ = linux.sigaction(linux.SIG.CHLD, &sa, null);
+    if (!foreground) detach(env);
+    reapChildrenAutomatically();
 
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
@@ -55,6 +40,33 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
 
     std.log.info("shotlet daemon running", .{});
     var log = LogFile.init(env, foreground);
+    try serve(gpa, env, &conn, &tray, &log);
+}
+
+/// Double fork + setsid: the shell gets control back and the daemon can
+/// never reacquire a terminal.
+fn detach(env: Env) void {
+    // first fork: parent returns control to the shell immediately
+    if ((sys.fork() catch 0) != 0) sys.exitProcess(0);
+    sys.setsid(); // drop the controlling terminal
+    // second fork: can never reacquire a tty
+    if ((sys.fork() catch 0) != 0) sys.exitProcess(0);
+    sys.chdirRoot();
+    redirectStdio(env);
+}
+
+/// Capture children are reaped by the kernel (SIGCHLD ignored).
+fn reapChildrenAutomatically() void {
+    var sa: linux.Sigaction = .{
+        .handler = .{ .handler = linux.SIG.IGN },
+        .mask = linux.sigemptyset(),
+        .flags = 0,
+    };
+    _ = linux.sigaction(linux.SIG.CHLD, &sa, null);
+}
+
+/// The bus loop: tray calls until Quit or the session bus goes away.
+fn serve(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, tray: *tray_mod.Tray, log: *LogFile) !void {
     while (true) {
         // wake up now and then to keep the log bounded: children write to
         // it through the stderr they inherit
@@ -79,31 +91,35 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
             }
             break :blk .none;
         };
-        switch (action) {
-            // the GNOME integration captures inside the shell (no prompt)
-            // and starts the editor itself; else a capture child as usual
-            .capture => {
-                const how: gnome.CaptureRequest = if (gnome.isGnome() and gnome.extensionActive(&conn))
-                    gnome.requestCapture(gpa, &conn)
-                else
-                    .unavailable;
-                if (how == .unavailable) spawnChild(env, "shot");
-            },
-            // `shotlet record` stops the recording under way, if any
-            .record => spawnChild(env, "record"),
-            .history => spawnChild(env, "history"),
-            .settings => spawnChild(env, "settings"),
-            .quit => return,
-            .none => {},
-            else => if (action.modeCommand()) |cmd| spawnChild(env, cmd),
-        }
+        if (action == .quit) return;
+        perform(gpa, env, conn, action);
+    }
+}
+
+/// Starts what a tray menu item asked for.
+fn perform(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, action: tray_mod.MenuAction) void {
+    switch (action) {
+        // the GNOME integration captures inside the shell (no prompt)
+        // and starts the editor itself; else a capture child as usual
+        .capture => {
+            const how: gnome.CaptureRequest = if (gnome.isGnome() and gnome.extensionActive(conn))
+                gnome.requestCapture(gpa, conn)
+            else
+                .unavailable;
+            if (how == .unavailable) spawnChild(env, "shot");
+        },
+        // `shotlet record` stops the recording under way, if any
+        .record => spawnChild(env, "record"),
+        .history => spawnChild(env, "history"),
+        .settings => spawnChild(env, "settings"),
+        .quit, .none => {},
+        else => if (action.modeCommand()) |cmd| spawnChild(env, cmd),
     }
 }
 
 /// Fork+exec a shotlet subcommand child so the daemon stays responsive and
 /// a crash in the editor can't take down the tray.
 fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
-    const linux = std.os.linux;
     const pid = linux.fork();
     if (linux.errno(pid) != .SUCCESS) {
         std.log.err("fork failed", .{});
