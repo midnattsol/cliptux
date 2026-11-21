@@ -103,6 +103,8 @@ shotlet text                          # select a region: its text goes to the cl
 shotlet edit FILE                     # open an image in the editor
 shotlet gnome-integration install     # GNOME: no prompts; thumbnail and pins above
 shotlet gnome-integration shortcut '<Shift><Super>s'   # its capture key
+shotlet permissions                   # how captures go, what Shotlet may capture with
+shotlet permissions reset             # forget it: the next capture asks again (--dry-run)
 ```
 
 ```sh
@@ -221,7 +223,12 @@ other windows on every workspace, leaves them out of Alt+Tab, and hands the keyb
 back to the app you were in when the thumbnail appears. Install it with
 `shotlet gnome-integration install` (or the link on the thumbnail):
 GNOME Shell on Wayland only picks up a newly installed extension at your
-next login. `shotlet gnome-integration status` tells whether it is active.
+next login, so install adds it to `enabled-extensions` itself (and offers
+to turn user extensions on if GNOME has them off), and the rest of the
+setup (pointing it at Shotlet, the Print key) runs with your answers the
+first time Shotlet captures through it after that login.
+`shotlet gnome-integration status` tells not installed, installed but
+disabled, loads at the next login and active apart.
 
 ### Captures without prompts on GNOME
 
@@ -292,6 +299,27 @@ as any new window does), and a pin stays above other windows only if you
 choose "Always on Top" in its window menu (right-click the pin). The
 thumbnail never covers more than itself: around the cards it lets clicks
 through to the window below.
+
+### Permissions
+
+`shotlet permissions` says which way a capture goes now (the GNOME
+integration, the compositor directly on wlroots and KWin, or the portal)
+and went last time, whether a screen-cast restore token is stored (never
+the token itself), and Shotlet's entries in the portal permission store
+(its screen-cast grants, older versions' `shotlet` and `cliptux` ones
+counted apart, and its answer for the Screenshot portal):
+
+```
+capture now:   through the screen-sharing portal (asks once; the choice is remembered)
+last capture:  through the screen-sharing portal (its permission)
+restore token: stored (the next portal capture reuses the screens chosen)
+screen cast:   1 permission for io.github.midnattsol.Shotlet
+screenshot:    none
+```
+
+`shotlet permissions reset` (or Reset permissions in Settings › General)
+forgets the token and removes those entries, and only those: other apps'
+and unidentified ones stay. `--dry-run` lists what it would remove.
 
 On GNOME the tray needs the AppIndicator extension. Without the GNOME
 integration, the first capture shows
@@ -472,6 +500,8 @@ own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
 | Thumbnails with the history off, dragged files | `$XDG_CACHE_HOME/shotlet/` (`quick/`, `drag/`) |
 | Recordings | the `record_dir` setting, else your XDG Videos folder, else `~/Videos`; kept entries add `video` (path, length, size) and `strip.png` (the filmstrip) |
 | GNOME Shell extension | `~/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io` |
+| Capture path | `$XDG_STATE_HOME/shotlet/capture-path`: how the last capture went (`gnome`, `direct`, `portal`) |
+| Pending GNOME setup | `$XDG_STATE_HOME/shotlet/gnome-setup-pending`: install's answer, until the extension loads |
 
 The settings file is plain `key=value`. Shotlet only rewrites the keys it
 changes, so editing it by hand while Shotlet runs is safe.
@@ -513,7 +543,14 @@ thumbnail's Copy, `shotlet record` again stops), `rec-pick` (the picker,
 its bar and the floating control outside the area), `rec-gif` (size,
 length, frames, file size, pause), `rec-trim`, `rec-settings` and
 `rec-portal` (no extension: one consent, then the restore token); they
-need `ffmpeg`/`ffprobe` and skip without; `rec-bench` (not run by
+need `ffmpeg`/`ffprobe` and skip without; `perms` (a portal grant,
+`shotlet permissions` reporting it, `reset --dry-run` and `reset`
+removing only Shotlet's entries, the next capture asking again),
+`perms-shell` (a capture through the extension stores no permission and
+`permissions` says so) and `gnome-install` (a copy-install with the shell
+running: enabled-extensions, "loads at your next login", then the
+private gnome-shell restarted as a new login: active, and the first
+capture finishing the setup); `rec-bench` (not run by
 default) measures the encoder paths. `shell-mixed` (two monitors at scales 2
 and 1, checked across the seam), `shell-tray` (the tray's Activate and
 menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,

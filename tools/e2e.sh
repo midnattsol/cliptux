@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
 
 # ---------------------------------------------------------------- inner side
 # (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:
@@ -23,7 +23,7 @@ scenarios="capture cancel multimon mixed fractional integer keyboard clipboard s
 # the scenario's settings, before anything starts
 prepare_scenario() {
     case $scenario in
-    capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell*)
+    capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell* | perms* | gnome-install)
         # these check what happens without the floating thumbnail
         mkdir -p "$HOME/.config/shotlet"
         printf 'quick_access=false\n' >"$HOME/.config/shotlet/config"
@@ -124,7 +124,7 @@ session_env() {
     sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$1" = ime ] && ibus=hangul
-    case $1 in quick | annotate | history | shell* | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
+    case $1 in quick | annotate | history | shell* | perms-shell | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
 }
 
 # run_session SCENARIO: the scenario in a fresh session (its own HOME,
