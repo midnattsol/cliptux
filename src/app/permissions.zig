@@ -74,7 +74,8 @@ fn printReset(o: reset.Outcome, dry: bool) void {
     if (o.token) out("{s} the stored restore token.\n", .{verb});
     for (o.entries) |e| {
         if (e.pick.whole) {
-            out("{s} a {s} permission of {s}.\n", .{ verb, tableName(e.table), e.pick.apps[0] });
+            const app = e.pick.apps[0];
+            out("{s} a {s} permission of {s}{s}.\n", .{ verb, tableName(e.table), app, if (e.older()) " (an older version)" else "" });
         } else for (e.pick.apps) |a| out("{s} {s} from the {s} permission.\n", .{ verb, a, tableName(e.table) });
     }
     if (o.store_error) |err| out("Could not read the portal permission store ({t}).\n", .{err});
