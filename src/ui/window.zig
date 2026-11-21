@@ -499,6 +499,8 @@ pub const Window = struct {
     fs_manager: u32 = 0, // wp_fractional_scale_manager_v1
     xdg_output_manager: u32 = 0,
     ti_manager: u32 = 0, // zwp_text_input_manager_v3
+    rel_manager: u32 = 0, // zwp_relative_pointer_manager_v1
+    rel_pointer: u32 = 0, // zwp_relative_pointer_v1
     ddm_version: u32 = 0,
     layer_shell: u32 = 0, // zwlr_layer_shell_v1
     layer_shell_version: u32 = 0,
@@ -539,6 +541,12 @@ pub const Window = struct {
     kb_focus: bool = false,
     /// queue a pointer_motion to (-1, -1) when the pointer leaves
     report_leave: bool = false,
+    /// pointer movement (logical pixels) from zwp_relative_pointer_v1,
+    /// summed until the caller takes it (takeRelative); only collected
+    /// when set before open(). Independent of where our surfaces are,
+    /// unlike wl_pointer positions: for moving a layer surface by drag.
+    track_relative: bool = false,
+    rel_sum: [2]f64 = .{ 0, 0 },
 
     // drops onto our surfaces: types taken, best first (empty: none);
     // a completed drop lands in `dropped` (caller frees .data)
@@ -673,6 +681,8 @@ pub const Window = struct {
         } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
             self.xdg_output_manager = try self.conn.bind(self.registry, name, iface, @min(version, 3));
             for (&self.outputs) |*o| if (o.id != 0) try self.ensureXdgOutput(o);
+        } else if (eql(u8, iface, "zwp_relative_pointer_manager_v1")) {
+            self.rel_manager = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "zwp_text_input_manager_v3")) {
             self.ti_manager = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wl_output")) {
@@ -739,6 +749,15 @@ pub const Window = struct {
         /// ignored otherwise (an xdg toplevel as the rest describes)
         layer: ?Layer = null,
     };
+
+    /// Relative pointer motion since the last call (logical pixels); null
+    /// when the compositor has no zwp_relative_pointer_v1 (or
+    /// track_relative was not set before open()).
+    pub fn takeRelative(self: *Window) ?[2]f64 {
+        if (self.rel_pointer == 0) return null;
+        defer self.rel_sum = .{ 0, 0 };
+        return self.rel_sum;
+    }
 
     /// The compositor offers zwlr_layer_shell_v1 (KDE, wlroots; not GNOME).
     pub fn hasLayerShell(self: *const Window) bool {
@@ -1300,6 +1319,13 @@ pub const Window = struct {
             try c.flush();
         } else if (ev.object != 0 and ev.object == self.pointer) {
             try self.handlePointer(ev.opcode, &r);
+        } else if (ev.object != 0 and ev.object == self.rel_pointer and ev.opcode == 0) {
+            // relative_motion: utime_hi, utime_lo, dx, dy (accelerated:
+            // what the cursor moved), dx, dy unaccelerated
+            _ = try r.uint();
+            _ = try r.uint();
+            self.rel_sum[0] += try r.fixed();
+            self.rel_sum[1] += try r.fixed();
         } else if (ev.object != 0 and ev.object == self.keyboard) {
             try self.handleKeyboard(ev.opcode, &r);
         } else if (ev.object != 0 and ev.object == self.text_input) {
@@ -1480,7 +1506,16 @@ pub const Window = struct {
         if (has_pointer and self.pointer == 0) {
             self.pointer = c.newId();
             try c.request(self.seat, wl.wl_seat.get_pointer, &.{.{ .new_id = self.pointer }});
+            if (self.rel_manager != 0 and self.track_relative) {
+                self.rel_pointer = c.newId();
+                // zwp_relative_pointer_manager_v1.get_relative_pointer
+                try c.request(self.rel_manager, 1, &.{ .{ .new_id = self.rel_pointer }, .{ .object = self.pointer } });
+            }
         } else if (!has_pointer and self.pointer != 0) {
+            if (self.rel_pointer != 0) {
+                try c.request(self.rel_pointer, 0, &.{}); // destroy
+                self.rel_pointer = 0;
+            }
             if (self.seat_version >= 3) try c.request(self.pointer, wl.wl_pointer.release, &.{});
             self.pointer = 0;
         }
