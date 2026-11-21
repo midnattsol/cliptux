@@ -133,8 +133,8 @@ open_settings() {
 }
 # the quick-access, history and GNOME integration settings, from the
 # keyboard (SHOTLET_SETTINGS_FOCUS=n focuses the n-th control: 3 Reset
-# permissions, 4 thumbnail switch, 6 seconds +, 12 Clear history,
-# 14 Enable)
+# permissions (4 while a token is stored: 3 is Choose again), 4 thumbnail
+# switch, 6 seconds +, 12 Clear history, 14 Enable)
 scenario_settings() {
     drv_ready Meta-0
     cfgf=$HOME/.config/shotlet/config
@@ -158,12 +158,12 @@ settings_reset() {
     perm SetPermission screencast true e2e-ours "$APP_ID" "['yes']" >/dev/null
     perm SetPermission screencast true e2e-other org.example.Other "['yes']" >/dev/null
     perm SetPermission screencast true e2e-anon "" "['yes']" >/dev/null
-    open_settings 3 enter
+    open_settings 4 enter
     check "Reset permissions forgets the restore token" not_grep "screencast_restore_token=e2e" "$cfgf"
     check "  ... keeping the other settings" grep -q "^notify=true" "$cfgf"
     check "  ... removes Shotlet's screen-cast grant" eq "$(perm Lookup screencast e2e-ours)" ""
     check "  ... and leaves other apps' alone" eq "$(perm_apps screencast | tr '\n' ' ')" " org.example.Other "
-    check "  ... saying so" grep -q "permissions reset from Settings: Forgot the screens and 1 permission" "$OUT/settings-3.log"
+    check "  ... saying so" grep -q "permissions reset from Settings: Forgot the screens and 1 permission" "$OUT/settings-4.log"
 }
 
 scenario_annotate() {
