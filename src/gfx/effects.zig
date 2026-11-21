@@ -62,6 +62,14 @@ pub fn blur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, ra
     if (radius >= 3) addNoise(pixels, w, c, r);
 }
 
+/// Blur for looks (backdrops under translucent UI): like `blur`, without
+/// the anti-recovery noise.
+pub fn softBlur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
+    const c = clip(r, w, h) orelse return;
+    if (radius == 0) return;
+    try boxBlur(alloc, pixels, w, h, c, @min(radius, max_blur_radius));
+}
+
 fn boxBlur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, c: Rect, rad: usize) !void {
     const cw: usize = @intCast(c.w);
     const ch: usize = @intCast(c.h);
