@@ -100,12 +100,18 @@ pub const Picker = struct {
 pub const Backdrop = struct {
     rect: Rect = Rect.empty,
     hash: u64 = 0,
+    /// the material over the blurred backdrop, r.w x r.h
     px: []u32 = &.{},
+    /// scratch: what lies behind, composed each frame to see if it changed
+    src: []u32 = &.{},
     sh_key: [6]i32 = @splat(0),
     sh_mask: []u8 = &.{},
+    /// the pane's content generation when `src` was last composed
+    gen: u64 = 0,
 
     pub fn release(self: *Backdrop, alloc: std.mem.Allocator) void {
         alloc.free(self.px);
+        alloc.free(self.src);
         alloc.free(self.sh_mask);
         self.* = .{};
     }
@@ -917,14 +923,22 @@ fn backdrop(self: *Editor, slot: Slot, r: Rect) ?[]const u32 {
     const rad: i32 = @max(2, self.sc(theme.backdrop_blur));
     const scr = self.screenRect();
     const src = Rect.intersect(r.expand(rad * 2), scr) orelse return null;
+    // nothing behind changed since last time: no need to even look
+    if (bd.gen == self.pn().gen and bd.hash != 0 and Rect.eql(bd.rect, r) and bd.px.len == @as(usize, @intCast(r.w * r.h))) return bd.px;
+    bd.gen = self.pn().gen;
     const n: usize = @intCast(src.w * src.h);
-    const scratch = self.alloc.alloc(u32, n) catch return null;
-    defer self.alloc.free(scratch);
+    if (bd.src.len < n) {
+        self.alloc.free(bd.src);
+        bd.src = &.{};
+        bd.src = self.alloc.alloc(u32, n) catch return null;
+    }
+    const scratch = bd.src[0..n];
     self.composeRegionTo(scratch, @intCast(src.w), .{ .x = src.x, .y = src.y }, src);
     var hasher = std.hash.Wyhash.init(0x5107);
     hasher.update(std.mem.sliceAsBytes(scratch));
     hasher.update(std.mem.asBytes(&r));
     hasher.update(std.mem.asBytes(&src));
+    hasher.update(std.mem.asBytes(&self.theme.material));
     const hash = hasher.final();
     if (bd.hash == hash and bd.px.len == @as(usize, @intCast(r.w * r.h)) and Rect.eql(bd.rect, r)) return bd.px;
 
@@ -953,32 +967,43 @@ fn backdrop(self: *Editor, slot: Slot, r: Rect) ?[]const u32 {
         bd.px = &.{};
         bd.px = self.alloc.alloc(u32, need) catch return null;
     }
+    // saturate a little, like vibrancy, and tint with the material, at
+    // the small size; then scale up (bilinear, 8-bit fixed point)
+    for (small) |*p| {
+        const cr: i32 = @intCast((p.* >> 16) & 0xFF);
+        const cg: i32 = @intCast((p.* >> 8) & 0xFF);
+        const cb: i32 = @intCast(p.* & 0xFF);
+        const lum = @divTrunc(54 * cr + 183 * cg + 19 * cb, 256);
+        var out: u32 = 0xFF000000;
+        inline for (.{ cr, cg, cb }, 0..) |cc, k| {
+            const v = std.math.clamp(lum + @divTrunc((cc - lum) * 346, 256), 0, 255);
+            out |= @as(u32, @intCast(v)) << @intCast(16 - 8 * k);
+        }
+        p.* = Canvas.blendPixel(out, self.theme.material);
+    }
     const rw: usize = @intCast(r.w);
     for (0..@intCast(r.h)) |y| {
-        const fy = (ff(r.y + @as(i32, @intCast(y)) - src.y) + 0.5) / 2.0 - 0.5;
-        const y0: usize = @intFromFloat(std.math.clamp(@floor(fy), 0, ff(@intCast(sh - 1))));
+        // source position in 1/256ths of a small pixel
+        const fy = std.math.clamp(@as(i32, @intCast(y)) * 128 + (r.y - src.y) * 128 - 64, 0, @as(i32, @intCast(sh - 1)) * 256);
+        const y0: usize = @intCast(@divTrunc(fy, 256));
         const y1 = @min(sh - 1, y0 + 1);
-        const ty = std.math.clamp(fy - ff(@intCast(y0)), 0, 1);
+        const ty: u32 = @intCast(@mod(fy, 256));
+        const row0 = small[y0 * sw ..][0..sw];
+        const row1 = small[y1 * sw ..][0..sw];
         for (0..rw) |x| {
-            const fx = (ff(r.x + @as(i32, @intCast(x)) - src.x) + 0.5) / 2.0 - 0.5;
-            const x0: usize = @intFromFloat(std.math.clamp(@floor(fx), 0, ff(@intCast(sw - 1))));
+            const fx = std.math.clamp(@as(i32, @intCast(x)) * 128 + (r.x - src.x) * 128 - 64, 0, @as(i32, @intCast(sw - 1)) * 256);
+            const x0: usize = @intCast(@divTrunc(fx, 256));
             const x1 = @min(sw - 1, x0 + 1);
-            const tx = std.math.clamp(fx - ff(@intCast(x0)), 0, 1);
-            var ch: [3]f64 = undefined;
-            inline for (0..3) |c| {
-                const sh_: u5 = @intCast(16 - 8 * c);
-                const a = ff(@intCast((small[y0 * sw + x0] >> sh_) & 0xFF));
-                const b = ff(@intCast((small[y0 * sw + x1] >> sh_) & 0xFF));
-                const cc = ff(@intCast((small[y1 * sw + x0] >> sh_) & 0xFF));
-                const d = ff(@intCast((small[y1 * sw + x1] >> sh_) & 0xFF));
-                ch[c] = (a * (1 - tx) + b * tx) * (1 - ty) + (cc * (1 - tx) + d * tx) * ty;
-            }
-            // saturate a little, like vibrancy
-            const lum = 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+            const tx: u32 = @intCast(@mod(fx, 256));
+            const a = row0[x0];
+            const b = row0[x1];
+            const c = row1[x0];
+            const d = row1[x1];
             var out: u32 = 0xFF000000;
-            inline for (0..3) |c| {
-                const v = std.math.clamp(lum + (ch[c] - lum) * 1.35, 0, 255);
-                out |= @as(u32, @intFromFloat(@round(v))) << @intCast(16 - 8 * c);
+            inline for (.{ 16, 8, 0 }) |sh_| {
+                const top = ((a >> sh_) & 0xFF) * (256 - tx) + ((b >> sh_) & 0xFF) * tx;
+                const bot = ((c >> sh_) & 0xFF) * (256 - tx) + ((d >> sh_) & 0xFF) * tx;
+                out |= (((top * (256 - ty) + bot * ty) >> 16) & 0xFF) << sh_;
             }
             bd.px[y * rw + x] = out;
         }
@@ -1034,53 +1059,119 @@ fn drawShadow(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, 
             bd.sh_mask[yy * @as(usize, @intCast(fr.w)) + xx] = @intFromFloat(@round(std.math.clamp(a, 0, 1) * 255));
         };
     }
-    const ca = ff(@intCast(sh.color >> 24)) * alpha;
+    const ca: u32 = @intFromFloat(@round(ff(@intCast(sh.color >> 24)) * alpha));
     const rgb = sh.color & 0x00FFFFFF;
     const fw: usize = @intCast(fr.w);
+    const xa: usize = @intCast(@max(0, -fr.x));
+    const xb: usize = @intCast(std.math.clamp(canvas.w - fr.x, 0, fr.w));
+    const cw: usize = @intCast(canvas.w);
     for (0..@intCast(fr.h)) |yy| {
         const y = fr.y + @as(i32, @intCast(yy));
         if (y < 0 or y >= canvas.h) continue;
-        for (0..fw) |xx| {
-            const m = bd.sh_mask[yy * fw + xx];
+        const row = canvas.px[@as(usize, @intCast(y)) * cw ..];
+        const mrow = bd.sh_mask[yy * fw ..][0..fw];
+        if (rgb == 0) {
+            // black: darken by the coverage, two multiplies a pixel
+            for (xa..xb) |xx| {
+                const m: u32 = mrow[xx];
+                if (m == 0) continue;
+                const keep = 256 - ((ca * m + 127) >> 8);
+                const i: usize = @intCast(fr.x + @as(i32, @intCast(xx)));
+                const p = row[i];
+                row[i] = 0xFF000000 | (((p & 0xFF00FF) * keep >> 8) & 0xFF00FF) | (((p & 0x00FF00) * keep >> 8) & 0x00FF00);
+            }
+            continue;
+        }
+        for (xa..xb) |xx| {
+            const m: u32 = mrow[xx];
             if (m == 0) continue;
-            const a: u32 = @intFromFloat(@round(ca * ff(m) / 255.0));
+            const a = (ca * m + 127) / 255;
             if (a == 0) continue;
-            canvas.blend(fr.x + @as(i32, @intCast(xx)), y, rgb | (a << 24));
+            const i: usize = @intCast(fr.x + @as(i32, @intCast(xx)));
+            row[i] = Canvas.blendPixel(row[i], rgb | (a << 24));
         }
     }
 }
 
-/// The floating material: shadow, blurred backdrop clipped to the rounded
-/// rect, the translucent tint and a hairline edge.
-fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow, alpha: f64) void {
+/// The floating material: shadow, the tinted blurred backdrop clipped to
+/// the rounded rect, and a hairline edge.
+fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow) void {
     if (r.w <= 0 or r.h <= 0) return;
     const th = self.theme;
-    drawShadow(self, canvas, slot, r, radius, sh, alpha);
+    drawShadow(self, canvas, slot, r, radius, sh, 1);
     if (backdrop(self, slot, r)) |bdp| {
-        const x0 = ff(r.x);
-        const y0 = ff(r.y);
-        const x1 = x0 + ff(r.w);
-        const y1 = y0 + ff(r.h);
-        const rw: usize = @intCast(r.w);
-        for (0..@intCast(r.h)) |yy| {
-            const y = r.y + @as(i32, @intCast(yy));
-            if (y < 0 or y >= canvas.h) continue;
-            for (0..rw) |xx| {
-                const x = r.x + @as(i32, @intCast(xx));
-                if (x < 0 or x >= canvas.w) continue;
+        blitRoundRect(canvas, bdp, r, radius);
+    } else canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, radius, th.material);
+    // 0.5 px hairline: one pixel at half strength on a 1x screen
+    hairline(canvas, r, radius, theme.fade(th.hairline, @min(1.0, 0.5 * self.uf())));
+}
+
+/// Copy `src` (r.w x r.h) into `r` with rounded, anti-aliased corners.
+fn blitRoundRect(canvas: *Canvas, src: []const u32, r: Rect, radius: f64) void {
+    const c = Rect.intersect(r, .{ .x = 0, .y = 0, .w = canvas.w, .h = canvas.h }) orelse return;
+    const rw: usize = @intCast(r.w);
+    const cw: usize = @intCast(canvas.w);
+    const band: i32 = @intFromFloat(@ceil(radius));
+    const x0 = ff(r.x);
+    const y0 = ff(r.y);
+    const x1 = x0 + ff(r.w);
+    const y1 = y0 + ff(r.h);
+    var y = c.y;
+    while (y < c.bottom()) : (y += 1) {
+        const sy: usize = @intCast(y - r.y);
+        const srow = src[sy * rw ..][0..rw];
+        const drow = canvas.px[@as(usize, @intCast(y)) * cw ..][0..cw];
+        const corner_row = y < r.y + band or y >= r.bottom() - band;
+        // the straight middle: a plain copy
+        const ma = if (corner_row) @max(c.x, r.x + band) else c.x;
+        const mb = if (corner_row) @min(c.right(), r.right() - band) else c.right();
+        if (mb > ma) @memcpy(drow[@intCast(ma)..@intCast(mb)], srow[@intCast(ma - r.x)..@intCast(mb - r.x)]);
+        if (!corner_row) continue;
+        for ([2][2]i32{ .{ c.x, @min(ma, c.right()) }, .{ @max(mb, c.x), c.right() } }) |span| {
+            var x = span[0];
+            while (x < span[1]) : (x += 1) {
                 const d = roundCov(ff(x) + 0.5, ff(y) + 0.5, x0, y0, x1, y1, radius);
-                const cov = std.math.clamp(0.5 - d, 0, 1) * alpha;
+                const cov = std.math.clamp(0.5 - d, 0, 1);
                 if (cov <= 0) continue;
                 const a: u32 = @intFromFloat(@round(cov * 255));
-                canvas.blend(x, y, (bdp[yy * rw + xx] & 0x00FFFFFF) | (a << 24));
+                const p = srow[@intCast(x - r.x)];
+                drow[@intCast(x)] = Canvas.blendPixel(drow[@intCast(x)], (p & 0x00FFFFFF) | (a << 24));
             }
         }
     }
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, radius, theme.fade(th.material, alpha));
-    // 0.5 px hairline: one pixel at half strength on a 1x screen
-    const lw = @max(1.0, 0.5 * self.uf());
-    const k = 0.5 * self.uf() / lw;
-    shapes_mod.roundRectRing(canvas, r, radius, lw, theme.fade(th.hairline, k * alpha));
+}
+
+/// A one-pixel line just inside the rounded rect `r`.
+fn hairline(canvas: *Canvas, r: Rect, radius: f64, color: u32) void {
+    const rad: i32 = @intFromFloat(@ceil(radius));
+    canvas.fillRect(r.x + rad, r.y, r.w - 2 * rad, 1, color);
+    canvas.fillRect(r.x + rad, r.bottom() - 1, r.w - 2 * rad, 1, color);
+    canvas.fillRect(r.x, r.y + rad, 1, r.h - 2 * rad, color);
+    canvas.fillRect(r.right() - 1, r.y + rad, 1, r.h - 2 * rad, color);
+    // the corners: a ring of radius - 0.5 around each corner's centre
+    const corners = [4][4]f64{
+        .{ ff(r.x) + radius, ff(r.y) + radius, -1, -1 },
+        .{ ff(r.right()) - radius, ff(r.y) + radius, 1, -1 },
+        .{ ff(r.x) + radius, ff(r.bottom()) - radius, -1, 1 },
+        .{ ff(r.right()) - radius, ff(r.bottom()) - radius, 1, 1 },
+    };
+    const ca = ff(@intCast(color >> 24));
+    for (corners) |k| {
+        const bx: i32 = if (k[2] < 0) r.x else r.right() - rad;
+        const by: i32 = if (k[3] < 0) r.y else r.bottom() - rad;
+        var y = by;
+        while (y < by + rad) : (y += 1) {
+            var x = bx;
+            while (x < bx + rad) : (x += 1) {
+                const dx = ff(x) + 0.5 - k[0];
+                const dy = ff(y) + 0.5 - k[1];
+                const d = @sqrt(dx * dx + dy * dy);
+                const cov = std.math.clamp(1.0 - @abs(d - (radius - 0.5)), 0, 1);
+                if (cov <= 0) continue;
+                canvas.blend(x, y, (color & 0x00FFFFFF) | (@as(u32, @intFromFloat(@round(ca * cov))) << 24));
+            }
+        }
+    }
 }
 
 /// Opacity for whatever is drawn between snapshot and restore: keeps a
@@ -1206,12 +1297,12 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
     const snap = if (alpha < 1) Snapshot.take(self.alloc, canvas, foot) else null;
 
     if (!self.panel_rect.isEmpty()) {
-        drawMaterial(self, canvas, .panel, self.panel_rect, theme.bar_radius * f, th.bar_shadow, 1);
+        drawMaterial(self, canvas, .panel, self.panel_rect, theme.bar_radius * f, th.bar_shadow);
         const pad = self.sc(theme.bar_pad);
         const fs = theme.font_small * f;
         text_mod.draw(canvas, self.panel_rect.x + pad + self.sc(8), self.panel_rect.y + @divTrunc(self.panel_rect.h - text_mod.height(fs), 2), fs, th.muted, "Beautify");
     }
-    drawMaterial(self, canvas, .bar, tb, theme.bar_radius * f, th.bar_shadow, 1);
+    drawMaterial(self, canvas, .bar, tb, theme.bar_radius * f, th.bar_shadow);
     for (self.seps[0..self.n_seps]) |sp| canvas.fillRect(sp.x, sp.y, sp.w, sp.h, th.hairline);
 
     // the sliding accent fill of the active tool
@@ -1319,7 +1410,7 @@ fn drawPopover(self: *Editor, canvas: *Canvas) void {
     const sh = th.popover_shadow;
     const snap = if (p < 1) Snapshot.take(self.alloc, canvas, shadowFootprint(self, pr, sh)) else null;
     const radius = (if (self.popover == .more) theme.menu_radius else theme.popover_radius) * f;
-    drawMaterial(self, canvas, .popover, grown, radius, sh, 1);
+    drawMaterial(self, canvas, .popover, grown, radius, sh);
     switch (self.popover) {
         .none => {},
         .colors => drawColorsContent(self, canvas),
@@ -1640,7 +1731,7 @@ fn drawPicker(self: *Editor, canvas: *Canvas) void {
     const p = self.picker.rect;
     const f = self.uf();
     const th = self.theme;
-    drawMaterial(self, canvas, .picker, p, theme.popover_radius * f, th.popover_shadow, 1);
+    drawMaterial(self, canvas, .picker, p, theme.popover_radius * f, th.popover_shadow);
     const sv = svRect(self);
     var y: i32 = 0;
     while (y < sv.h) : (y += 1) {
@@ -1860,7 +1951,7 @@ fn drawHelp(self: *Editor, canvas: *Canvas) void {
     const r = helpRect(self);
     const f = self.uf();
     const th = self.theme;
-    drawMaterial(self, canvas, .help, r, theme.popover_radius * f, th.popover_shadow, 1);
+    drawMaterial(self, canvas, .help, r, theme.popover_radius * f, th.popover_shadow);
     const fs = theme.font_label * f;
     const lh = text_mod.height(fs) + self.sc(7);
     const pad = self.sc(24);
@@ -1918,7 +2009,7 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
         .copying, .copied => th.accent,
         .failed => th.destructive,
     };
-    drawMaterial(self, canvas, .notice, r, ff(r.h) / 2.0, th.bar_shadow, 1);
+    drawMaterial(self, canvas, .notice, r, ff(r.h) / 2.0, th.bar_shadow);
     const icon_size = self.sc(22);
     const cx = ff(r.x + self.sc(14) + @divTrunc(icon_size, 2));
     const cy = ff(r.y) + ff(r.h) / 2.0;

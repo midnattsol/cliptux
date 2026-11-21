@@ -184,6 +184,9 @@ pub const Pane = struct {
     due: bool = true,
     /// blurred backdrops and shadows of the floating chrome
     backdrops: [ui.n_slots]ui.Backdrop = @splat(.{}),
+    /// bumped whenever what composeRegion paints may have changed, so the
+    /// backdrops know when to look again
+    gen: u64 = 1,
 
     fn release(self: *Pane, alloc: std.mem.Allocator) void {
         alloc.free(self.viewc);
@@ -472,6 +475,7 @@ pub const Editor = struct {
         motion.enabled = prefs.animations and getenv("SHOTLET_EDITOR_SCRIPT") == null;
         for (self.panes[0..self.n_panes]) |*p| {
             for (&p.backdrops) |*b| b.hash = 0;
+            p.gen +%= 1;
         }
         self.needs_render = true;
     }
@@ -561,6 +565,7 @@ pub const Editor = struct {
             dimRow(self.pn().viewc[off..][0..@intCast(r.w)], self.pn().viewc_dim[off..][0..@intCast(r.w)], keep);
         }
         self.pn().content_dirty.add(r);
+        self.pn().gen +%= 1;
         if (self.selBuf()) |s| {
             if (Rect.intersect(s, r) != null) self.pn().bcache_valid = false;
         }
@@ -584,6 +589,7 @@ pub const Editor = struct {
             if (!p.alive) continue;
             if (whole) p.content_dirty.add(.{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) });
             p.bcache_valid = false;
+            p.gen +%= 1;
         }
         self.needs_render = true;
     }
@@ -630,6 +636,7 @@ pub const Editor = struct {
             self.pane_i = @intCast(i);
             if (self.selBuf()) |sb| p.content_dirty.add(self.frameRect(sb).expand(2));
             p.bcache_valid = false;
+            p.gen +%= 1;
         }
         self.needs_render = true;
     }
@@ -650,6 +657,7 @@ pub const Editor = struct {
         const fr = self.frameRect(s);
         const old = self.pn().bcache_rect;
         self.pn().bcache_valid = true;
+        self.pn().gen +%= 1;
         self.pn().bcache_rect = fr;
         const fw: u32 = @intCast(fr.w);
         const fh: u32 = @intCast(fr.h);
