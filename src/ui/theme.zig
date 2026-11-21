@@ -1,0 +1,361 @@
+//! The look of every Shotlet surface ("Glass": translucent material over a
+//! blurred backdrop, macOS-like metrics), in a light and a dark variant,
+//! following the system's colour scheme and accent colour.
+//!
+//! Stable API (the editor, the Settings window and the after-capture
+//! windows all use it):
+//!
+//!   Theme                 every colour (0xAARRGGBB) of one appearance;
+//!                         the metrics are the `pub const`s below, in
+//!                         logical pixels (multiply by the surface scale)
+//!   Theme.get(dark, accent)   build one; accent null = system blue
+//!   Prefs                 what the system asks for: dark, accent,
+//!                         animations (false = reduce motion)
+//!   Prefs.theme()         the Theme for those preferences
+//!   readPrefs(conn)       ask org.freedesktop.portal.Settings once
+//!                         (color-scheme, accent-color, enable-animations);
+//!                         never fails: missing values keep the defaults
+//!   watch(conn)           subscribe to SettingChanged
+//!   applySignal(&prefs, msg)  fold a SettingChanged into prefs; true when
+//!                         something the theme uses changed
+//!   withAlpha(c, a), mix(a, b, t)  colour helpers
+//!
+//! Colour-scheme values: 1 prefer dark, 2 prefer light, 0 no preference
+//! (treated as dark: a screenshot overlay sits on a dimmed screen).
+
+const std = @import("std");
+const dbus = @import("../platform/dbus.zig");
+const sys = @import("../platform/sys.zig");
+
+// --- metrics (logical px) ---
+
+/// floating toolbar: corner radius, inner padding, gap between controls
+pub const bar_radius: f64 = 14;
+pub const bar_pad: f64 = 6;
+pub const bar_gap: f64 = 4;
+/// square tool buttons and their corner radius
+pub const button: f64 = 34;
+pub const button_radius: f64 = 9;
+/// icon box inside a button, and the icons' stroke (in 24-unit icon space)
+pub const icon: f64 = 18;
+pub const icon_stroke: f64 = 1.75;
+/// separators between groups: 1 px wide, this tall, `sep_margin` each side
+pub const sep_h: f64 = 20;
+pub const sep_margin: f64 = 4;
+/// popovers and menus
+pub const popover_radius: f64 = 14;
+pub const popover_pad: f64 = 14;
+pub const menu_radius: f64 = 12;
+pub const menu_pad: f64 = 6;
+pub const menu_row: f64 = 30;
+/// boxed-list cards (Settings), rows and switches
+pub const card_radius: f64 = 12;
+pub const row_h: f64 = 56;
+pub const switch_w: f64 = 44;
+pub const switch_h: f64 = 26;
+/// backdrop blur under the material (CSS blur radius, roughly a sigma)
+pub const backdrop_blur: f64 = 24;
+/// keyboard focus ring: width and gap to the control
+pub const focus_w: f64 = 2;
+pub const focus_gap: f64 = 2;
+/// type sizes
+pub const font_label: f64 = 13;
+pub const font_small: f64 = 12;
+/// motion: durations of the ease-out transitions, ms
+pub const motion_fast: i64 = 120;
+pub const motion: i64 = 150;
+pub const motion_slow: i64 = 180;
+/// tooltips wait this long under a still pointer
+pub const tooltip_delay: i64 = 500;
+
+pub const default_accent: u32 = 0xFF0A84FF;
+
+pub const Shadow = struct {
+    color: u32,
+    /// CSS-style blur radius and vertical offset, logical px
+    blur: f64,
+    dy: f64,
+};
+
+pub const Theme = struct {
+    dark: bool,
+    accent: u32,
+    /// accent when hovered / pressed
+    accent_hover: u32,
+    /// text and icons on the accent
+    on_accent: u32 = 0xFFFFFFFF,
+
+    // --- floating material (toolbar, popovers, menus, tooltips) ---
+    fg: u32,
+    muted: u32,
+    /// the translucent material, drawn over the blurred backdrop
+    material: u32,
+    /// the material as an opaque colour (gap rings, segmented thumbs)
+    material_solid: u32,
+    /// 0.5 px border of the material, and separators
+    hairline: u32,
+    hover: u32,
+    pressed: u32,
+    /// slider tracks and segmented-control troughs
+    track: u32,
+    /// the selected segment of a segmented control
+    seg_on: u32,
+    bar_shadow: Shadow,
+    popover_shadow: Shadow,
+
+    // --- the capture overlay ---
+    /// over everything outside the selection
+    dim: u32 = 0x52000000,
+    sel_edge: u32 = 0xE6FFFFFF,
+    handle: u32 = 0xFFFFFFFF,
+    handle_shadow: u32 = 0x66000000,
+    /// the size label and other pills drawn on the screenshot
+    pill_bg: u32 = 0xB81C1C1E,
+    pill_fg: u32 = 0xFFF5F5F7,
+
+    // --- windows (Settings, history): GNOME-like boxed lists ---
+    window_bg: u32,
+    header_bg: u32,
+    card: u32,
+    line: u32,
+    chip: u32,
+    switch_off: u32,
+    text: u32,
+    text_muted: u32,
+    view_sel: u32,
+    /// panels of the after-capture windows, and their input fields
+    panel: u32,
+    field: u32,
+    destructive: u32,
+
+    pub fn get(dark: bool, accent_opt: ?u32) Theme {
+        const accent = (accent_opt orelse default_accent) | 0xFF000000;
+        const hover_accent = mix(accent, if (dark) 0xFFFFFFFF else 0xFF000000, 0.12);
+        if (dark) return .{
+            .dark = true,
+            .accent = accent,
+            .accent_hover = hover_accent,
+            .fg = 0xFFF5F5F7,
+            .muted = 0x99EBEBF5,
+            .material = 0xBD242426,
+            .material_solid = 0xFF2C2C2E,
+            .hairline = 0x1FFFFFFF,
+            .hover = 0x14FFFFFF,
+            .pressed = 0x24FFFFFF,
+            .track = 0x1FFFFFFF,
+            .seg_on = 0xFF636366,
+            .bar_shadow = .{ .color = 0x47000000, .blur = 40, .dy = 12 },
+            .popover_shadow = .{ .color = 0x52000000, .blur = 50, .dy = 18 },
+            .window_bg = 0xFF242424,
+            .header_bg = 0xFF2E2E32,
+            .card = 0xFF363636,
+            .line = 0x14FFFFFF,
+            .chip = 0x1AFFFFFF,
+            .switch_off = 0x2EFFFFFF,
+            .text = 0xFFFFFFFF,
+            .text_muted = 0x99FFFFFF,
+            .view_sel = 0x1AFFFFFF,
+            .panel = 0xCC242426,
+            .field = 0x14FFFFFF,
+            .destructive = 0xFFFF453A,
+        };
+        return .{
+            .dark = false,
+            .accent = accent,
+            .accent_hover = hover_accent,
+            .fg = 0xFF1D1D1F,
+            .muted = 0x9E3C3C43,
+            .material = 0xCCF6F6F8,
+            .material_solid = 0xFFF2F2F7,
+            .hairline = 0x1A000000,
+            .hover = 0x0D000000,
+            .pressed = 0x1A000000,
+            .track = 0x14000000,
+            .seg_on = 0xFFFFFFFF,
+            .bar_shadow = .{ .color = 0x38000000, .blur = 40, .dy = 12 },
+            .popover_shadow = .{ .color = 0x42000000, .blur = 50, .dy = 18 },
+            .window_bg = 0xFFFAFAFB,
+            .header_bg = 0xFFFFFFFF,
+            .card = 0xFFFFFFFF,
+            .line = 0x14000006,
+            .chip = 0x12000006,
+            .switch_off = 0x26000006,
+            .text = 0xCC000006,
+            .text_muted = 0x8C000006,
+            .view_sel = 0x12000006,
+            .panel = 0xDBFAFAFC,
+            .field = 0x0D000000,
+            .destructive = 0xFFFF3B30,
+        };
+    }
+};
+
+/// What the desktop asks for.
+pub const Prefs = struct {
+    dark: bool = true,
+    accent: ?u32 = null,
+    /// org.gnome.desktop.interface enable-animations; false = reduce motion
+    animations: bool = true,
+
+    pub fn theme(self: Prefs) Theme {
+        return Theme.get(self.dark, self.accent);
+    }
+};
+
+/// `c` with its alpha replaced by `a`.
+pub fn withAlpha(c: u32, a: u8) u32 {
+    return (c & 0x00FFFFFF) | (@as(u32, a) << 24);
+}
+
+/// `c` with its alpha multiplied by `k` (0..1).
+pub fn fade(c: u32, k: f64) u32 {
+    const a: f64 = @floatFromInt(c >> 24);
+    return withAlpha(c, @intFromFloat(@round(std.math.clamp(a * k, 0, 255))));
+}
+
+/// Channel-wise blend of two colours, alpha included.
+pub fn mix(a: u32, b: u32, t: f64) u32 {
+    const k = std.math.clamp(t, 0, 1);
+    var out: u32 = 0;
+    inline for (.{ 0, 8, 16, 24 }) |sh| {
+        const ca: f64 = @floatFromInt((a >> sh) & 0xFF);
+        const cb: f64 = @floatFromInt((b >> sh) & 0xFF);
+        out |= @as(u32, @intFromFloat(@round(ca + (cb - ca) * k))) << sh;
+    }
+    return out;
+}
+
+// --- org.freedesktop.portal.Settings ---
+
+const portal_dest = "org.freedesktop.portal.Desktop";
+const portal_path = "/org/freedesktop/portal/desktop";
+const settings_iface = "org.freedesktop.portal.Settings";
+
+const Key = enum { color_scheme, accent, animations };
+const keys = [_]struct { ns: []const u8, key: []const u8 }{
+    .{ .ns = "org.freedesktop.appearance", .key = "color-scheme" },
+    .{ .ns = "org.freedesktop.appearance", .key = "accent-color" },
+    .{ .ns = "org.gnome.desktop.interface", .key = "enable-animations" },
+};
+
+/// Read the appearance settings from the Settings portal, waiting at most
+/// `timeout_ms` for all of them. Values the portal does not know (or no
+/// portal at all) keep their defaults.
+pub fn readPrefs(conn: *dbus.Connection, timeout_ms: i64) Prefs {
+    var prefs: Prefs = .{};
+    var serials: [keys.len]?u32 = @splat(null);
+    for (keys, 0..) |k, i| {
+        var m = dbus.Marshal.init(conn.alloc);
+        defer m.deinit();
+        m.putString(k.ns) catch return prefs;
+        m.putString(k.key) catch return prefs;
+        serials[i] = conn.callMethod(portal_dest, portal_path, settings_iface, "ReadOne", "ss", m.buf.items) catch return prefs;
+    }
+    const deadline = sys.monoMs() + timeout_ms;
+    var left: usize = keys.len;
+    while (left > 0) {
+        var msg = (conn.readMessageDeadline(deadline) catch return prefs) orelse return prefs;
+        const which = for (serials, 0..) |s, i| {
+            if (s != null and msg.reply_serial != null and msg.reply_serial.? == s.?) break i;
+        } else null;
+        const i = which orelse {
+            // not ours: leave it for whoever waits for it
+            conn.pending.append(conn.alloc, msg) catch msg.deinit(conn.alloc);
+            continue;
+        };
+        defer msg.deinit(conn.alloc);
+        serials[i] = null;
+        left -= 1;
+        if (msg.type != .method_return) continue;
+        var r = msg.reader();
+        applyValue(&prefs, @fromBackingInt(@intCast(i)), &r) catch {};
+    }
+    return prefs;
+}
+
+/// Subscribe to the portal's SettingChanged signal.
+pub fn watch(conn: *dbus.Connection) !void {
+    try conn.addMatchOnce("type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'");
+}
+
+/// Fold a SettingChanged signal into `prefs`. True when it changed a value
+/// the theme uses.
+pub fn applySignal(prefs: *Prefs, msg: *const dbus.Message) bool {
+    if (!msg.isSignal(settings_iface, "SettingChanged")) return false;
+    var r = msg.reader();
+    const ns = r.readString() catch return false;
+    const key = r.readString() catch return false;
+    for (keys, 0..) |k, i| {
+        if (!std.mem.eql(u8, k.ns, ns) or !std.mem.eql(u8, k.key, key)) continue;
+        const before = prefs.*;
+        applyValue(prefs, @fromBackingInt(@intCast(i)), &r) catch return false;
+        return !std.meta.eql(before, prefs.*);
+    }
+    return false;
+}
+
+/// Read one setting's variant (unwrapping the nesting older portals add).
+fn applyValue(prefs: *Prefs, which: Key, r: *dbus.Reader) !void {
+    var sig = try r.readSignature();
+    var depth: usize = 0;
+    while (std.mem.eql(u8, sig, "v") and depth < 4) : (depth += 1) sig = try r.readSignature();
+    switch (which) {
+        .color_scheme => {
+            if (!std.mem.eql(u8, sig, "u")) return error.BadType;
+            prefs.dark = (try r.readU32()) != 2;
+        },
+        .accent => {
+            if (!std.mem.eql(u8, sig, "(ddd)")) return error.BadType;
+            r.pad(8);
+            var c: [3]f64 = undefined;
+            for (&c) |*v| v.* = @bitCast(try r.readU64());
+            // out of range means "no accent set"
+            for (c) |v| if (!(v >= 0 and v <= 1)) {
+                prefs.accent = null;
+                return;
+            };
+            var rgb: u32 = 0xFF000000;
+            for (c, 0..) |v, i| rgb |= @as(u32, @intFromFloat(@round(v * 255))) << @intCast(16 - 8 * i);
+            prefs.accent = rgb;
+        },
+        .animations => {
+            if (!std.mem.eql(u8, sig, "b")) return error.BadType;
+            prefs.animations = (try r.readU32()) != 0;
+        },
+    }
+}
+
+test "theme variants differ where they should" {
+    const d = Theme.get(true, null);
+    const l = Theme.get(false, 0xFF3584E4);
+    try std.testing.expect(d.dark and !l.dark);
+    try std.testing.expectEqual(default_accent, d.accent);
+    try std.testing.expectEqual(@as(u32, 0xFF3584E4), l.accent);
+    try std.testing.expect(d.fg != l.fg);
+    try std.testing.expectEqual(@as(u32, 0x80FF0000), withAlpha(0xFFFF0000, 0x80));
+    try std.testing.expectEqual(@as(u32, 0xFF808080), mix(0xFF000000, 0xFFFFFFFF, 0.5));
+}
+
+test "portal values fold into prefs" {
+    const alloc = std.testing.allocator;
+    // color-scheme as ReadOne returns it: v(u)
+    var m = dbus.Marshal.init(alloc);
+    defer m.deinit();
+    try m.putSignature("u");
+    try m.putU32(2);
+    var r: dbus.Reader = .{ .data = m.buf.items, .pos = 0 };
+    var p: Prefs = .{};
+    try applyValue(&p, .color_scheme, &r);
+    try std.testing.expect(!p.dark);
+
+    // accent-color, double-wrapped like Read: v(v((ddd)))
+    var m2 = dbus.Marshal.init(alloc);
+    defer m2.deinit();
+    try m2.putSignature("v");
+    try m2.putSignature("(ddd)");
+    try m2.pad(8);
+    for ([_]f64{ 1.0, 0.5, 0.0 }) |v| try m2.putU64(@bitCast(v));
+    r = .{ .data = m2.buf.items, .pos = 0 };
+    try applyValue(&p, .accent, &r);
+    try std.testing.expectEqual(@as(u32, 0xFFFF8000), p.accent.?);
+}
