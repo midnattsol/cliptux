@@ -259,7 +259,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
-fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
+pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
     const pw = @import("../platform/pw.zig");
 
     if (from.shell) |args| {

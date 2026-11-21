@@ -76,6 +76,7 @@ pub fn main(init: std.process.Init) !void {
         var t0: ?i64 = null;
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
+        var then_record = false;
         var i: usize = if (shell_launch) 1 else 2;
         while (i + 1 < args.len) : (i += 2) {
             if (std.mem.eql(u8, args[i], "--from")) {
@@ -89,6 +90,9 @@ pub fn main(init: std.process.Init) !void {
                 shell_monitors = args[i + 1];
             } else if (std.mem.eql(u8, args[i], "--pieces")) {
                 shell_pieces = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--then")) {
+                // the extension's record shortcut: the picker on this capture
+                if (std.mem.eql(u8, args[i + 1], "record")) then_record = true;
             } else if (std.mem.eql(u8, args[i], "--t0")) {
                 t0 = std.fmt.parseInt(i64, args[i + 1], 10) catch null;
             } else if (std.mem.eql(u8, args[i], "--smoke")) {
@@ -107,6 +111,7 @@ pub fn main(init: std.process.Init) !void {
             fs.pieces = shell_pieces;
             fs.t0_ms = t0;
         }
+        if (then_record and from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, from_shell.?);
         try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and

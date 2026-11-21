@@ -74,6 +74,15 @@ pub fn start(gpa: std.mem.Allocator, bus: *dbus.Connection, o: Options) !u32 {
     return try r.readU32();
 }
 
+/// Ask the extension to capture the desktop and start the picker on it
+/// (`shotlet --from-shell ... --then record`).
+pub fn select(gpa: std.mem.Allocator, bus: *dbus.Connection) !void {
+    const serial = try bus.callMethod(bus_name, path, iface, "RecordSelect", "", "");
+    var reply = try bus.waitReplyOrError(serial, 10_000);
+    defer reply.deinit(gpa);
+    if (reply.type == .@"error") return error.Refused;
+}
+
 pub fn stop(bus: *dbus.Connection) void {
     _ = bus.callMethod(bus_name, path, iface, "StopRecording", "", "") catch {};
 }

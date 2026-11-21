@@ -68,6 +68,9 @@ const IFACE = `<node>
       <arg type="u" name="node" direction="out"/>
     </method>
     <method name="StopRecording"/>
+    <method name="RecordSelect">
+      <arg type="b" name="started" direction="out"/>
+    </method>
     <signal name="RecordingStopRequested"/>
     <method name="Place">
       <arg type="s" name="title" direction="in"/>
@@ -220,6 +223,10 @@ export default class ShotletExtension extends Extension {
 
     StopRecordingAsync(params, invocation) {
         this._recorder.stopCall(params, invocation);
+    }
+
+    RecordSelectAsync(params, invocation) {
+        this._recorder.selectCall(params, invocation);
     }
 
     get Shortcuts() {
@@ -507,22 +514,23 @@ export default class ShotletExtension extends Extension {
 
     _place(win) {
         const st = this._windows.get(win);
-        if (!st || st.role !== 'quick')
+        if (!st || (st.role !== 'quick' && st.role !== 'rec'))
             return;
         const r = win.get_frame_rect();
         if (r.width === 0 || r.height === 0)
             return;
         const monitors = global.display.get_n_monitors();
         const area = win.get_work_area_for_monitor(Math.min(st.monitor, monitors - 1));
-        const x = area.x + EDGE;
-        const y = area.y + area.height - r.height - EDGE;
+        // a recording's control: "shotlet:rec:X:Y", where Shotlet wants it
+        const [x, y] = st.role === 'rec' ? win.get_title().split(':').slice(2, 4).map(Number)
+            : [area.x + EDGE, area.y + area.height - r.height - EDGE];
         if (r.x !== x || r.y !== y)
             win.move_frame(true, x, y);
     }
 
     _onFocus(win) {
         const st = this._windows.get(win);
-        if (!st || st.role !== 'quick')
+        if (!st || (st.role !== 'quick' && st.role !== 'rec'))
             return;
         const now = GLib.get_monotonic_time() / 1000;
         if (st.handed_back || now - st.born > FOCUS_ON_MAP_MS)

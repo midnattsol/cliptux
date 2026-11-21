@@ -117,6 +117,20 @@ export class Recorder {
         }
     }
 
+    // RecordSelect(): the picker in record mode, on a capture taken here
+    async selectCall(_params, invocation) {
+        try {
+            await this._ext._checkCaller(invocation.get_sender());
+            if (this._rec)
+                throw this._error('Busy', 'a recording is under way');
+            const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
+            await this._ext._capture(t0, true, ['--then', 'record']);
+            invocation.return_value(new GLib.Variant('(b)', [true]));
+        } catch (e) {
+            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
+        }
+    }
+
     async stopCall(_params, invocation) {
         try {
             await this._ext._checkCaller(invocation.get_sender());

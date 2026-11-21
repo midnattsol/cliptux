@@ -82,6 +82,34 @@ rec-shell)
     check "shotlet record again stops the recording" wait_exit 20
     check "  ... and keeps it" grep -q "recording: saved" "$SHOT_LOG"
     ;;
+rec-pick)
+    # the picker and the floating control, through the extension
+    drv_start Meta-0 || { fail "driver"; exit 1; }
+    drv key esc
+    plain_desktop
+    sleep 1
+    run_shotlet pick record
+    check "shotlet record asks the extension for the picker" wait_exit 10
+    check "  ... which comes up" shell_wait 10 "record: picker up" 1
+    sleep 1
+    slow_drag 0 300 200 500 350 700 500
+    sleep 0.5
+    shot 0 picker
+    check "  ... with the record bar under the area" eval 'drv find 0 ff453a 24 60 0 500 1600 900'
+    read -r bx by _ <<<"$VAL"
+    click 0 "$bx" "$by"
+    check "Record starts the countdown" shell_wait 10 "record: recording" 1
+    sleep 1
+    shot 0 recording
+    check "  ... the control sits below the area" eval 'drv find 0 ff453a 30 4 0 500 1600 900'
+    drv pixel "$OUT/recording.png" 500 350
+    check "  ... and not in it" near "$VAL" "$BG"
+    sleep 1
+    "$BIN" record --stop >"$OUT/stop.log" 2>&1
+    check "shotlet record --stop ends it" shell_wait 15 "recording: saved" 1
+    f=$(grep -o "recording: saved [^ ]*" "$HL_SHELL_LOG" | tail -1 | cut -d' ' -f3)
+    check "  ... at the picked size" eq "$(probe "$f" stream=width,height)" "400,300"
+    ;;
 rec-gif)
     drv_start Meta-0 || { fail "driver"; exit 1; }
     drv key esc

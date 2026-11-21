@@ -15,6 +15,7 @@ const session = @import("session.zig");
 const region = @import("region.zig");
 const ctlsock = @import("ctlsock.zig");
 const shellrec = @import("shellrec.zig");
+const gnome = @import("../app/gnome.zig");
 const control_mod = @import("../ui/recui/control.zig");
 const cli = @import("cli.zig");
 const Env = env_mod.Env;
@@ -43,6 +44,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
             return;
         }
     }
+    // on GNOME the top bar has the stop button: no control in the picture
+    if (ctl) |*c| if (c.covers_monitor and gnome.isGnome() and shellrec.available(gpa, &bus)) {
+        c.close();
+        ctl = null;
+    };
     var rec = switch (session.Recording.begin(gpa, env, &bus, &cfg, set, .{ .area = area, .out = a.out })) {
         .ok => |r| r,
         .cancelled => {

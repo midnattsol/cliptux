@@ -6,8 +6,9 @@
 //! discard.
 //!
 //! Placement as for the thumbnail: a layer-shell overlay surface where
-//! the compositor has one, else a window titled "shotlet:rec" that the
-//! GNOME Shell extension keeps above (and hands the keyboard back from).
+//! the compositor has one, else a window titled "shotlet:rec:X:Y" that the
+//! GNOME Shell extension puts at X, Y (logical) and keeps above, handing
+//! the keyboard back to the app that had it.
 //! On GNOME a recording of a whole monitor has no floating control: the
 //! top bar's stop button (the extension's) is not in the way.
 
@@ -28,20 +29,18 @@ const Env = env_mod.Env;
 
 pub const Outcome = enum { stop, discard };
 
-const title = "shotlet:rec";
-
 pub const Control = struct {
     gpa: std.mem.Allocator,
     win: window.Window,
     bus: *dbus.Connection,
     /// logical position on the desktop, and the monitor it is on
     pos: [2]i32,
+    covers_monitor: bool = false,
     layer: bool,
     hover: ?draw.Button = null,
     dirty: bool = true,
     state: draw.State = .{},
     last_draw_ms: i64 = 0,
-    placed: bool = false,
 
     pub fn open(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, area: region.Rect) !Control {
         text.init(gpa);
@@ -50,8 +49,12 @@ pub const Control = struct {
         errdefer c.win.deinit();
         const mon = monitorOf(&c.win, area);
         c.pos = place(area, mon);
+        c.covers_monitor = inside(area, mon);
         c.layer = c.win.hasLayerShell();
         const sz = draw.windowSize();
+        // on GNOME the extension reads where to put it from the title
+        var tbuf: [48]u8 = undefined;
+        const title = std.fmt.bufPrint(&tbuf, "shotlet:rec:{d}:{d}", .{ c.pos[0], c.pos[1] }) catch "shotlet:rec";
         if (c.layer) {
             try c.win.open(title, .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
                 .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
@@ -85,18 +88,6 @@ pub const Control = struct {
 
     fn scale(self: *const Control) f64 {
         return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
-    }
-
-    /// Move the window into place through the GNOME integration.
-    fn placeOnGnome(self: *Control) void {
-        if (self.layer or self.placed or !gnome.isGnome()) return;
-        self.placed = true;
-        var m = dbus.Marshal.init(self.gpa);
-        defer m.deinit();
-        m.putString(title) catch return;
-        m.putI32(self.pos[0]) catch return;
-        m.putI32(self.pos[1]) catch return;
-        _ = self.bus.callMethod("dev.shotlet.Shell1", "/dev/shotlet/Shell1", "dev.shotlet.Shell1", "Place", "sii", m.buf.items) catch {};
     }
 
     /// Count down `seconds`; false when cancelled (× or a stop or discard
@@ -164,7 +155,6 @@ pub const Control = struct {
     }
 
     fn render(self: *Control) !void {
-        self.placeOnGnome();
         const now = sys.monoMs();
         // the dot pulses: a frame every quarter second while recording
         if (self.state.mode == .recording and now - self.last_draw_ms >= 250) self.dirty = true;

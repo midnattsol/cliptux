@@ -18,6 +18,16 @@ const settings_mod = @import("settings.zig");
 const region = @import("region.zig");
 const ctlsock = @import("ctlsock.zig");
 const run_mod = @import("run.zig");
+const shellrec = @import("shellrec.zig");
+const picker = @import("../ui/recui/picker.zig");
+const capture = @import("../app/capture.zig");
+const config = @import("../app/config.zig");
+const gnome = @import("../app/gnome.zig");
+const shot = @import("../app/shot.zig");
+const shellcap = @import("../app/shellcap.zig");
+const dbus = @import("../platform/dbus.zig");
+const portal = @import("../platform/portal.zig");
+const text = @import("../gfx/text.zig");
 const Env = env_mod.Env;
 
 pub const Args = struct {
@@ -98,7 +108,66 @@ pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
         std.log.info("record: stopped the recording under way ({s})", .{r});
         return;
     }
-    try run_mod.run(gpa, env, a, set, null);
+    if (a.area != null or a.full) return run_mod.run(gpa, env, a, set, null);
+    try pickThenRun(gpa, env, a, set);
+}
+
+/// The picker on a capture of the desktop: taken by the GNOME Shell
+/// extension (which then starts `shotlet --from-shell ... --then record`),
+/// else as for screenshots (direct or the portal).
+fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: settings_mod.Settings) !void {
+    var bus = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    defer bus.deinit();
+    if (gnome.isGnome() and shellrec.available(gpa, &bus)) {
+        if (shellrec.select(gpa, &bus)) {
+            std.log.info("record: the picker is up through the GNOME integration", .{});
+            return;
+        } else |err| std.log.info("record: GNOME integration: {t}", .{err});
+    }
+    var cfg = config.load(gpa, env.home);
+    portal.registerApp(gpa, &bus);
+    var cap = (try shot.acquire(gpa, env, &bus, &cfg, .{})) orelse return;
+    defer cap.deinit(gpa);
+    try pickOn(gpa, env, a, set, &cap, false);
+}
+
+/// `shotlet --from-shell ID ... --then record`
+pub fn fromShell(gpa: std.mem.Allocator, env: Env, args: shellcap.Args) !void {
+    var cap = try shellcap.load(gpa, env.runtime_dir, args);
+    defer cap.deinit(gpa);
+    try pickOn(gpa, env, .{}, settings_mod.load(gpa, env.home), &cap, true);
+}
+
+fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings, cap: *const capture.Capture, overlays: bool) !void {
+    var set = set0;
+    text.init(gpa);
+    std.log.info("record: picker up", .{});
+    const res = picker.pick(gpa, env, cap, &set, overlays);
+    text.deinit();
+    const area = switch (try res) {
+        .area => |r| r,
+        .cancelled => {
+            std.log.info("record: cancelled in the picker", .{});
+            return;
+        },
+    };
+    saveChoices(gpa, env.home, &set0, &set);
+    std.log.info("record: picked {d},{d} {d}x{d}", .{ area.x, area.y, area.w, area.h });
+    try run_mod.run(gpa, env, a, set, area);
+}
+
+/// Remember the bar's choices for next time.
+fn saveChoices(gpa: std.mem.Allocator, home: []const u8, old: *const settings_mod.Settings, new: *const settings_mod.Settings) void {
+    const tf = struct {
+        fn f(v: bool) []const u8 {
+            return if (v) "true" else "false";
+        }
+    }.f;
+    if (old.format != new.format) settings_mod.save(gpa, home, "record_format", @tagName(new.format));
+    if (old.mic != new.mic) settings_mod.save(gpa, home, "record_mic", tf(new.mic));
+    if (old.system_audio != new.system_audio) settings_mod.save(gpa, home, "record_system_audio", tf(new.system_audio));
+    if (old.clicks != new.clicks) settings_mod.save(gpa, home, "record_clicks", tf(new.clicks));
+    if (old.keys != new.keys) settings_mod.save(gpa, home, "record_keys", tf(new.keys));
 }
 
 test "record options parse" {

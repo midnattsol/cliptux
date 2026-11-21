@@ -27,4 +27,8 @@ test {
     _ = @import("run.zig");
     _ = @import("../ui/recui/control.zig");
     _ = @import("../ui/recui/control_draw.zig");
+    _ = @import("../ui/recui/glyphs.zig");
+    _ = @import("../ui/recui/picker.zig");
+    _ = @import("../ui/recui/picker_bar.zig");
+    _ = @import("../ui/recui/picker_sel.zig");
 }
