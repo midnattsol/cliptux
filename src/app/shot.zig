@@ -1,5 +1,5 @@
 //! Capture-and-edit flow: portal/PipeWire acquisition (every monitor,
-//! stitched), the first-run permission dialog, and copy/save
+//! stitched), the first-run permission dialog, and copy/save/save-as
 //! handling around the editor.
 
 const std = @import("std");
@@ -94,8 +94,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             }
             win.closeWindow();
             ed.releaseCaches();
-            // TODO(platform): .save_as asks for a path with the FileChooser portal
-            const saved: ?[]u8 = try savePng(gpa, env, &cfg, data);
+            const saved: ?[]u8 = if (result.action == .save)
+                try savePng(gpa, env, &cfg, data)
+            else
+                try saveAs(gpa, env, &conn, &cfg, data);
             if (saved) |path| {
                 defer gpa.free(path);
                 var buf: [512]u8 = undefined;
@@ -378,6 +380,39 @@ pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ex
         return path;
     }
     return error.TooManyCollisions;
+}
+
+/// Ask where to save with the FileChooser portal. Null when the person
+/// cancelled (nothing is written). Falls back to the screenshots folder
+/// when there is no FileChooser portal.
+fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
+    var dir_buf: [1024]u8 = undefined;
+    const dir = try saveDir(gpa, env, cfg, &dir_buf);
+    sys.mkdirAll(dir, 0o755);
+    var name_buf: [64]u8 = undefined;
+    const base = try baseName(gpa, env, &name_buf);
+    var file_buf: [80]u8 = undefined;
+    const current_name = try std.fmt.bufPrint(&file_buf, "{s}.png", .{base});
+
+    const path = switch (try portal.saveFile(gpa, conn, .{ .current_name = current_name, .current_folder = dir })) {
+        .granted => |p| p,
+        .cancelled, .denied, .timeout => return null,
+        .unavailable => {
+            std.log.warn("no file chooser portal; saving to {s}", .{dir});
+            return try savePng(gpa, env, cfg, data);
+        },
+    };
+    errdefer gpa.free(path);
+    if (std.ascii.endsWithIgnoreCase(path, ".png")) {
+        // the chooser already confirmed replacing an existing file
+        try sys.writeFile(path, data);
+        return path;
+    }
+    // a name typed without extension: add one, but never replace a file
+    // the chooser did not ask about
+    defer gpa.free(path);
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.BadPath;
+    return try writeUnique(gpa, path[0..slash], path[slash + 1 ..], ".png", data);
 }
 
 test "saved names never overwrite" {
