@@ -9,6 +9,8 @@ const std = @import("std");
 const render = @import("../gfx/render.zig");
 const text_mod = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
+const bidi = @import("../gfx/bidi.zig");
+const utf8 = @import("../gfx/utf8.zig");
 
 const Canvas = render.Canvas;
 
@@ -218,17 +220,9 @@ pub const Shape = struct {
             .text => {
                 const fs = self.fontPx();
                 const lh = text_mod.height(fs);
-                var lines: i32 = 0;
-                var wmax: i32 = 0;
-                var it = std.mem.splitScalar(u8, self.str.items, '\n');
-                while (it.next()) |line| {
-                    lines += 1;
-                    wmax = @max(wmax, text_mod.width(fs, line));
-                }
+                const lines: i32 = @intCast(std.mem.count(u8, self.str.items, "\n") + 1);
                 const pad = if (self.pill) self.pillPad() else 0;
-                // leave room for the caret on empty text
-                wmax = @max(wmax, @as(i32, @intFromFloat(fs * 0.4)));
-                return (Rect{ .x = self.p0.x, .y = self.p0.y, .w = wmax, .h = lines * lh }).expand(pad);
+                return (Rect{ .x = self.p0.x, .y = self.p0.y, .w = textBoxWidth(fs, self.str.items), .h = lines * lh }).expand(pad);
             },
             else => return Rect.fromCorners(self.p0, self.p1),
         }
@@ -446,6 +440,38 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
     }
 }
 
+/// Width of a text box at font size `fs`: its widest line, with room for
+/// the caret when it is empty.
+pub fn textBoxWidth(fs: f64, str: []const u8) i32 {
+    var wmax: i32 = 0;
+    var it = std.mem.splitScalar(u8, str, '\n');
+    while (it.next()) |line| wmax = @max(wmax, text_mod.width(fs, line));
+    return @max(wmax, @as(i32, @intFromFloat(fs * 0.4)));
+}
+
+/// Where a line starts inside its text box: lines whose first strong
+/// character is right-to-left (Hebrew, Arabic...) align to the right edge,
+/// as in any editor.
+pub fn lineIndent(fs: f64, line: []const u8, box_w: i32) i32 {
+    var it = utf8.Iterator.init(line);
+    const rtl = while (it.next()) |cp| {
+        switch (bidi.class(cp)) {
+            .L => break false,
+            .R, .AL => break true,
+            else => {},
+        }
+    } else false;
+    if (!rtl) return 0;
+    return @max(0, box_w - text_mod.width(fs, line));
+}
+
+test "right-to-left lines align to the right of the box" {
+    try std.testing.expectEqual(@as(i32, 0), lineIndent(20, "hello", 500));
+    try std.testing.expectEqual(@as(i32, 0), lineIndent(20, "123 hello", 500));
+    try std.testing.expect(lineIndent(20, "\u{5E9}\u{5DC}\u{5D5}\u{5DD}", 500) > 0);
+    try std.testing.expect(lineIndent(20, "123 \u{645}\u{631}\u{62D}\u{628}\u{627}", 500) > 0);
+}
+
 /// Caret (byte offset) and selected byte range of a text being edited.
 pub const TextCursor = struct {
     caret: usize,
@@ -462,18 +488,25 @@ fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) vo
         const r = xf.rect(s.frame());
         canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, fs * 0.35, s.color);
     }
-    const x0: i32 = @intFromFloat(@round(xf.fx(s.p0.x)));
+    const box_x: i32 = @intFromFloat(@round(xf.fx(s.p0.x)));
+    const box_w = textBoxWidth(fs, s.str.items);
     var y: i32 = @intFromFloat(@round(xf.fy(s.p0.y)));
     var start: usize = 0;
     var it = std.mem.splitScalar(u8, s.str.items, '\n');
     while (it.next()) |line| {
+        const x0 = box_x + lineIndent(fs, line, box_w);
         if (cursor) |cur| if (cur.sel) |sel| {
             // the part of the selection on this line (+ a sliver for its newline)
             const a = @max(sel[0], start);
             const b = @min(sel[1], start + line.len + 1);
             if (a < b) {
-                const sx = x0 + text_mod.width(fs, line[0 .. a - start]);
-                const ex = x0 + text_mod.width(fs, line[0 .. @min(b, start + line.len) - start]) +
+                // positions in visual order, so right-to-left text highlights
+                // under the right glyphs (a mixed-direction range is shown
+                // as one span from its leftmost to its rightmost edge)
+                const xa = text_mod.xForOffset(fs, .regular, line, a - start);
+                const xb = text_mod.xForOffset(fs, .regular, line, @min(b, start + line.len) - start);
+                const sx = x0 + @min(xa, xb);
+                const ex = x0 + @max(xa, xb) +
                     (if (b > start + line.len) @as(i32, @intFromFloat(@round(fs * 0.25))) else 0);
                 canvas.fillRect(sx, y, ex - sx, lh, selection_color);
             }
@@ -482,7 +515,7 @@ fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) vo
         if (cursor) |cur| {
             const c = cur.caret;
             if (c >= start and c <= start + line.len) {
-                const cx = x0 + text_mod.width(fs, line[0 .. c - start]);
+                const cx = x0 + text_mod.xForOffset(fs, .regular, line, c - start);
                 const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));
                 canvas.fillRect(cx, y, cw, lh, fg);
             }

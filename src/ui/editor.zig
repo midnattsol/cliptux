@@ -1865,7 +1865,9 @@ pub const Editor = struct {
         var line: i32 = 0;
         for (str[0..ls]) |c| line += @intFromBool(c == '\n');
         const lh = text_mod.height(fs);
-        const p = Point{ .x = s.p0.x + text_mod.width(fs, str[ls..t.te.caret]), .y = s.p0.y + line * lh };
+        const line_str = str[ls..textedit.lineEnd(str, t.te.caret)];
+        const indent = shapes_mod.lineIndent(fs, line_str, shapes_mod.textBoxWidth(fs, str));
+        const p = Point{ .x = s.p0.x + indent + text_mod.xForOffset(fs, .regular, line_str, t.te.caret - ls), .y = s.p0.y + line * lh };
         const b = self.pn().view.toBuf(p);
         return .{ .x = b.x, .y = b.y, .w = @max(1, self.sc(2)), .h = @max(1, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(lh)) * self.pn().view.scale)))) };
     }
@@ -2199,21 +2201,10 @@ pub fn caretAt(s: *const Shape, p: Point) usize {
         if (it.peek() == null) break;
         start += l.len + 1;
     }
-    const target = p.x - s.p0.x;
-    var best: usize = 0;
-    var j: usize = 0;
-    while (true) {
-        const wj = text_mod.width(fs, line[0..j]);
-        if (wj > target) {
-            const wp = text_mod.width(fs, line[0..best]);
-            if (target - wp > wj - target) best = j;
-            break;
-        }
-        best = j;
-        if (j >= line.len) break;
-        j = textedit.nextBoundary(line, j);
-    }
-    return start + best;
+    // bidi-aware: on right-to-left text the nearest offset is found in
+    // visual order
+    const indent = shapes_mod.lineIndent(fs, line, shapes_mod.textBoxWidth(fs, str));
+    return start + @min(line.len, text_mod.offsetForX(fs, .regular, line, p.x - s.p0.x - indent));
 }
 
 test "caret lands on the nearest character" {
