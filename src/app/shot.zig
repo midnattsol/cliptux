@@ -94,39 +94,48 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     ed.show_hint = !cfg.hint_shown;
     ed.presetSelection(preset_sel);
     defer ed.deinit();
-    const result = try ed.run();
-    rememberEditorPrefs(gpa, env, &cfg, &ed);
-    defer if (result.png_data) |d| gpa.free(d);
+    while (true) {
+        const result = try ed.run();
+        rememberEditorPrefs(gpa, env, &cfg, &ed);
+        defer if (result.png_data) |d| gpa.free(d);
 
-    switch (result.action) {
-        .cancel, .copied => {
-            win.closeWindow();
-            ed.releaseCaches(); // serving may outlive the session; drop ~140MB
-            if (win.hasClipboard()) try win.serveClipboard();
-        },
-        .save, .save_as => {
-            const data = result.png_data.?;
-            if (cfg.copy_on_save) {
-                const copy = try gpa.dupe(u8, data);
-                win.setClipboardPng(copy) catch |err| {
-                    gpa.free(copy);
-                    std.log.warn("copy-on-save failed: {t}", .{err});
+        switch (result.action) {
+            .cancel, .copied => {
+                win.closeWindow();
+                ed.releaseCaches(); // serving may outlive the session; drop ~140MB
+                if (win.hasClipboard()) try win.serveClipboard();
+            },
+            .save, .save_as => {
+                const data = result.png_data.?;
+                if (cfg.copy_on_save) {
+                    const copy = try gpa.dupe(u8, data);
+                    win.setClipboardPng(copy) catch |err| {
+                        gpa.free(copy);
+                        std.log.warn("copy-on-save failed: {t}", .{err});
+                    };
+                }
+                win.closeWindow();
+                ed.releaseCaches();
+                const saved: ?[]u8 = if (result.action == .save)
+                    try savePng(gpa, env, &cfg, data)
+                else
+                    try saveAs(gpa, env, &conn, &cfg, data);
+                const path = saved orelse {
+                    // the file chooser was cancelled: back to the editor,
+                    // annotations intact, rather than losing the work
+                    if (per_monitor) try win.openOutputs("Shotlet") else try win.open("Shotlet", .{ .fullscreen = true });
+                    ed.running = true;
+                    ed.action = .cancel;
+                    continue;
                 };
-            }
-            win.closeWindow();
-            ed.releaseCaches();
-            const saved: ?[]u8 = if (result.action == .save)
-                try savePng(gpa, env, &cfg, data)
-            else
-                try saveAs(gpa, env, &conn, &cfg, data);
-            if (saved) |path| {
                 defer gpa.free(path);
                 var buf: [512]u8 = undefined;
                 const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
                 if (cfg.notify) portal.notify(gpa, &conn, "Shotlet", msg);
-            }
-            if (win.hasClipboard()) try win.serveClipboard();
-        },
+                if (win.hasClipboard()) try win.serveClipboard();
+            },
+        }
+        return;
     }
 }
 
