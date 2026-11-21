@@ -40,7 +40,7 @@ pub const Action = enum {
     }
 };
 
-pub const n_actions = @typeInfo(Action).@"enum".fields.len;
+pub const n_actions = @typeInfo(Action).@"enum".field_names.len;
 
 pub const Bind = struct {
     code: u32 = 0, // evdev key code; 0 = unbound
@@ -206,8 +206,8 @@ pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
             cfg.sc_token_len = n;
         } else if (std.mem.startsWith(u8, key, "bind_")) {
             const name = key["bind_".len..];
-            inline for (@typeInfo(Action).@"enum".fields, 0..) |fld, i| {
-                if (std.mem.eql(u8, name, fld.name)) {
+            inline for (@typeInfo(Action).@"enum".field_names, 0..) |fld_name, i| {
+                if (std.mem.eql(u8, name, fld_name)) {
                     cfg.binds[i] = parseBind(value);
                 }
             }
@@ -260,10 +260,10 @@ pub fn save(alloc: std.mem.Allocator, home: []const u8, cfg: *const Config) !voi
     });
     defer alloc.free(head);
     try content_list.appendSlice(alloc, head);
-    inline for (@typeInfo(Action).@"enum".fields, 0..) |fld, i| {
+    inline for (@typeInfo(Action).@"enum".field_names, 0..) |fld_name, i| {
         const b = cfg.binds[i];
         const line = try std.fmt.allocPrint(alloc, "bind_{s}={s}{s}{d}\n", .{
-            fld.name,
+            fld_name,
             if (b.ctrl) "ctrl+" else "",
             if (b.shift) "shift+" else "",
             b.code,
@@ -309,7 +309,7 @@ test "config save/load roundtrip" {
     cfg.copy_on_save = true;
     cfg.default_thickness = 9;
     cfg.default_color = 5;
-    cfg.binds[@intFromEnum(Action.pen)] = .{ .code = 33, .ctrl = true };
+    cfg.binds[@backingInt(Action.pen)] = .{ .code = 33, .ctrl = true };
     cfg.setScToken("tok-123");
     try save(alloc, home, &cfg);
 
@@ -318,7 +318,7 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(true, loaded.copy_on_save);
     try std.testing.expectEqual(@as(i32, 9), loaded.default_thickness);
     try std.testing.expectEqual(@as(u3, 5), loaded.default_color);
-    try std.testing.expect(loaded.binds[@intFromEnum(Action.pen)].matches(33, true, false));
+    try std.testing.expect(loaded.binds[@backingInt(Action.pen)].matches(33, true, false));
     try std.testing.expectEqualStrings("tok-123", loaded.scToken().?);
 }
 

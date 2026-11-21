@@ -24,13 +24,13 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Run tests
         run: zig build test
 
       - name: Build ${{ matrix.arch }}
-        run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
+        run: zig build -Doptimize=safe -Dtarget=${{ matrix.target }}
 
       - name: Package
         run: |

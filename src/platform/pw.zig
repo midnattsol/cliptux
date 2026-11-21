@@ -148,11 +148,12 @@ pub fn available() bool {
 
 fn loadApi(l: *std.DynLib) ?Api {
     var out: Api = undefined;
-    inline for (@typeInfo(Api).@"struct".fields) |fld| {
-        const sym_name = "pw_" ++ fld.name;
+    const info = @typeInfo(Api).@"struct";
+    inline for (info.field_names, info.field_types) |fld_name, fld_type| {
+        const sym_name = "pw_" ++ fld_name;
         // DynLib.lookup requires a null-terminated name
-        const ptr = l.lookup(fld.type, sym_name) orelse return null;
-        @field(out, fld.name) = ptr;
+        const ptr = l.lookup(fld_type, sym_name) orelse return null;
+        @field(out, fld_name) = ptr;
     }
     return out;
 }
@@ -197,11 +198,11 @@ fn buildFormatPod(buf: []u8) []const u8 {
     putU32(buf, &pos, 0);
     putU32(buf, &pos, 4); // child size
     putU32(buf, &pos, SPA_TYPE_Id);
-    putU32(buf, &pos, @intFromEnum(VideoFormat.BGRA)); // default
-    putU32(buf, &pos, @intFromEnum(VideoFormat.BGRA));
-    putU32(buf, &pos, @intFromEnum(VideoFormat.BGRx));
-    putU32(buf, &pos, @intFromEnum(VideoFormat.RGBA));
-    putU32(buf, &pos, @intFromEnum(VideoFormat.RGBx));
+    putU32(buf, &pos, @backingInt(VideoFormat.BGRA)); // default
+    putU32(buf, &pos, @backingInt(VideoFormat.BGRA));
+    putU32(buf, &pos, @backingInt(VideoFormat.BGRx));
+    putU32(buf, &pos, @backingInt(VideoFormat.RGBA));
+    putU32(buf, &pos, @backingInt(VideoFormat.RGBx));
     putU32(buf, &pos, 0); // pad to 8
 
     // size: range 1x1 .. 16384x16384
@@ -442,7 +443,7 @@ pub fn grabPre(pre: *Pre, node_id: u32, timeout_sec: u32) !Frame {
 
 fn finishFrame(ctx: *Ctx) !Frame {
     const pixels = ctx.pixels.?;
-    switch (@as(VideoFormat, @enumFromInt(ctx.format))) {
+    switch (@as(VideoFormat, @fromBackingInt(@intCast(ctx.format)))) {
         .BGRA, .BGRx => for (pixels) |*p| {
             p.* |= 0xFF000000;
         },

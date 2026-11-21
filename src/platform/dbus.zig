@@ -516,7 +516,7 @@ pub const Connection = struct {
         var m = Marshal.init(self.alloc);
         defer m.deinit();
         try m.putByte('l'); // little-endian
-        try m.putByte(@intFromEnum(mtype));
+        try m.putByte(@backingInt(mtype));
         try m.putByte(if (mtype == .method_call) 0 else 1); // NO_REPLY_EXPECTED on non-calls
         try m.putByte(1); // protocol version
         try m.putU32(@intCast(body.len));
@@ -530,21 +530,21 @@ pub const Connection = struct {
         if (fields.destination) |v| try putHeaderField(&m, .destination, 's', v);
         if (reply_serial) |rs| {
             try m.beginStruct();
-            try m.putByte(@intFromEnum(FieldCode.reply_serial));
+            try m.putByte(@backingInt(FieldCode.reply_serial));
             try m.putSignature("u");
             try m.putU32(rs);
         }
         if (fields.signature) |v| {
             if (v.len > 0) {
                 try m.beginStruct();
-                try m.putByte(@intFromEnum(FieldCode.signature));
+                try m.putByte(@backingInt(FieldCode.signature));
                 try m.putSignature("g");
                 try m.putSignature(v);
             }
         }
         if (fds.len > 0) {
             try m.beginStruct();
-            try m.putByte(@intFromEnum(FieldCode.unix_fds));
+            try m.putByte(@backingInt(FieldCode.unix_fds));
             try m.putSignature("u");
             try m.putU32(@intCast(fds.len));
         }
@@ -569,7 +569,7 @@ pub const Connection = struct {
 
     fn putHeaderField(m: *Marshal, code: FieldCode, type_char: u8, value: []const u8) !void {
         try m.beginStruct();
-        try m.putByte(@intFromEnum(code));
+        try m.putByte(@backingInt(code));
         try m.putSignature(&.{type_char});
         try m.putString(value);
     }
@@ -623,15 +623,15 @@ pub const Connection = struct {
             const code = try r.readByte();
             const sig = try r.readSignature();
             switch (code) {
-                @intFromEnum(FieldCode.path) => msg.path = try r.readString(),
-                @intFromEnum(FieldCode.interface) => msg.interface = try r.readString(),
-                @intFromEnum(FieldCode.member) => msg.member = try r.readString(),
-                @intFromEnum(FieldCode.error_name) => msg.error_name = try r.readString(),
-                @intFromEnum(FieldCode.reply_serial) => msg.reply_serial = try r.readU32(),
-                @intFromEnum(FieldCode.destination) => msg.destination = try r.readString(),
-                @intFromEnum(FieldCode.sender) => msg.sender = try r.readString(),
-                @intFromEnum(FieldCode.signature) => msg.signature = try r.readSignature(),
-                @intFromEnum(FieldCode.unix_fds) => {
+                @backingInt(FieldCode.path) => msg.path = try r.readString(),
+                @backingInt(FieldCode.interface) => msg.interface = try r.readString(),
+                @backingInt(FieldCode.member) => msg.member = try r.readString(),
+                @backingInt(FieldCode.error_name) => msg.error_name = try r.readString(),
+                @backingInt(FieldCode.reply_serial) => msg.reply_serial = try r.readU32(),
+                @backingInt(FieldCode.destination) => msg.destination = try r.readString(),
+                @backingInt(FieldCode.sender) => msg.sender = try r.readString(),
+                @backingInt(FieldCode.signature) => msg.signature = try r.readSignature(),
+                @backingInt(FieldCode.unix_fds) => {
                     const count = try r.readU32();
                     if (count > msg.fds.len) return error.TooManyFds;
                     // fds attached to this message have been collected by the

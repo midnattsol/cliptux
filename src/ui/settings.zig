@@ -105,11 +105,11 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
                     const new_bind = config.Bind{ .code = k.code, .ctrl = k.ctrl, .shift = k.shift };
                     // clear any other action using the same combo
                     for (&cfg.binds, 0..) |*b, i| {
-                        if (i != @intFromEnum(action) and b.matches(k.code, k.ctrl, k.shift)) {
+                        if (i != @backingInt(action) and b.matches(k.code, k.ctrl, k.shift)) {
                             b.* = .{};
                         }
                     }
-                    cfg.binds[@intFromEnum(action)] = new_bind;
+                    cfg.binds[@backingInt(action)] = new_bind;
                     recording = null;
                     config.save(alloc, home, &cfg) catch |err|
                         std.log.warn("could not save config: {t}", .{err});
@@ -293,9 +293,8 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         card(&ui, margin, y, w - margin * 2, card_h, "Editor shortcuts  -  click one to change it");
         var ry = y + ui.sc(16) + ui.sc(26);
 
-        inline for (@typeInfo(config.Action).@"enum".fields, 0..) |fld, i| {
-            const action: config.Action = @enumFromInt(i);
-            _ = fld;
+        inline for (0..config.n_actions) |i| {
+            const action: config.Action = @fromBackingInt(@intCast(i));
             const hovered = mx >= margin and mx < w - margin and my >= ry and my < ry + row_h;
             const is_recording = recording == action;
             if (hovered and !is_recording)

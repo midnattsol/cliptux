@@ -150,7 +150,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
     var prev_kind: ?ButtonKind = null;
     for (self.buttons.items) |b| {
         if (prev_kind) |pk| {
-            const group_changed = @intFromEnum(pk) != @intFromEnum(b.kind) and
+            const group_changed = @backingInt(pk) != @backingInt(b.kind) and
                 (pk == .color or (std.meta.activeTag(pk) == .tool and std.meta.activeTag(b.kind) == .color));
             if (group_changed) {
                 const sx = @divTrunc(prevRight(pk, self.buttons.items) + b.rect.x, 2);

@@ -614,7 +614,7 @@ pub const Window = struct {
                 .{ .uint = wl.wl_shm.format_argb8888 },
             });
             const pixels = @as([*]u32, @ptrCast(@alignCast(self.cursor_pool_mem.ptr)))[i * cursor_size * cursor_size ..][0 .. cursor_size * cursor_size];
-            drawCursor(@as(Cursor, @enumFromInt(i)), pixels);
+            drawCursor(@as(Cursor, @fromBackingInt(@intCast(i))), pixels);
         }
         try c.request(pool, wl.wl_shm_pool.destroy, &.{});
 
@@ -705,7 +705,7 @@ pub const Window = struct {
     fn applyCursor(self: *Window) !void {
         if (self.pointer == 0 or self.cursor_surface == 0) return;
         const c = &self.conn;
-        const idx: usize = @intFromEnum(self.current_cursor);
+        const idx: usize = @backingInt(self.current_cursor);
         try c.request(self.cursor_surface, wl.wl_surface.attach, &.{ .{ .object = self.cursor_buffers[idx] }, .{ .int = 0 }, .{ .int = 0 } });
         try c.request(self.cursor_surface, wl.wl_surface.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = cursor_size }, .{ .int = cursor_size } });
         try c.request(self.cursor_surface, wl.wl_surface.commit, &.{});

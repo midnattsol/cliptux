@@ -542,7 +542,7 @@ pub const Editor = struct {
         // configurable bindings first
         for (self.binds, 0..) |b, i| {
             if (!b.matches(code, ctrl, shift)) continue;
-            switch (@as(config.Action, @enumFromInt(i))) {
+            switch (@as(config.Action, @fromBackingInt(@intCast(i)))) {
                 .select => self.tool = .select,
                 .pen => self.tool = .pen,
                 .line => self.tool = .line,

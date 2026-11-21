@@ -21,11 +21,11 @@ with the standard portals should work.
 
 ## Install
 
-Requires Zig 0.16 to build. At runtime: a Wayland session with
+Requires Zig 0.17 to build. At runtime: a Wayland session with
 xdg-desktop-portal (PipeWire recommended for fast capture).
 
 ```sh
-zig build -Doptimize=ReleaseSafe
+zig build -Doptimize=safe
 install -Dm755 zig-out/bin/shotlet ~/.local/bin/shotlet
 install -Dm644 shotlet.desktop ~/.local/share/applications/shotlet.desktop
 install -Dm644 shotlet.svg ~/.local/share/icons/hicolor/scalable/apps/shotlet.svg

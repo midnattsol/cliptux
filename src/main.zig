@@ -14,7 +14,7 @@ const usage =
     \\
 ;
 
-const is_debug = @import("builtin").mode == .Debug;
+const is_debug = @import("builtin").mode == .debug;
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
