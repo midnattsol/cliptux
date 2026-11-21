@@ -130,6 +130,7 @@ const KEY_X = 45;
 const KEY_INSERT = 110;
 const KEY_D = 32;
 const KEY_Y = 21;
+const KEY_W = 17;
 const KEY_SLASH = 53;
 const KEY_F1 = 59;
 const KEY_KPMINUS = 74;
@@ -896,22 +897,37 @@ pub const Editor = struct {
         }
     }
 
+    /// Switch the text with a width handle between fitting its text and a
+    /// fixed width (its current one), with undo.
+    pub fn toggleTextWidth(self: *Editor) !void {
+        const i = self.textHandleShape() orelse return;
+        const s = &self.doc.shapes.items[i];
+        if (s.box_w != 0) return self.setTextAutoWidth(i);
+        if (self.text == null) try self.doc.checkpoint();
+        s.box_w = s.frame().w - 2 * s.textPad();
+        self.needs_render = true;
+    }
+
+    /// Back to fitting the text; right-to-left text keeps its right edge.
+    fn setTextAutoWidth(self: *Editor, i: usize) !void {
+        const s = &self.doc.shapes.items[i];
+        if (s.box_w == 0) return;
+        const editing = self.text != null;
+        if (!editing) try self.doc.checkpoint();
+        const before = s.bounds();
+        const rtl = s.textRtl();
+        const right = s.p0.x + s.frame().w - 2 * s.textPad();
+        s.box_w = 0;
+        if (rtl) s.p0.x = right - (s.frame().w - 2 * s.textPad());
+        self.needs_render = true;
+        if (!editing) try self.recompose(Rect.unite(before, s.bounds()));
+    }
+
     fn pressTextHandle(self: *Editor, i: usize, double: bool) !void {
         const s = &self.doc.shapes.items[i];
         const editing = self.text != null;
         self.needs_render = true;
-        if (double) {
-            if (s.box_w == 0) return;
-            if (!editing) try self.doc.checkpoint();
-            const before = s.bounds();
-            const rtl = s.textRtl();
-            const right = s.p0.x + s.frame().w - 2 * s.textPad();
-            s.box_w = 0;
-            // right-to-left text keeps its right edge
-            if (rtl) s.p0.x = right - (s.frame().w - 2 * s.textPad());
-            if (!editing) try self.recompose(Rect.unite(before, s.bounds()));
-            return;
-        }
+        if (double) return self.setTextAutoWidth(i);
         if (!editing) {
             try self.doc.checkpoint();
             try self.lift(i);
@@ -1531,6 +1547,8 @@ pub const Editor = struct {
         if (txt.len == 0) return;
         t.upstream = false;
         t.goal_x = null;
+        // typing ends a double-click chain (the next press is a new click)
+        self.last_click_ms = 0;
         try t.te.insert(self.alloc, &self.doc.shapes.items[t.idx].str, txt);
     }
 
@@ -1554,6 +1572,7 @@ pub const Editor = struct {
                 if (self.picker.open) ui.pickerFrom(self, self.custom_color);
             },
             .style => try self.cycleStyle(),
+            .text_width => try self.toggleTextWidth(),
             .thickness => try self.setThickness(if (self.thickness >= 16) 1 else self.thickness + 1),
             .beautify => {
                 self.beautify.enabled = !self.beautify.enabled;
@@ -1659,6 +1678,11 @@ pub const Editor = struct {
         }
         if (self.text != null and ((k.ctrl and k.code == KEY_V) or (k.shift and k.code == KEY_INSERT))) {
             try self.pasteText();
+            return;
+        }
+        // Alt+W: a text's width between fitting the text and fixed
+        if (k.alt and !k.ctrl and k.code == KEY_W and self.textHandleShape() != null) {
+            try self.toggleTextWidth();
             return;
         }
         if (self.text != null) {

@@ -172,9 +172,18 @@ var state: ?State = null;
 /// Find and load the system UI font once at startup. Safe to call
 /// repeatedly. Bold, monospace and fallback faces load on first use.
 pub fn init(alloc: std.mem.Allocator) void {
+    initWith(alloc, null);
+}
+
+/// init, with `font_path` (when given and loadable) as the regular face
+/// instead of the system UI font; for development tools and tests.
+pub fn initWith(alloc: std.mem.Allocator, font_path: ?[]const u8) void {
     if (state != null) return;
     var st: State = .{ .alloc = alloc, .db = fontdb.Db.init(alloc) };
-    st.regular = st.loadQuery(.sans);
+    if (font_path) |fp| if (alloc.dupe(u8, fp)) |path| {
+        st.regular = st.add(.{ .path = path }) orelse no_font;
+    } else |_| {};
+    if (st.regular == no_font) st.regular = st.loadQuery(.sans);
     if (st.regular == no_font) {
         // any face at all beats the bitmap font
         var k: usize = 0;
@@ -204,7 +213,7 @@ pub fn available() bool {
 
 /// Zero-width codepoints that should neither draw nor advance.
 fn invisible(cp: u21) bool {
-    return cp < 0x20 or cp == 0x7F or (cp >= 0x200B and cp <= 0x200F) or
+    return cp < 0x20 or cp == 0x7F or (cp >= 0x200B and cp <= 0x200F) or bidi.isExplicit(cp) or
         (cp >= 0xFE00 and cp <= 0xFE0F) or cp == 0xFEFF or cp == 0x2060;
 }
 
@@ -273,6 +282,14 @@ const Scratch = struct {
     glevels: std.ArrayList(u8) = .empty,
     /// total advance of the last laid-out line
     width: f64 = 0,
+    /// the paragraph shaped in cps..lg (null: none)
+    key: ?ParaKey = null,
+    para: u1 = 0,
+    has_rtl: bool = false,
+    /// the current line's glyphs, levels, and global -> line glyph index
+    line: std.ArrayList(LGlyph) = .empty,
+    line_levels: std.ArrayList(u8) = .empty,
+    remap: std.ArrayList(i32) = .empty,
 
     fn deinit(self: *Scratch, alloc: std.mem.Allocator) void {
         self.cps.deinit(alloc);
@@ -288,6 +305,9 @@ const Scratch = struct {
         self.run.deinit(alloc);
         self.lg.deinit(alloc);
         self.glevels.deinit(alloc);
+        self.line.deinit(alloc);
+        self.line_levels.deinit(alloc);
+        self.remap.deinit(alloc);
     }
 };
 
@@ -312,17 +332,134 @@ fn advanceUnits(f: *const ttf.Font, gid: u16) i32 {
     return if (a < 1e6) @intFromFloat(a) else 0;
 }
 
-/// Lay out one line: decode (lossily), resolve bidi levels, shape runs of
-/// complex scripts with the font's GSUB/GPOS (or Arabic presentation forms
-/// when the font has none), reorder to visual order, mirror brackets in
-/// RTL runs, and position every glyph. `dir` sets the paragraph direction
-/// (.auto: from the first strong character). The result lives in the
-/// state's scratch until the next call. Null when memory runs out.
+/// Lay out a line: the whole of `s`, or bytes [a, b) of it when `s` is a
+/// paragraph wrapped into several lines. The paragraph is decoded
+/// (lossily), its bidi levels resolved and its runs shaped as a whole
+/// (complex scripts with the font's GSUB/GPOS, or Arabic presentation
+/// forms when the font has none), so letters at a line break keep the
+/// forms they have in the unbroken word; then the line's glyphs are
+/// reordered to visual order (L1-L2) and positioned. `dir` sets the
+/// paragraph direction (.auto: from its first strong character). Item
+/// byte offsets are in `s`. The result lives in the state's scratch until
+/// the next call; the shaped paragraph is reused while `s`, the size,
+/// style and direction stay the same. Null when memory runs out.
 fn layout(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) ?[]Item {
-    return layoutInner(st, size_px, style, s, dir) catch null;
+    return layoutRange(st, size_px, style, s, dir, 0, s.len);
 }
 
-fn layoutInner(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) ![]Item {
+fn layoutRange(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction, a: usize, b: usize) ?[]Item {
+    ensureShaped(st, size_px, style, s, dir) catch return null;
+    return placeLine(st, s, a, b) catch null;
+}
+
+const ParaKey = struct { hash: u64, len: usize, size: u64, style: Style, dir: bidi.Direction };
+
+fn ensureShaped(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) !void {
+    const key: ParaKey = .{ .hash = std.hash.Wyhash.hash(0, s), .len = s.len, .size = @bitCast(size_px), .style = style, .dir = dir };
+    if (st.scratch.key) |k| if (std.meta.eql(k, key)) return;
+    st.scratch.key = null;
+    try shapePara(st, size_px, style, s, dir);
+    st.scratch.key = key;
+}
+
+/// Character index of byte offset `off` (the first character starting
+/// at or after it).
+fn charAt(starts: []const u32, off: usize) usize {
+    var lo: usize = 0;
+    var hi: usize = starts.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        if (starts[mid] < off) lo = mid + 1 else hi = mid;
+    }
+    return lo;
+}
+
+/// Total advance of the glyphs of bytes [a, b) of the shaped paragraph.
+fn rangeAdvance(st: *State, a: usize, b: usize) f64 {
+    const sc = &st.scratch;
+    const c_lo = charAt(sc.starts.items, a);
+    const c_hi = charAt(sc.starts.items, b);
+    var w: f64 = 0;
+    for (sc.lg.items) |g| {
+        if (g.c0 >= c_lo and g.c0 < c_hi) w += g.adv;
+    }
+    return w;
+}
+
+/// Visual order and positions of the glyphs of bytes [a, b) of the
+/// shaped paragraph `s`.
+fn placeLine(st: *State, s: []const u8, a_byte: usize, b_byte: usize) ![]Item {
+    const al = st.alloc;
+    const sc = &st.scratch;
+    const n = sc.cps.items.len;
+    const c_lo = charAt(sc.starts.items, @min(a_byte, s.len));
+    const c_hi = @max(c_lo, charAt(sc.starts.items, @min(b_byte, s.len)));
+    const all = sc.lg.items;
+    // the line's glyphs (logical order), with attachments renumbered
+    sc.line.clearRetainingCapacity();
+    try sc.remap.resize(al, all.len);
+    for (all, 0..) |g, k| {
+        if (g.c0 >= c_lo and g.c0 < c_hi) {
+            sc.remap.items[k] = @intCast(sc.line.items.len);
+            try sc.line.append(al, g);
+        } else sc.remap.items[k] = -1;
+    }
+    const lg = sc.line.items;
+    for (lg) |*g| {
+        if (g.attach >= 0) g.attach = sc.remap.items[@intCast(g.attach)];
+    }
+    // L1 for this line: its trailing whitespace goes to the paragraph level
+    const m = lg.len;
+    try sc.glevels.resize(al, m);
+    try sc.order.resize(al, m);
+    if (sc.has_rtl) {
+        try sc.line_levels.resize(al, c_hi - c_lo);
+        @memcpy(sc.line_levels.items, sc.levels.items[c_lo..c_hi]);
+        bidi.lineLevels(sc.cps.items[c_lo..c_hi], sc.para, sc.line_levels.items);
+        for (lg, sc.glevels.items) |g, *l| l.* = sc.line_levels.items[g.c0 - c_lo];
+    } else @memset(sc.glevels.items, 0);
+    const order = sc.order.items;
+    if (sc.has_rtl) bidi.reorder(sc.glevels.items, order) else for (order, 0..) |*o, k| {
+        o.* = @intCast(k);
+    }
+    var x: f64 = 0;
+    for (order) |li| {
+        const g = &lg[li];
+        g.x = x;
+        g.ox = x + g.dx;
+        g.oy = g.dy;
+        x += g.adv;
+    }
+    // attached marks follow their base (always earlier in logical order)
+    for (lg, 0..) |*g, k| {
+        if (g.attach < 0 or g.attach >= k) continue;
+        const b = lg[@intCast(g.attach)];
+        g.x = b.x;
+        g.ox = b.ox + g.dx;
+        g.oy = b.oy + g.dy;
+    }
+    sc.width = x;
+    sc.items.clearRetainingCapacity();
+    try sc.items.ensureTotalCapacity(al, m);
+    for (order) |li| {
+        const g = lg[li];
+        sc.items.appendAssumeCapacity(.{
+            .cp = g.cp,
+            .start = sc.starts.items[g.c0],
+            .end = if (g.c1 < n) sc.starts.items[g.c1] else @intCast(s.len),
+            .rtl = sc.glevels.items[li] % 2 == 1,
+            .slot = g.slot,
+            .gid = g.gid,
+            .x = g.x,
+            .adv = g.adv,
+            .gx = g.ox,
+            .gy = g.oy,
+        });
+    }
+    return sc.items.items;
+}
+
+fn shapePara(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) !void {
     const a = st.alloc;
     const sc = &st.scratch;
     sc.cps.clearRetainingCapacity();
@@ -348,9 +485,12 @@ fn layoutInner(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.
     const cps = sc.cps.items;
     try sc.levels.resize(a, n);
     const levels = sc.levels.items;
+    sc.para = 0;
+    sc.has_rtl = has_rtl;
     if (has_rtl) {
         try sc.types.resize(a, n);
-        bidi.resolveLevels(cps, bidi.paragraphLevel(cps, dir), sc.types.items, levels);
+        sc.para = bidi.paragraphLevel(cps, dir);
+        bidi.resolveLevels(cps, sc.para, sc.types.items, levels);
     } else @memset(levels, 0);
 
     // characters as drawn: mirrored at odd levels; the presentation-form
@@ -418,52 +558,6 @@ fn layoutInner(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.
         }
         i = j;
     }
-
-    // visual order of the glyphs
-    const lg = sc.lg.items;
-    const m = lg.len;
-    try sc.glevels.resize(a, m);
-    try sc.order.resize(a, m);
-    for (lg, sc.glevels.items) |g, *l| l.* = g.level;
-    const order = sc.order.items;
-    if (has_rtl) bidi.reorder(sc.glevels.items, order) else for (order, 0..) |*o, k| {
-        o.* = @intCast(k);
-    }
-    var x: f64 = 0;
-    for (order) |li| {
-        const g = &lg[li];
-        g.x = x;
-        g.ox = x + g.dx;
-        g.oy = g.dy;
-        x += g.adv;
-    }
-    // attached marks follow their base (always earlier in logical order)
-    for (lg, 0..) |*g, k| {
-        if (g.attach < 0 or g.attach >= k) continue;
-        const b = lg[@intCast(g.attach)];
-        g.x = b.x;
-        g.ox = b.ox + g.dx;
-        g.oy = b.oy + g.dy;
-    }
-    sc.width = x;
-    sc.items.clearRetainingCapacity();
-    try sc.items.ensureTotalCapacity(a, m);
-    for (order) |li| {
-        const g = lg[li];
-        sc.items.appendAssumeCapacity(.{
-            .cp = g.cp,
-            .start = sc.starts.items[g.c0],
-            .end = if (g.c1 < n) sc.starts.items[g.c1] else @intCast(s.len),
-            .rtl = g.level % 2 == 1,
-            .slot = g.slot,
-            .gid = g.gid,
-            .x = g.x,
-            .adv = g.adv,
-            .gx = g.ox,
-            .gy = g.oy,
-        });
-    }
-    return sc.items.items;
 }
 
 /// Script of the shaping run character `i` belongs to: its own, or for a
@@ -589,12 +683,18 @@ pub fn drawStyled(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, sty
 /// drawStyled with an explicit paragraph direction (for a line wrapped
 /// out of a longer paragraph, whose direction comes from the paragraph).
 pub fn drawDir(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, style: Style, s: []const u8, dir: bidi.Direction) void {
+    drawRange(canvas, x, y, size_px, color, style, s, 0, s.len, dir);
+}
+
+/// Draw the line made of bytes [la, lb) of paragraph `s`, shaped as part
+/// of the whole paragraph (see `layout`).
+pub fn drawRange(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, style: Style, s: []const u8, la: usize, lb: usize, dir: bidi.Direction) void {
     const st = if (state) |*p| p else {
-        canvas.text(x, y, bitmapScale(size_px), color, s);
+        canvas.text(x, y, bitmapScale(size_px), color, s[@min(la, s.len)..@min(lb, s.len)]);
         return;
     };
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return;
-    const items = layout(st, size_px, style, s, dir) orelse return;
+    const items = layoutRange(st, size_px, style, s, dir, la, lb) orelse return;
     const primary = st.styleSlot(style);
     const smear: i32 = if (style == .bold and st.faux_bold) fauxBoldOffset(size_px) else 0;
     const baseline = @as(f64, @floatFromInt(y)) + st.slots[primary].font.ascentPx(size_px);
@@ -624,10 +724,15 @@ pub fn widthStyled(size_px: f64, style: Style, s: []const u8) i32 {
 }
 
 pub fn widthDir(size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) i32 {
-    const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s);
+    return widthRange(size_px, style, s, 0, s.len, dir);
+}
+
+/// Width of the line made of bytes [la, lb) of paragraph `s`.
+pub fn widthRange(size_px: f64, style: Style, s: []const u8, la: usize, lb: usize, dir: bidi.Direction) i32 {
+    const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s[@min(la, s.len)..@min(lb, s.len)]);
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    _ = layout(st, size_px, style, s, dir) orelse return 0;
-    const total = st.scratch.width;
+    ensureShaped(st, size_px, style, s, dir) catch return 0;
+    const total = rangeAdvance(st, la, lb);
     if (!(total < 1e9)) return std.math.maxInt(i32) / 2;
     return @intFromFloat(@ceil(total));
 }
@@ -685,10 +790,22 @@ pub fn offsetForX(size_px: f64, style: Style, s: []const u8, x: i32) usize {
 }
 
 pub fn offsetForXDir(size_px: f64, style: Style, s: []const u8, x: i32, dir: bidi.Direction) usize {
-    const st = if (state) |*p| p else return bitmapOffsetForX(size_px, s, x);
-    if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s, dir) orelse return 0;
-    if (items.len == 0) return 0;
+    return offsetForXRange(size_px, style, s, 0, s.len, x, dir);
+}
+
+/// offsetForX on the line made of bytes [la, lb) of paragraph `s`; the
+/// result is an offset in `s`, within [la, lb].
+pub fn offsetForXRange(size_px: f64, style: Style, s: []const u8, la: usize, lb: usize, x: i32, dir: bidi.Direction) usize {
+    const lo = @min(la, s.len);
+    const hi = @min(@max(lb, lo), s.len);
+    return std.math.clamp(offsetForXInner(size_px, style, s, lo, hi, x, dir), lo, hi);
+}
+
+fn offsetForXInner(size_px: f64, style: Style, s: []const u8, la: usize, lb: usize, x: i32, dir: bidi.Direction) usize {
+    const st = if (state) |*p| p else return la + bitmapOffsetForX(size_px, s[la..lb], x);
+    if (!(size_px > 0 and size_px <= ttf.max_size_px)) return la;
+    const items = layoutRange(st, size_px, style, s, dir, la, lb) orelse return la;
+    if (items.len == 0) return la;
     const fx: f64 = @floatFromInt(x);
     // before the first / past the last glyph: the visual line ends
     const first = items[0];
@@ -723,16 +840,25 @@ pub fn xForOffset(size_px: f64, style: Style, s: []const u8, offset: usize) i32 
 }
 
 pub fn xForOffsetDir(size_px: f64, style: Style, s: []const u8, offset: usize, dir: bidi.Direction) i32 {
-    const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s[0..@min(offset, s.len)]);
+    return xForOffsetRange(size_px, style, s, 0, s.len, offset, dir);
+}
+
+/// xForOffset on the line made of bytes [la, lb) of paragraph `s`
+/// (`offset` in `s`, clamped to the line).
+pub fn xForOffsetRange(size_px: f64, style: Style, s: []const u8, la: usize, lb: usize, offset_in: usize, dir: bidi.Direction) i32 {
+    const lo = @min(la, s.len);
+    const hi = @min(@max(lb, lo), s.len);
+    const offset = std.math.clamp(offset_in, lo, hi);
+    const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s[lo..offset]);
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s, dir) orelse return 0;
+    const items = layoutRange(st, size_px, style, s, dir, lo, hi) orelse return 0;
     if (items.len == 0) return 0;
     var x: f64 = 0;
-    if (offset >= s.len) {
+    if (offset >= hi) {
         // trailing edge of the logically last character
         var found: ?usize = null;
         for (items, 0..) |item, k| {
-            if (item.end == s.len and (found == null or item.adv > 0)) found = k;
+            if (item.end >= hi and (found == null or item.adv > 0)) found = k;
         }
         if (found) |k| {
             _, _, const c0, const c1 = clusterAt(items, k);
@@ -770,11 +896,19 @@ pub fn xForOffsetDir(size_px: f64, style: Style, s: []const u8, offset: usize, d
 
 pub const Line = wrap_mod.Line;
 
-fn measureFor(ctx: struct { f64, Style }, s: []const u8) f64 {
-    return @floatFromInt(widthStyled(ctx[0], ctx[1], s));
+const MeasureCtx = struct { size: f64, style: Style, para: []const u8, dir: bidi.Direction };
+
+/// Width of `sub` (a slice of the paragraph) as part of the shaped
+/// paragraph, so joining forms at a break are the unbroken word's.
+fn measureFor(ctx: MeasureCtx, sub: []const u8) f64 {
+    const a = @intFromPtr(sub.ptr) - @intFromPtr(ctx.para.ptr);
+    const st = if (state) |*p| p else return @floatFromInt(Canvas.textWidth(bitmapScale(ctx.size), sub));
+    if (!(ctx.size > 0 and ctx.size <= ttf.max_size_px)) return 0;
+    ensureShaped(st, ctx.size, ctx.style, ctx.para, ctx.dir) catch return @floatFromInt(widthStyled(ctx.size, ctx.style, sub));
+    return rangeAdvance(st, a, a + sub.len);
 }
 
-const WrapKey = struct { hash: u64, len: usize, size: u64, style: Style, max_w: i32 };
+const WrapKey = struct { hash: u64, len: usize, size: u64, style: Style, max_w: i32, dir: bidi.Direction };
 const WrapEntry = struct { key: WrapKey, lines: []Line };
 var wrap_cache: [8]?WrapEntry = @splat(null);
 var wrap_next: usize = 0;
@@ -792,8 +926,8 @@ fn clearWrapCache() void {
 /// wide: breaks after spaces and hyphens and around CJK, long words cut
 /// between graphemes (see wrap.zig). Appended to `out`. Recent results are
 /// cached, since boxes are laid out on every frame.
-pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []const u8, max_w: i32, out: *std.ArrayList(Line)) !void {
-    const key: WrapKey = .{ .hash = std.hash.Wyhash.hash(0, s), .len = s.len, .size = @bitCast(size_px), .style = style, .max_w = max_w };
+pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []const u8, max_w: i32, dir: bidi.Direction, out: *std.ArrayList(Line)) !void {
+    const key: WrapKey = .{ .hash = std.hash.Wyhash.hash(0, s), .len = s.len, .size = @bitCast(size_px), .style = style, .max_w = max_w, .dir = dir };
     const cacheable = state != null;
     if (cacheable) {
         for (wrap_cache) |e| {
@@ -802,7 +936,7 @@ pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []cons
         }
     }
     const first = out.items.len;
-    try wrap_mod.wrap(alloc, s, @floatFromInt(max_w), .{ size_px, style }, measureFor, out);
+    try wrap_mod.wrap(alloc, s, @floatFromInt(max_w), MeasureCtx{ .size = size_px, .style = style, .para = s, .dir = dir }, measureFor, out);
     if (!cacheable) return;
     const st_alloc = state.?.alloc;
     const copy = st_alloc.dupe(Line, out.items[first..]) catch return;
@@ -817,14 +951,21 @@ pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []cons
 /// visual order, adjacent glyphs merged. Mixed-direction text gives
 /// several spans. A ligature partly inside the range counts as inside.
 pub fn rangeSpans(size_px: f64, style: Style, s: []const u8, a: usize, b: usize, dir: bidi.Direction, out: [][2]i32) usize {
+    return rangeSpansLine(size_px, style, s, 0, s.len, a, b, dir, out);
+}
+
+/// rangeSpans for the line made of bytes [la, lb) of paragraph `s`.
+pub fn rangeSpansLine(size_px: f64, style: Style, s: []const u8, la: usize, lb: usize, a: usize, b: usize, dir: bidi.Direction, out: [][2]i32) usize {
     if (a >= b or out.len == 0) return 0;
+    const lo = @min(la, s.len);
+    const hi = @min(@max(lb, lo), s.len);
     const st = if (state) |*p| p else {
         const sc = bitmapScale(size_px);
-        out[0] = .{ Canvas.textWidth(sc, s[0..@min(a, s.len)]), Canvas.textWidth(sc, s[0..@min(b, s.len)]) };
+        out[0] = .{ Canvas.textWidth(sc, s[lo..std.math.clamp(a, lo, hi)]), Canvas.textWidth(sc, s[lo..std.math.clamp(b, lo, hi)]) };
         return 1;
     };
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s, dir) orelse return 0;
+    const items = layoutRange(st, size_px, style, s, dir, lo, hi) orelse return 0;
     var n: usize = 0;
     var cur: ?[2]f64 = null;
     for (items) |it| {
@@ -1003,6 +1144,40 @@ test "bidi layout: visual order, carets and shaping" {
     draw(&c, 0, 0, 14, 0xFFFFFFFF, "abc \u{5D0}\u{5D1} 123 (\u{627}\u{644}) \xFF\xC3");
     _ = offsetForX(14, .bold, "\u{5D0}1(2)\u{5D1}", 7);
     _ = xForOffset(14, .mono, "\u{5D0}1(2)\u{5D1}", 3);
+}
+
+test "a word cut across lines keeps the forms of the unbroken word" {
+    const alloc = std.testing.allocator;
+    init(alloc);
+    defer deinit();
+    const st = if (state) |*p| p else return;
+    const word = "\u{679}\u{6CC}\u{644}\u{6CC}\u{641}\u{648}\u{646}"; // ٹیلیفون
+    const full = layout(st, 32, .regular, word, .rtl).?;
+    if (!otl.hasScript(st.slots[full[0].slot].font.layout.gsub, .arab)) return;
+    var gid_at: [32]u16 = @splat(0);
+    for (full) |it| gid_at[it.start] = it.gid;
+    const cut = 6; // after three letters
+    var n_items: usize = 0;
+    for ([_][2]usize{ .{ 0, cut }, .{ cut, word.len } }) |r| {
+        const part = layoutRange(st, 32, .regular, word, .rtl, r[0], r[1]).?;
+        for (part) |it| {
+            try std.testing.expect(it.start >= r[0] and it.start < r[1]);
+            // same glyph as in the unbroken word: medial letters at the
+            // cut stay medial
+            try std.testing.expectEqual(gid_at[it.start], it.gid);
+            n_items += 1;
+        }
+        // and the line's width is its glyphs' advances
+        var w: f64 = 0;
+        for (part) |it| w += it.adv;
+        try std.testing.expect(@abs(@as(f64, @floatFromInt(widthRange(32, .regular, word, r[0], r[1], .rtl))) - w) <= 1);
+    }
+    try std.testing.expectEqual(full.len, n_items);
+    // the isolated shaping of the second half would differ (initial form)
+    const alone = layout(st, 32, .regular, word[cut..], .rtl).?;
+    var differs = false;
+    for (alone) |it| differs = differs or it.gid != gid_at[it.start + cut];
+    try std.testing.expect(differs);
 }
 
 /// Drawn bounding box (left, top, right, bottom) of item `it` relative to

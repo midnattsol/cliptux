@@ -31,6 +31,8 @@ pub const ButtonKind = union(enum) {
     color: u3,
     custom_color,
     style,
+    /// a text's width: fits the text, or fixed (lines wrap)
+    text_width,
     thickness,
     beautify,
     background,
@@ -94,6 +96,11 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, buf: []u8) []const u8 {
         .color => |c| return std.fmt.bufPrint(buf, "{s}  {d}", .{ ([_][]const u8{ "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "White", "Black" })[c], @as(u8, c) + 1 }) catch "Colour",
         .custom_color => .{ "Custom colour", null, "9" },
         .style => .{ "Fill / rounded / text background", .style, "" },
+        .text_width => {
+            const fixed = if (self.textHandleShape()) |i| self.doc.shapes.items[i].box_w > 0 else false;
+            const what = if (fixed) "Width: fixed, lines wrap (click: fit text)" else "Width: fits text (click: fix it, lines wrap)";
+            return std.fmt.bufPrint(buf, "{s}  Alt+W", .{what}) catch what;
+        },
         .thickness => .{ "Size (wheel)", null, "- =" },
         .beautify => .{ "Beautify frame", .beautify, "" },
         .background => return std.fmt.bufPrint(buf, "Background: {s}", .{self.beautify.background().name}) catch "Background",
@@ -154,6 +161,10 @@ pub fn layoutToolbar(self: *Editor) !void {
             n += 1;
         },
         else => {},
+    }
+    if (self.textHandleShape() != null) {
+        items[n] = .{ .kind = .text_width, .w = btn, .group = 1 };
+        n += 1;
     }
     items[n] = .{ .kind = .thickness, .w = chip_w, .group = 1 };
     n += 1;
@@ -492,6 +503,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
             .corners => self.beautify.rounded,
             .shadow => self.beautify.shadow,
             .help => self.help_open,
+            .text_width => if (self.textHandleShape()) |i| self.doc.shapes.items[i].box_w > 0 else false,
             else => false,
         };
         const swatch = switch (b.kind) {
@@ -842,7 +854,7 @@ const help_lines = [_][2][]const u8{
     .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
     .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
     .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },
-    .{ "Text: side handle", "Drag to wrap at a width; double-click: fit text" },
+    .{ "Text: side handle, Alt+W", "Drag to wrap at a width; double-click / Alt+W: fit text" },
     .{ "B", "Beautify frame (padding, background, shadow)" },
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
     .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
@@ -1086,6 +1098,26 @@ fn drawButtonIcon(self: *Editor, canvas: *Canvas, b: Button, fg: u32, active: bo
                         shapes_mod.roundRectRing(canvas, r, rad, 2.0 * f, fg);
                     } else canvas.rectOutline(r.x, r.y, r.w, r.h, thin, fg);
                 },
+            }
+        },
+        .text_width => {
+            // wrapped lines against a right margin when fixed; one long
+            // line between arrows when the box fits its text
+            const lw = @max(1, self.sc(2));
+            const fixed = if (self.textHandleShape()) |i| self.doc.shapes.items[i].box_w > 0 else false;
+            if (fixed) {
+                for ([_]i32{ 0, 1, 2 }, [_]f64{ 0.78, 0.62, 0.7 }) |row, frac| {
+                    const ly = y + @divTrunc(si * (row * 2 + 1), 7);
+                    canvas.fillRect(x, ly, @intFromFloat(sf * frac), lw, fg);
+                }
+                canvas.fillRect(x + si - lw, y, lw, si, fg);
+            } else {
+                canvas.fillRect(x, y + @divTrunc(si, 2) - @divTrunc(lw, 2), si, lw, fg);
+                for ([_]f64{ 0, 1 }) |side| {
+                    const tip = xf + side * sf;
+                    const back = tip + (if (side == 0) sf * 0.28 else -sf * 0.28);
+                    canvas.fillTriangleAA(tip, cyf, back, cyf - sf * 0.22, back, cyf + sf * 0.22, fg);
+                }
             }
         },
         .thickness => {

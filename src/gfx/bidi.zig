@@ -12,7 +12,7 @@
 
 const std = @import("std");
 
-pub const Class = enum(u8) { L, R, AL, EN, ES, ET, AN, CS, NSM, BN, B, S, WS, ON };
+pub const Class = enum(u8) { L, R, AL, EN, ES, ET, AN, CS, NSM, BN, B, S, WS, ON, LRE, RLE, LRO, RLO, PDF, LRI, RLI, FSI, PDI };
 
 const Range = struct { lo: u21, hi: u21, c: Class };
 
@@ -81,55 +81,60 @@ const ranges = [_]Range{
     .{ .lo = 0x2000, .hi = 0x200A, .c = .WS },   .{ .lo = 0x200B, .hi = 0x200D, .c = .BN },
     .{ .lo = 0x200E, .hi = 0x200E, .c = .L },    .{ .lo = 0x200F, .hi = 0x200F, .c = .R },
     .{ .lo = 0x2010, .hi = 0x2027, .c = .ON },   .{ .lo = 0x2028, .hi = 0x2028, .c = .WS },
-    .{ .lo = 0x2029, .hi = 0x2029, .c = .B },    .{ .lo = 0x202A, .hi = 0x202E, .c = .BN },
+    .{ .lo = 0x2029, .hi = 0x2029, .c = .B },    .{ .lo = 0x202A, .hi = 0x202A, .c = .LRE },
+    .{ .lo = 0x202B, .hi = 0x202B, .c = .RLE },  .{ .lo = 0x202C, .hi = 0x202C, .c = .PDF },
+    .{ .lo = 0x202D, .hi = 0x202D, .c = .LRO },  .{ .lo = 0x202E, .hi = 0x202E, .c = .RLO },
     .{ .lo = 0x202F, .hi = 0x202F, .c = .CS },   .{ .lo = 0x2030, .hi = 0x2034, .c = .ET },
     .{ .lo = 0x2035, .hi = 0x2043, .c = .ON },   .{ .lo = 0x2044, .hi = 0x2044, .c = .CS },
     .{ .lo = 0x2045, .hi = 0x205E, .c = .ON },   .{ .lo = 0x205F, .hi = 0x205F, .c = .WS },
-    .{ .lo = 0x2060, .hi = 0x206F, .c = .BN },   .{ .lo = 0x2070, .hi = 0x2070, .c = .EN },
-    .{ .lo = 0x2074, .hi = 0x2079, .c = .EN },   .{ .lo = 0x207A, .hi = 0x207B, .c = .ES },
-    .{ .lo = 0x207C, .hi = 0x207E, .c = .ON },   .{ .lo = 0x2080, .hi = 0x2089, .c = .EN },
-    .{ .lo = 0x208A, .hi = 0x208B, .c = .ES },   .{ .lo = 0x208C, .hi = 0x208E, .c = .ON },
-    .{ .lo = 0x20A0, .hi = 0x20CF, .c = .ET },   .{ .lo = 0x20D0, .hi = 0x20F0, .c = .NSM },
-    .{ .lo = 0x2100, .hi = 0x2101, .c = .ON },   .{ .lo = 0x2103, .hi = 0x2106, .c = .ON },
-    .{ .lo = 0x2108, .hi = 0x2109, .c = .ON },   .{ .lo = 0x2114, .hi = 0x2114, .c = .ON },
-    .{ .lo = 0x2116, .hi = 0x2118, .c = .ON },   .{ .lo = 0x211E, .hi = 0x2123, .c = .ON },
-    .{ .lo = 0x212E, .hi = 0x212E, .c = .ET },   .{ .lo = 0x2140, .hi = 0x2144, .c = .ON },
-    .{ .lo = 0x214A, .hi = 0x214D, .c = .ON },   .{ .lo = 0x2150, .hi = 0x215F, .c = .ON },
-    .{ .lo = 0x2189, .hi = 0x2211, .c = .ON },   .{ .lo = 0x2212, .hi = 0x2212, .c = .ES },
-    .{ .lo = 0x2213, .hi = 0x2213, .c = .ET },   .{ .lo = 0x2214, .hi = 0x2335, .c = .ON },
-    .{ .lo = 0x237B, .hi = 0x2394, .c = .ON },   .{ .lo = 0x2396, .hi = 0x2487, .c = .ON },
-    .{ .lo = 0x2488, .hi = 0x249B, .c = .EN },   .{ .lo = 0x24EA, .hi = 0x26AB, .c = .ON },
-    .{ .lo = 0x26AD, .hi = 0x27FF, .c = .ON },   .{ .lo = 0x2900, .hi = 0x2B73, .c = .ON },
-    .{ .lo = 0x2B76, .hi = 0x2BFF, .c = .ON },   .{ .lo = 0x2E00, .hi = 0x2E7F, .c = .ON },
-    .{ .lo = 0x2E80, .hi = 0x2FFB, .c = .ON },   .{ .lo = 0x3000, .hi = 0x3000, .c = .WS },
-    .{ .lo = 0x3001, .hi = 0x3004, .c = .ON },   .{ .lo = 0x3008, .hi = 0x3020, .c = .ON },
-    .{ .lo = 0x3030, .hi = 0x3030, .c = .ON },   .{ .lo = 0x303D, .hi = 0x303F, .c = .ON },
-    .{ .lo = 0xA4D0, .hi = 0xA4FF, .c = .L },    .{ .lo = 0xFB1D, .hi = 0xFB1D, .c = .R },
-    .{ .lo = 0xFB1E, .hi = 0xFB1E, .c = .NSM },  .{ .lo = 0xFB1F, .hi = 0xFB28, .c = .R },
-    .{ .lo = 0xFB29, .hi = 0xFB29, .c = .ES },   .{ .lo = 0xFB2A, .hi = 0xFB4F, .c = .R },
-    .{ .lo = 0xFB50, .hi = 0xFD3D, .c = .AL },   .{ .lo = 0xFD3E, .hi = 0xFD4F, .c = .ON },
-    .{ .lo = 0xFD50, .hi = 0xFDCF, .c = .AL },   .{ .lo = 0xFDF0, .hi = 0xFDFC, .c = .AL },
-    .{ .lo = 0xFDFD, .hi = 0xFDFF, .c = .ON },   .{ .lo = 0xFE00, .hi = 0xFE0F, .c = .NSM },
-    .{ .lo = 0xFE10, .hi = 0xFE19, .c = .ON },   .{ .lo = 0xFE20, .hi = 0xFE2F, .c = .NSM },
-    .{ .lo = 0xFE30, .hi = 0xFE4F, .c = .ON },   .{ .lo = 0xFE50, .hi = 0xFE50, .c = .CS },
-    .{ .lo = 0xFE51, .hi = 0xFE51, .c = .ON },   .{ .lo = 0xFE52, .hi = 0xFE52, .c = .CS },
-    .{ .lo = 0xFE54, .hi = 0xFE54, .c = .ON },   .{ .lo = 0xFE55, .hi = 0xFE55, .c = .CS },
-    .{ .lo = 0xFE56, .hi = 0xFE5E, .c = .ON },   .{ .lo = 0xFE5F, .hi = 0xFE5F, .c = .ET },
-    .{ .lo = 0xFE60, .hi = 0xFE61, .c = .ON },   .{ .lo = 0xFE62, .hi = 0xFE63, .c = .ES },
-    .{ .lo = 0xFE64, .hi = 0xFE66, .c = .ON },   .{ .lo = 0xFE68, .hi = 0xFE68, .c = .ON },
-    .{ .lo = 0xFE69, .hi = 0xFE6A, .c = .ET },   .{ .lo = 0xFE6B, .hi = 0xFE6B, .c = .ON },
-    .{ .lo = 0xFE70, .hi = 0xFEFE, .c = .AL },   .{ .lo = 0xFEFF, .hi = 0xFEFF, .c = .BN },
-    .{ .lo = 0xFF01, .hi = 0xFF02, .c = .ON },   .{ .lo = 0xFF03, .hi = 0xFF05, .c = .ET },
-    .{ .lo = 0xFF06, .hi = 0xFF0A, .c = .ON },   .{ .lo = 0xFF0B, .hi = 0xFF0B, .c = .ES },
-    .{ .lo = 0xFF0C, .hi = 0xFF0C, .c = .CS },   .{ .lo = 0xFF0D, .hi = 0xFF0D, .c = .ES },
-    .{ .lo = 0xFF0E, .hi = 0xFF0F, .c = .CS },   .{ .lo = 0xFF10, .hi = 0xFF19, .c = .EN },
-    .{ .lo = 0xFF1A, .hi = 0xFF1A, .c = .CS },   .{ .lo = 0xFF1B, .hi = 0xFF20, .c = .ON },
-    .{ .lo = 0xFF3B, .hi = 0xFF40, .c = .ON },   .{ .lo = 0xFF5B, .hi = 0xFF65, .c = .ON },
-    .{ .lo = 0xFFE0, .hi = 0xFFE1, .c = .ET },   .{ .lo = 0xFFE2, .hi = 0xFFE4, .c = .ON },
-    .{ .lo = 0xFFE5, .hi = 0xFFE6, .c = .ET },   .{ .lo = 0xFFE8, .hi = 0xFFEE, .c = .ON },
-    .{ .lo = 0xFFF9, .hi = 0xFFFD, .c = .ON },   .{ .lo = 0x10800, .hi = 0x10FFF, .c = .R },
-    .{ .lo = 0x1D7CE, .hi = 0x1D7FF, .c = .EN }, .{ .lo = 0x1E800, .hi = 0x1EDFF, .c = .R },
-    .{ .lo = 0x1EE00, .hi = 0x1EEFF, .c = .AL }, .{ .lo = 0x1F000, .hi = 0x1FAFF, .c = .ON },
+    .{ .lo = 0x2060, .hi = 0x2065, .c = .BN },   .{ .lo = 0x2066, .hi = 0x2066, .c = .LRI },
+    .{ .lo = 0x2067, .hi = 0x2067, .c = .RLI },  .{ .lo = 0x2068, .hi = 0x2068, .c = .FSI },
+    .{ .lo = 0x2069, .hi = 0x2069, .c = .PDI },  .{ .lo = 0x206A, .hi = 0x206F, .c = .BN },
+    .{ .lo = 0x2070, .hi = 0x2070, .c = .EN },   .{ .lo = 0x2074, .hi = 0x2079, .c = .EN },
+    .{ .lo = 0x207A, .hi = 0x207B, .c = .ES },   .{ .lo = 0x207C, .hi = 0x207E, .c = .ON },
+    .{ .lo = 0x2080, .hi = 0x2089, .c = .EN },   .{ .lo = 0x208A, .hi = 0x208B, .c = .ES },
+    .{ .lo = 0x208C, .hi = 0x208E, .c = .ON },   .{ .lo = 0x20A0, .hi = 0x20CF, .c = .ET },
+    .{ .lo = 0x20D0, .hi = 0x20F0, .c = .NSM },  .{ .lo = 0x2100, .hi = 0x2101, .c = .ON },
+    .{ .lo = 0x2103, .hi = 0x2106, .c = .ON },   .{ .lo = 0x2108, .hi = 0x2109, .c = .ON },
+    .{ .lo = 0x2114, .hi = 0x2114, .c = .ON },   .{ .lo = 0x2116, .hi = 0x2118, .c = .ON },
+    .{ .lo = 0x211E, .hi = 0x2123, .c = .ON },   .{ .lo = 0x212E, .hi = 0x212E, .c = .ET },
+    .{ .lo = 0x2140, .hi = 0x2144, .c = .ON },   .{ .lo = 0x214A, .hi = 0x214D, .c = .ON },
+    .{ .lo = 0x2150, .hi = 0x215F, .c = .ON },   .{ .lo = 0x2189, .hi = 0x2211, .c = .ON },
+    .{ .lo = 0x2212, .hi = 0x2212, .c = .ES },   .{ .lo = 0x2213, .hi = 0x2213, .c = .ET },
+    .{ .lo = 0x2214, .hi = 0x2335, .c = .ON },   .{ .lo = 0x237B, .hi = 0x2394, .c = .ON },
+    .{ .lo = 0x2396, .hi = 0x2487, .c = .ON },   .{ .lo = 0x2488, .hi = 0x249B, .c = .EN },
+    .{ .lo = 0x24EA, .hi = 0x26AB, .c = .ON },   .{ .lo = 0x26AD, .hi = 0x27FF, .c = .ON },
+    .{ .lo = 0x2900, .hi = 0x2B73, .c = .ON },   .{ .lo = 0x2B76, .hi = 0x2BFF, .c = .ON },
+    .{ .lo = 0x2E00, .hi = 0x2E7F, .c = .ON },   .{ .lo = 0x2E80, .hi = 0x2FFB, .c = .ON },
+    .{ .lo = 0x3000, .hi = 0x3000, .c = .WS },   .{ .lo = 0x3001, .hi = 0x3004, .c = .ON },
+    .{ .lo = 0x3008, .hi = 0x3020, .c = .ON },   .{ .lo = 0x3030, .hi = 0x3030, .c = .ON },
+    .{ .lo = 0x303D, .hi = 0x303F, .c = .ON },   .{ .lo = 0xA4D0, .hi = 0xA4FF, .c = .L },
+    .{ .lo = 0xFB1D, .hi = 0xFB1D, .c = .R },    .{ .lo = 0xFB1E, .hi = 0xFB1E, .c = .NSM },
+    .{ .lo = 0xFB1F, .hi = 0xFB28, .c = .R },    .{ .lo = 0xFB29, .hi = 0xFB29, .c = .ES },
+    .{ .lo = 0xFB2A, .hi = 0xFB4F, .c = .R },    .{ .lo = 0xFB50, .hi = 0xFD3D, .c = .AL },
+    .{ .lo = 0xFD3E, .hi = 0xFD4F, .c = .ON },   .{ .lo = 0xFD50, .hi = 0xFDCF, .c = .AL },
+    .{ .lo = 0xFDF0, .hi = 0xFDFC, .c = .AL },   .{ .lo = 0xFDFD, .hi = 0xFDFF, .c = .ON },
+    .{ .lo = 0xFE00, .hi = 0xFE0F, .c = .NSM },  .{ .lo = 0xFE10, .hi = 0xFE19, .c = .ON },
+    .{ .lo = 0xFE20, .hi = 0xFE2F, .c = .NSM },  .{ .lo = 0xFE30, .hi = 0xFE4F, .c = .ON },
+    .{ .lo = 0xFE50, .hi = 0xFE50, .c = .CS },   .{ .lo = 0xFE51, .hi = 0xFE51, .c = .ON },
+    .{ .lo = 0xFE52, .hi = 0xFE52, .c = .CS },   .{ .lo = 0xFE54, .hi = 0xFE54, .c = .ON },
+    .{ .lo = 0xFE55, .hi = 0xFE55, .c = .CS },   .{ .lo = 0xFE56, .hi = 0xFE5E, .c = .ON },
+    .{ .lo = 0xFE5F, .hi = 0xFE5F, .c = .ET },   .{ .lo = 0xFE60, .hi = 0xFE61, .c = .ON },
+    .{ .lo = 0xFE62, .hi = 0xFE63, .c = .ES },   .{ .lo = 0xFE64, .hi = 0xFE66, .c = .ON },
+    .{ .lo = 0xFE68, .hi = 0xFE68, .c = .ON },   .{ .lo = 0xFE69, .hi = 0xFE6A, .c = .ET },
+    .{ .lo = 0xFE6B, .hi = 0xFE6B, .c = .ON },   .{ .lo = 0xFE70, .hi = 0xFEFE, .c = .AL },
+    .{ .lo = 0xFEFF, .hi = 0xFEFF, .c = .BN },   .{ .lo = 0xFF01, .hi = 0xFF02, .c = .ON },
+    .{ .lo = 0xFF03, .hi = 0xFF05, .c = .ET },   .{ .lo = 0xFF06, .hi = 0xFF0A, .c = .ON },
+    .{ .lo = 0xFF0B, .hi = 0xFF0B, .c = .ES },   .{ .lo = 0xFF0C, .hi = 0xFF0C, .c = .CS },
+    .{ .lo = 0xFF0D, .hi = 0xFF0D, .c = .ES },   .{ .lo = 0xFF0E, .hi = 0xFF0F, .c = .CS },
+    .{ .lo = 0xFF10, .hi = 0xFF19, .c = .EN },   .{ .lo = 0xFF1A, .hi = 0xFF1A, .c = .CS },
+    .{ .lo = 0xFF1B, .hi = 0xFF20, .c = .ON },   .{ .lo = 0xFF3B, .hi = 0xFF40, .c = .ON },
+    .{ .lo = 0xFF5B, .hi = 0xFF65, .c = .ON },   .{ .lo = 0xFFE0, .hi = 0xFFE1, .c = .ET },
+    .{ .lo = 0xFFE2, .hi = 0xFFE4, .c = .ON },   .{ .lo = 0xFFE5, .hi = 0xFFE6, .c = .ET },
+    .{ .lo = 0xFFE8, .hi = 0xFFEE, .c = .ON },   .{ .lo = 0xFFF9, .hi = 0xFFFD, .c = .ON },
+    .{ .lo = 0x10800, .hi = 0x10FFF, .c = .R },  .{ .lo = 0x1D7CE, .hi = 0x1D7FF, .c = .EN },
+    .{ .lo = 0x1E800, .hi = 0x1EDFF, .c = .R },  .{ .lo = 0x1EE00, .hi = 0x1EEFF, .c = .AL },
+    .{ .lo = 0x1F000, .hi = 0x1FAFF, .c = .ON },
 };
 
 pub fn class(cp: u21) Class {
@@ -150,8 +155,27 @@ pub fn class(cp: u21) Class {
 /// Whether `cp` can make text need reordering or shaping (cheap pre-check).
 pub fn isRtl(cp: u21) bool {
     if (cp < 0x0590) return false;
+    if (isExplicit(cp)) return true;
     const c = class(cp);
     return c == .R or c == .AL or c == .AN;
+}
+
+/// Explicit directional embeddings, overrides and isolates.
+pub fn isExplicit(cp: u21) bool {
+    return (cp >= 0x202A and cp <= 0x202E) or (cp >= 0x2066 and cp <= 0x2069);
+}
+
+fn isIsolateInit(c: Class) bool {
+    return c == .LRI or c == .RLI or c == .FSI;
+}
+
+/// Characters X9 removes (kept here as boundary neutrals, as UAX #9
+/// section 5.2 allows).
+fn isRemoved(c: Class) bool {
+    return switch (c) {
+        .LRE, .RLE, .LRO, .RLO, .PDF, .BN => true,
+        else => false,
+    };
 }
 
 /// Mirrored glyph for brackets and other paired punctuation (L4).
@@ -203,19 +227,32 @@ fn isOpening(cp: u21) bool {
 
 pub const Direction = enum { auto, ltr, rtl };
 
-/// Paragraph embedding level from the first strong character (P2/P3).
+/// Paragraph embedding level from the first strong character (P2/P3),
+/// skipping text inside isolates.
 pub fn paragraphLevel(cps: []const u21, dir: Direction) u1 {
     switch (dir) {
         .ltr => return 0,
         .rtl => return 1,
         .auto => {},
     }
+    return firstStrong(cps) orelse 0;
+}
+
+/// Direction of the first strong character outside nested isolates,
+/// stopping at an unmatched PDI.
+fn firstStrong(cps: []const u21) ?u1 {
+    var depth: usize = 0;
     for (cps) |cp| switch (class(cp)) {
-        .L => return 0,
-        .R, .AL => return 1,
+        .L => if (depth == 0) return 0,
+        .R, .AL => if (depth == 0) return 1,
+        .LRI, .RLI, .FSI => depth += 1,
+        .PDI => {
+            if (depth == 0) return null;
+            depth -= 1;
+        },
         else => {},
     };
-    return 0;
+    return null;
 }
 
 fn strongDir(c: Class) ?u1 {
@@ -228,30 +265,222 @@ fn strongDir(c: Class) ?u1 {
 
 fn isNeutral(c: Class) bool {
     return switch (c) {
-        .B, .S, .WS, .ON, .BN => true,
+        .B, .S, .WS, .ON, .BN, .LRI, .RLI, .FSI, .PDI => true,
         else => false,
     };
 }
 
-/// Resolve embedding levels for one line (`levels.len == cps.len`).
-/// `types` is scratch of the same length.
+/// Resolve embedding levels for one paragraph or line (`levels.len ==
+/// cps.len`); `types` is scratch of the same length. Explicit
+/// embeddings, overrides and isolates (X1-X10) are honoured; text
+/// without them takes a fast path with one isolating run sequence.
 pub fn resolveLevels(cps: []const u21, para: u1, types: []Class, levels: []u8) void {
     for (cps, types) |cp, *t| t.* = class(cp);
-    resolveWeak(types, para);
-    resolveBrackets(cps, types, para);
-    resolveNeutrals(types, para);
-    assignLevels(cps, types, para, levels);
+    const explicit = for (cps) |cp| {
+        if (isExplicit(cp)) break true;
+    } else false;
+    if (!explicit or !resolveExplicit(cps, para, types, levels)) {
+        @memset(levels, para);
+        resolveSequence(cps, types, para, para, para);
+        for (types, levels) |t, *l| l.* = implicitLevel(para, t);
+    }
+    lineRules(cps, para, levels);
+}
+
+/// I1/I2.
+fn implicitLevel(base: u8, t: Class) u8 {
+    if (base % 2 == 0) {
+        if (t == .R) return base + 1;
+        if (t == .AN or t == .EN) return base + 2;
+    } else if (t == .L or t == .EN or t == .AN) return base + 1;
+    return base;
+}
+
+/// W1-W7, N0-N2 on one isolating run sequence (`sos`, `eos`: the
+/// directions at its ends; `e`: its embedding direction).
+fn resolveSequence(cps: []const u21, types: []Class, sos: u1, eos: u1, e: u1) void {
+    resolveWeak(types, sos);
+    resolveBrackets(cps, types, e, sos);
+    resolveNeutrals(types, sos, eos, e);
+}
+
+const max_depth = 125;
+
+/// X1-X10 with explicit codes present. False when scratch runs out (the
+/// caller then ignores the codes).
+fn resolveExplicit(cps: []const u21, para: u1, types: []Class, levels: []u8) bool {
+    const n = cps.len;
+    var mem: [16384]u8 = undefined;
+    var bfa: std.heap.BufferFirstAllocator = .init(&mem, std.heap.page_allocator);
+    const a = bfa.allocator();
+    // BD9: isolate initiator -> matching PDI
+    const match = a.alloc(u32, n) catch return false;
+    defer a.free(match);
+    const none = std.math.maxInt(u32);
+    @memset(match, none);
+    const matched_pdi = a.alloc(bool, n) catch return false;
+    defer a.free(matched_pdi);
+    @memset(matched_pdi, false);
+    {
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(a);
+        for (types, 0..) |t, i| {
+            if (isIsolateInit(t)) {
+                stack.append(a, @intCast(i)) catch return false;
+            } else if (t == .PDI) {
+                if (stack.pop()) |o| {
+                    match[o] = @intCast(i);
+                    matched_pdi[i] = true;
+                }
+            }
+        }
+    }
+
+    // X1-X8
+    const Entry = struct { level: u8, override: ?Class, isolate: bool };
+    var stack: [max_depth + 2]Entry = undefined;
+    var sp: usize = 1;
+    stack[0] = .{ .level = para, .override = null, .isolate = false };
+    var overflow_isolate: usize = 0;
+    var overflow_embed: usize = 0;
+    var valid_isolate: usize = 0;
+    for (types, 0..) |*t, i| {
+        const top = stack[sp - 1];
+        switch (t.*) {
+            .RLE, .LRE, .RLO, .LRO => {
+                levels[i] = top.level;
+                const rtl = t.* == .RLE or t.* == .RLO;
+                const next: u8 = if (rtl) (top.level + 1) | 1 else (top.level + 2) & ~@as(u8, 1);
+                if (next <= max_depth and overflow_isolate == 0 and overflow_embed == 0) {
+                    stack[sp] = .{ .level = next, .override = if (t.* == .RLO) .R else if (t.* == .LRO) .L else null, .isolate = false };
+                    sp += 1;
+                } else if (overflow_isolate == 0) overflow_embed += 1;
+                t.* = .BN;
+            },
+            .RLI, .LRI, .FSI => {
+                levels[i] = top.level;
+                var rtl = t.* == .RLI;
+                if (t.* == .FSI) {
+                    const end = if (match[i] != none) match[i] else n;
+                    rtl = (firstStrong(cps[i + 1 .. end]) orelse 0) == 1;
+                }
+                if (top.override) |o| t.* = o;
+                const next: u8 = if (rtl) (top.level + 1) | 1 else (top.level + 2) & ~@as(u8, 1);
+                if (next <= max_depth and overflow_isolate == 0 and overflow_embed == 0) {
+                    valid_isolate += 1;
+                    stack[sp] = .{ .level = next, .override = null, .isolate = true };
+                    sp += 1;
+                } else overflow_isolate += 1;
+            },
+            .PDI => {
+                if (overflow_isolate > 0) {
+                    overflow_isolate -= 1;
+                } else if (valid_isolate > 0) {
+                    overflow_embed = 0;
+                    while (!stack[sp - 1].isolate) sp -= 1;
+                    sp -= 1;
+                    valid_isolate -= 1;
+                }
+                const cur = stack[sp - 1];
+                levels[i] = cur.level;
+                if (cur.override) |o| t.* = o;
+            },
+            .PDF => {
+                if (overflow_isolate > 0) {} else if (overflow_embed > 0) {
+                    overflow_embed -= 1;
+                } else if (!top.isolate and sp >= 2) sp -= 1;
+                levels[i] = stack[sp - 1].level;
+                t.* = .BN;
+            },
+            .B => levels[i] = para,
+            .BN => levels[i] = top.level,
+            else => {
+                levels[i] = top.level;
+                if (top.override) |o| t.* = o;
+            },
+        }
+    }
+
+    // X10: level runs joined across isolates into isolating run sequences
+    // (found on the explicit levels; `levels` receives the final ones)
+    const xl = a.dupe(u8, levels) catch return false;
+    defer a.free(xl);
+    const idx = a.alloc(u32, n) catch return false;
+    defer a.free(idx);
+    const seq_cps = a.alloc(u21, n) catch return false;
+    defer a.free(seq_cps);
+    const seq_types = a.alloc(Class, n) catch return false;
+    defer a.free(seq_types);
+    var start: usize = 0;
+    while (start < n) {
+        var end = start + 1;
+        while (end < n and xl[end] == xl[start]) end += 1;
+        defer start = end;
+        // a run starting with a matched PDI continues an earlier sequence
+        if (matched_pdi[start]) continue;
+        var m: usize = 0;
+        var rs = start;
+        var re = end;
+        while (true) {
+            for (rs..re) |k| {
+                idx[m] = @intCast(k);
+                m += 1;
+            }
+            const last = re - 1;
+            if (!isIsolateInit(class(cps[last])) or match[last] == none) break;
+            rs = match[last];
+            re = rs + 1;
+            while (re < n and xl[re] == xl[rs]) re += 1;
+        }
+        const seq = idx[0..m];
+        const lv = xl[seq[0]];
+        // sos / eos from the neighbouring levels (removed characters skipped)
+        var before: u8 = para;
+        var k = seq[0];
+        while (k > 0) {
+            k -= 1;
+            if (!isRemoved(class(cps[k]))) {
+                before = xl[k];
+                break;
+            }
+        }
+        var after: u8 = para;
+        const last = seq[m - 1];
+        if (!isIsolateInit(class(cps[last]))) {
+            var q = last + 1;
+            while (q < n) : (q += 1) {
+                if (!isRemoved(class(cps[q]))) {
+                    after = xl[q];
+                    break;
+                }
+            }
+        }
+        const sos: u1 = @intCast(@max(lv, before) % 2);
+        const eos: u1 = @intCast(@max(lv, after) % 2);
+        for (seq, 0..) |q, j| {
+            seq_cps[j] = cps[q];
+            seq_types[j] = types[q];
+        }
+        resolveSequence(seq_cps[0..m], seq_types[0..m], sos, eos, @intCast(lv % 2));
+        for (seq, 0..) |q, j| {
+            types[q] = seq_types[j];
+            levels[q] = implicitLevel(lv, seq_types[j]);
+        }
+    }
+    return true;
 }
 
 /// W1-W7.
-fn resolveWeak(types: []Class, para: u1) void {
+fn resolveWeak(types: []Class, sos: u1) void {
     const n = types.len;
-    const e: Class = if (para == 0) .L else .R; // sos
-    // W1: NSM (and BN: explicit formatting codes, ZWJ...) take the type
-    // of the previous character (sos at the start)
+    const e: Class = if (sos == 0) .L else .R;
+    // W1: NSM (and BN: formatting codes, ZWJ...) take the type of the
+    // previous character (sos at the start; ON after an isolate)
     var prev: Class = e;
     for (types) |*t| {
-        if (t.* == .NSM or t.* == .BN) t.* = prev else prev = t.*;
+        if (t.* == .NSM or t.* == .BN) {
+            t.* = if (prev == .LRI or prev == .RLI or prev == .FSI or prev == .PDI) .ON else prev;
+        } else prev = t.*;
     }
     // W2: EN after AL (looking back to the last strong) -> AN; W3: AL -> R
     var last_strong: Class = e;
@@ -306,9 +535,9 @@ fn resolveWeak(types: []Class, para: u1) void {
 
 /// N1/N2: runs of neutrals take the surrounding direction when both
 /// sides agree (numbers count as R), else the embedding direction.
-fn resolveNeutrals(types: []Class, para: u1) void {
+fn resolveNeutrals(types: []Class, sos: u1, eos: u1, e_dir: u1) void {
     const n = types.len;
-    const e: Class = if (para == 0) .L else .R;
+    const e: Class = if (e_dir == 0) .L else .R;
     var i: usize = 0;
     while (i < n) {
         if (!isNeutral(types[i])) {
@@ -317,43 +546,47 @@ fn resolveNeutrals(types: []Class, para: u1) void {
         }
         var j = i;
         while (j < n and isNeutral(types[j])) j += 1;
-        const before: u1 = if (i == 0) para else strongDir(types[i - 1]) orelse para;
-        const after: u1 = if (j == n) para else strongDir(types[j]) orelse para;
+        const before: u1 = if (i == 0) sos else strongDir(types[i - 1]) orelse sos;
+        const after: u1 = if (j == n) eos else strongDir(types[j]) orelse eos;
         const d: Class = if (before == after) (if (before == 0) .L else .R) else e;
         @memset(types[i..j], d);
         i = j;
     }
 }
 
-/// I1/I2 and L1.
-fn assignLevels(cps: []const u21, types: []const Class, para: u1, levels: []u8) void {
-    for (types, levels) |t, *l| {
-        l.* = para;
-        if (para == 0) {
-            if (t == .R) l.* = 1 else if (t == .AN or t == .EN) l.* = 2;
-        } else {
-            if (t == .L or t == .EN or t == .AN) l.* = 2;
+/// L1: separators, and whitespace and isolate controls at the end of the
+/// line (or before a separator), go back to the paragraph level.
+fn lineRules(cps: []const u21, para: u1, levels: []u8) void {
+    const trailing = struct {
+        fn f(c: Class) bool {
+            return switch (c) {
+                .WS, .S, .B, .BN, .LRI, .RLI, .FSI, .PDI, .LRE, .RLE, .LRO, .RLO, .PDF => true,
+                else => false,
+            };
         }
-    }
-    // L1: trailing whitespace (and separators) at the paragraph level
+    }.f;
     var k = cps.len;
-    while (k > 0) {
-        const c = class(cps[k - 1]);
-        if (c == .WS or c == .S or c == .B or c == .BN) {
-            levels[k - 1] = para;
-            k -= 1;
-        } else break;
-    }
-    for (cps, levels) |cp, *l| {
+    while (k > 0 and trailing(class(cps[k - 1]))) : (k -= 1) levels[k - 1] = para;
+    for (cps, 0..) |cp, i| {
         const c = class(cp);
-        if (c == .S or c == .B) l.* = para;
+        if (c != .S and c != .B) continue;
+        levels[i] = para;
+        var j = i;
+        while (j > 0 and trailing(class(cps[j - 1])) and class(cps[j - 1]) != .S and class(cps[j - 1]) != .B) : (j -= 1) levels[j - 1] = para;
     }
+}
+
+/// L1 for one line of a paragraph whose levels were resolved as a whole
+/// (`cps` and `levels` are the line's): its trailing whitespace returns
+/// to the paragraph level.
+pub fn lineLevels(cps: []const u21, para: u1, levels: []u8) void {
+    lineRules(cps, para, levels);
 }
 
 const Pair = struct { open: usize, close: usize };
 
 /// N0: paired brackets take the direction of what they enclose.
-fn resolveBrackets(cps: []const u21, types: []Class, ed: u1) void {
+fn resolveBrackets(cps: []const u21, types: []Class, ed: u1, sos: u1) void {
     var pairs: [64]Pair = undefined;
     var n_pairs: usize = 0;
     var stack_cp: [63]u21 = undefined;
@@ -382,12 +615,12 @@ fn resolveBrackets(cps: []const u21, types: []Class, ed: u1) void {
             }
         }
     }
-    applyPairs(cps, types, pairs[0..n_pairs], ed);
+    applyPairs(cps, types, pairs[0..n_pairs], ed, sos);
 }
 
 /// Second half of N0 for the bracket pairs found (`ed`: embedding
 /// direction, 0 = L, 1 = R).
-fn applyPairs(cps: []const u21, types: []Class, pairs: []Pair, ed: u1) void {
+fn applyPairs(cps: []const u21, types: []Class, pairs: []Pair, ed: u1, sos: u1) void {
     // process in order of opening position
     std.mem.sort(Pair, pairs, {}, struct {
         fn lt(_: void, a: Pair, b: Pair) bool {
@@ -407,7 +640,7 @@ fn applyPairs(cps: []const u21, types: []Class, pairs: []Pair, ed: u1) void {
             d = ed;
         } else if (found_o) {
             // context before the opening bracket
-            var ctx: u1 = ed;
+            var ctx: u1 = sos;
             var k = p.open;
             while (k > 0) : (k -= 1) {
                 if (strongDir(types[k - 1])) |sd| {
@@ -488,34 +721,59 @@ fn joining(cp: u21) Joining {
 }
 
 /// Contextual joining form of every character (logical order), as OpenType
-/// feature masks: 1 isol, 2 fina, 4 medi, 8 init, 0 none. ZWJ joins,
-/// ZWNJ and anything non-joining breaks the chain, marks are transparent.
+/// feature masks: 1 isol, 2 fina, 4 medi, 8 init, 0x10 fin2, 0x20 fin3,
+/// 0x40 med2 (the last three for Syriac Alaph), 0 none. ZWJ joins, ZWNJ
+/// and anything non-joining breaks the chain, marks are transparent.
+/// This is the joining state machine shapers use, with Syriac's Alaph and
+/// Dalath/Rish groups.
 pub fn joiningMasks(cps: []const u21, out: []u8) void {
-    const joins_prev: u8 = 0x10;
-    const joins_next: u8 = 0x20;
+    const none: u8 = 0;
+    const isol: u8 = 1;
+    const fina: u8 = 2;
+    const medi: u8 = 4;
+    const init: u8 = 8;
+    const fin2: u8 = 0x10;
+    const fin3: u8 = 0x20;
+    const med2: u8 = 0x40;
+    const E = struct { prev: u8, cur: u8, next: u3 };
+    // columns: U, L, R, D, Alaph, Dalath/Rish
+    const table = [7][6]E{
+        // 0: previous non-joining
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 6 } },
+        // 1: previous R (or an isolated Alaph), not joining forward
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = fin2, .next = 5 }, .{ .prev = none, .cur = isol, .next = 6 } },
+        // 2: previous D/L, isolated so far, willing to join
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = init, .cur = fina, .next = 1 }, .{ .prev = init, .cur = fina, .next = 3 }, .{ .prev = init, .cur = fina, .next = 4 }, .{ .prev = init, .cur = fina, .next = 6 } },
+        // 3: previous D in final form, willing to join
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = medi, .cur = fina, .next = 1 }, .{ .prev = medi, .cur = fina, .next = 3 }, .{ .prev = medi, .cur = fina, .next = 4 }, .{ .prev = medi, .cur = fina, .next = 6 } },
+        // 4: previous final Alaph
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = med2, .cur = isol, .next = 2 }, .{ .prev = med2, .cur = isol, .next = 1 }, .{ .prev = med2, .cur = isol, .next = 2 }, .{ .prev = med2, .cur = fin2, .next = 5 }, .{ .prev = med2, .cur = isol, .next = 6 } },
+        // 5: previous fin2/fin3 Alaph
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = isol, .cur = isol, .next = 2 }, .{ .prev = isol, .cur = isol, .next = 1 }, .{ .prev = isol, .cur = isol, .next = 2 }, .{ .prev = isol, .cur = fin2, .next = 5 }, .{ .prev = isol, .cur = isol, .next = 6 } },
+        // 6: previous Dalath/Rish
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = fin3, .next = 5 }, .{ .prev = none, .cur = isol, .next = 6 } },
+    };
     @memset(out, 0);
+    var state: u3 = 0;
     var prev: ?usize = null;
-    var prev_jt: Joining = .U;
     for (cps, 0..) |cp, i| {
-        const jt = joining(cp);
-        if (jt == .T) continue;
-        if (prev) |p| {
-            if ((prev_jt == .D or prev_jt == .C) and (jt == .D or jt == .R or jt == .C)) {
-                out[p] |= joins_next;
-                out[i] |= joins_prev;
-            }
-        }
-        prev = i;
-        prev_jt = jt;
-    }
-    for (cps, out) |cp, *m| {
-        const p = m.* & joins_prev != 0;
-        const n = m.* & joins_next != 0;
-        m.* = switch (joining(cp)) {
-            .D => if (p and n) 4 else if (p) 2 else if (n) 8 else 1,
-            .R => if (p) 2 else 1,
-            else => 0,
+        const col: usize = switch (cp) {
+            0x0710 => 4,
+            0x0715, 0x0716, 0x072A, 0x072F => 5,
+            else => switch (joining(cp)) {
+                .T => continue,
+                .U => 0,
+                .R => 2,
+                .D, .C => 3,
+            },
         };
+        const e = table[state][col];
+        if (e.prev != none) if (prev) |p| {
+            out[p] = e.prev;
+        };
+        out[i] = e.cur;
+        prev = i;
+        state = e.next;
     }
 }
 
@@ -657,6 +915,17 @@ test "joining masks: forms, transparent marks, non-joiners" {
     try std.testing.expectEqualSlices(u8, &.{ isol, 0, isol }, m[0..3]);
     joiningMasks(&u32s("ب\u{200D}"), m[0..2]);
     try std.testing.expectEqual(@as(u8, init), m[0]);
+    // Syriac Alaph: final after a joining letter, fin2 after a
+    // non-joining one, fin3 after Dalath/Rish, med2 when a final Alaph
+    // is followed by more letters
+    joiningMasks(&u32s("ܫܠܡܐ"), m[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ init, medi, medi, fina }, m[0..4]);
+    joiningMasks(&u32s("ܘܐ"), m[0..2]);
+    try std.testing.expectEqual(@as(u8, 0x10), m[1]);
+    joiningMasks(&u32s("ܕܐ"), m[0..2]);
+    try std.testing.expectEqual(@as(u8, 0x20), m[1]);
+    joiningMasks(&u32s("ܒܐܒ"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ init, 0x40, isol }, m[0..3]);
 }
 
 test "bidi classes" {
@@ -723,6 +992,68 @@ test "bidi reordering" {
     try expectVisual("אב cd", "בא cd", .ltr);
     // phone number with separators stays together
     try expectVisual("טל 03-555-1234", "03-555-1234 לט", .auto);
+}
+
+/// expectVisual ignoring where the (invisible) explicit controls land;
+/// `expected` is written without them.
+fn expectVisualText(comptime logical: []const u8, comptime expected: []const u8, dir: Direction) !void {
+    const alloc = std.testing.allocator;
+    const l = u32s(logical);
+    const v = try visual(alloc, &l, dir);
+    defer alloc.free(v);
+    var out: [64]u21 = undefined;
+    var n: usize = 0;
+    for (v) |c| {
+        if (isExplicit(c)) continue;
+        out[n] = c;
+        n += 1;
+    }
+    const e = u32s(expected);
+    try std.testing.expectEqualSlices(u21, &e, out[0..n]);
+}
+
+test "explicit embeddings, overrides and isolates" {
+    // RLO..PDF reverses Latin letters
+    try expectVisualText("a\u{202E}bc\u{202C}d", "acbd", .ltr);
+    // LRO keeps Hebrew in logical order
+    try expectVisualText("\u{202D}\u{5D0}\u{5D1}\u{202C}", "\u{5D0}\u{5D1}", .ltr);
+    // an LRI keeps "hello!" together: without it the "!" would jump to
+    // the left of the word in this right-to-left paragraph
+    try expectVisualText("שלום \u{2066}hello!\u{2069} עולם", "םלוע hello! םולש", .auto);
+    try expectVisualText("שלום hello! עולם", "םלוע !hello םולש", .auto);
+    // FSI takes the direction of its content
+    try expectVisualText("a \u{2068}\u{5D0}\u{5D1}\u{2069} c", "a \u{5D1}\u{5D0} c", .auto);
+    // RLI around a number and Latin in an LTR paragraph: the isolate
+    // reads right to left as a unit
+    try expectVisualText("x \u{2067}ab \u{5D0}\u{2069} y", "x \u{5D0} ab y", .auto);
+    // the paragraph direction skips isolated text (P2)
+    try std.testing.expectEqual(@as(u1, 0), paragraphLevel(&u32s("\u{2067}\u{5D0}\u{2069}abc"), .auto));
+    // RLE raises Latin text to level 2: order kept
+    try expectVisualText("x\u{202B}ab 12\u{202C}y", "xab 12y", .ltr);
+    // unbalanced and absurdly deep controls never crash or overflow
+    const alloc = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(3);
+    const r = prng.random();
+    const pool = [_]u21{ 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 'a', 0x5D0, 0x627, '1', ' ', '(', ')', 0x64E, 0x200D };
+    var cps: [400]u21 = undefined;
+    var types: [400]Class = undefined;
+    var levels: [400]u8 = undefined;
+    var order: [400]u32 = undefined;
+    for (0..2000) |_| {
+        const n = r.intRangeAtMost(usize, 0, cps.len);
+        for (cps[0..n]) |*c| c.* = pool[r.uintLessThan(usize, pool.len)];
+        if (r.boolean()) for (cps[0 .. n / 2]) |*c| {
+            c.* = 0x202B;
+        };
+        const para = paragraphLevel(cps[0..n], .auto);
+        resolveLevels(cps[0..n], para, types[0..n], levels[0..n]);
+        for (levels[0..n]) |l| std.testing.expect(l <= max_depth + 1) catch |e| {
+            std.debug.print("level {d} in {any}\n", .{ l, cps[0..n] });
+            return e;
+        };
+        reorder(levels[0..n], order[0..n]);
+    }
+    _ = alloc;
 }
 
 test "arabic shaping" {

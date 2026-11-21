@@ -101,22 +101,24 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     if (std.mem.eql(u8, cmd, "test-font")) {
 
         // internal development tool: render sample text to a PNG;
-        // `test-font "line|line..." [out.png]` renders the given lines
+        // `test-font "line|line..." [out.png [font.ttf]]` renders the given
+        // lines (with that font first in the fallback chain)
         const text = @import("../gfx/text.zig");
         const render = @import("../gfx/render.zig");
-        text.init(gpa);
+        text.initWith(gpa, if (args.len >= 5) args[4] else null);
         defer text.deinit();
         if (args.len >= 3) {
             const W = 1000;
             const n_lines = std.mem.count(u8, args[2], "|") + 1;
-            const H = 20 + 64 * n_lines;
+            const row = text.height(44.0) + 20;
+            const H: usize = @intCast(20 + row * @as(i32, @intCast(n_lines)));
             const px = try gpa.alloc(u32, W * H);
             defer gpa.free(px);
             @memset(px, 0xFFFFFFFF);
             var canvas = render.Canvas.init(px, W, @intCast(H));
             var it = std.mem.splitScalar(u8, args[2], '|');
             var y: i32 = 10;
-            while (it.next()) |line| : (y += 64) {
+            while (it.next()) |line| : (y += row) {
                 const w = text.width(44.0, line);
                 canvas.fillRect(20, y, w, text.height(44.0), 0xFFE7F0FF);
                 text.draw(&canvas, 20, y, 44.0, 0xFF101010, line);
