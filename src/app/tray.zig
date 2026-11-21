@@ -17,6 +17,8 @@ pub const Tray = struct {
     alloc: std.mem.Allocator,
     conn: *dbus.Connection,
     icons: []const IconPixmap,
+    /// a StatusNotifierWatcher accepted the item
+    registered: bool = false,
 
     pub const IconPixmap = struct {
         width: i32,
@@ -34,6 +36,13 @@ pub const Tray = struct {
     }
 
     fn register(self: *Tray) !void {
+        self.registered = false;
+        // no watcher (GNOME without the AppIndicator extension): wait for
+        // one to appear instead of failing a call
+        if (!(self.conn.nameHasOwner("org.kde.StatusNotifierWatcher") catch true)) {
+            std.log.warn("no system tray host found (on GNOME, enable the AppIndicator extension); waiting for one", .{});
+            return;
+        }
         var m = dbus.Marshal.init(self.alloc);
         defer m.deinit();
         try m.putString(sni_path);
@@ -50,6 +59,8 @@ pub const Tray = struct {
             return;
         };
         reply.deinit(self.alloc);
+        self.registered = true;
+        std.log.info("tray icon registered", .{});
     }
 
     /// Handle one incoming message if it belongs to the tray objects.
