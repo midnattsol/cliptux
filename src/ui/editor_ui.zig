@@ -452,11 +452,15 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
                 canvas.ringAA(px, py, handleDrawRadius(self), 1.5 * f, 0xB3000000);
             }
         }
-        var buf: [64]u8 = undefined;
-        const label = dimsLabel(self, &buf);
-        const r = dimsPillRect(self, s);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xE6191D21);
-        text_mod.draw(canvas, r.x + self.sc(8), r.y + self.sc(4), 13.0 * f, ui_fg, label);
+        // one size label, on the monitor with the toolbar (the one the
+        // pointer is on, else the one showing most of the selection)
+        if (self.isTbPane()) {
+            var buf: [64]u8 = undefined;
+            const label = dimsLabel(self, &buf);
+            const r = dimsPillRect(self, s);
+            canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xE6191D21);
+            text_mod.draw(canvas, r.x + self.sc(8), r.y + self.sc(4), 13.0 * f, ui_fg, label);
+        }
     }
     if (self.show_hint) {
         // first run only: a quiet pill, gone at the first click or key

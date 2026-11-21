@@ -98,6 +98,7 @@ if [ "${1:-}" = "--inner" ]; then
             [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
     }
     not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
+    no_find_exact() { ! drv find "$1" "$2" "$3" 2>/dev/null; }
     no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }
     gdbus_owner() {
         gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
@@ -246,6 +247,9 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 0.3
         shot 0 sel0
         shot 1 sel1
+        # the "400 × 200" pill (ui_fg text) only next to the toolbar
+        check "size label shown on the toolbar's monitor" drv find 0 e9ecef 3
+        check "  ... and not repeated on the other" no_find_exact 1 e9ecef 3
         drv key enter
         sleep 1
         check "selection across both monitors is copied whole" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
