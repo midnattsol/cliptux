@@ -187,6 +187,8 @@ rec-trim)
     wait_log 10 "trim: " && sleep 1.5
     shot 0 trim
     check "the trim window shows the filmstrip's handles" eval 'drv find 0 ffcc00 20 4'
+    # a thumbnail that appeared meanwhile may hold the keyboard: click in
+    click 0 800 330
     keys esc
     check "  ... and Esc closes it" wait_exit 5
     ;;
