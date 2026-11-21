@@ -808,6 +808,24 @@ pub const Window = struct {
         try self.finishOpen();
     }
 
+    /// One fullscreen surface on the output whose logical rectangle starts
+    /// at x, y; open(.{ .fullscreen = true }) when there is none.
+    pub fn openOnOutputAt(self: *Window, title: []const u8, x: i32, y: i32) !void {
+        for (&self.outputs) |*o| {
+            if (o.id == 0) continue;
+            const r = o.logicalRect();
+            if (r.x != x or r.y != y) continue;
+            try self.createSurface(0, title, .{ .fullscreen = true }, o.id, o.global);
+            const s = &self.surfaces[0];
+            s.int_scale = @max(1, o.scale);
+            if (s.fs_obj == 0) s.scale120 = @intCast(s.int_scale * 120);
+            setOutputRect(s, o);
+            self.n_surfaces = 1;
+            return self.finishOpen();
+        }
+        return self.open(title, .{ .fullscreen = true });
+    }
+
     fn setOutputRect(s: *Surface, o: *const Output) void {
         const r = o.logicalRect();
         s.x = r.x;

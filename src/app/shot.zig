@@ -68,7 +68,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     const per_monitor = cap.monitors.len > 1 and for (cap.monitors) |m| {
         if (m.logical == null) break false;
     } else true;
-    if (per_monitor) try win.openOutputs("Shotlet") else try win.open("Shotlet", .{ .fullscreen = true });
+    try openEditor(&win, &cap, per_monitor);
     const t_open = nowMs();
     std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
     std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
@@ -81,6 +81,18 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         t_open - t_capture,
     });
     try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null);
+}
+
+/// The editor's fullscreen surfaces: one per monitor when the capture has
+/// several; for a capture of one monitor (a portal that shares one, like
+/// xdg-desktop-portal-wlr), on that monitor rather than wherever the
+/// compositor puts a new window.
+fn openEditor(win: anytype, cap: *const capture.Capture, per_monitor: bool) !void {
+    if (per_monitor) return win.openOutputs("Shotlet");
+    if (cap.monitors.len == 1) if (cap.monitors[0].logical) |l| {
+        return win.openOnOutputAt("Shotlet", l.x, l.y);
+    };
+    try win.open("Shotlet", .{ .fullscreen = true });
 }
 
 /// A kept capture opened again in the editor ("Annotate").
@@ -164,7 +176,7 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
                 const path = saved orelse {
                     // the file chooser was cancelled: back to the editor,
                     // annotations intact, rather than losing the work
-                    if (per_monitor) try win.openOutputs("Shotlet") else try win.open("Shotlet", .{ .fullscreen = true });
+                    try openEditor(win, cap, per_monitor);
                     ed.running = true;
                     ed.action = .cancel;
                     continue;
@@ -302,6 +314,7 @@ fn screencastInner(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg
             std.log.warn("could not store the screencast token: {t}", .{err});
     }
 
+    for (started.streams) |st| std.log.debug("screencast stream: node {d} position {?any} size {?any}", .{ st.node_id, st.position, st.size });
     const fd = try portal.scOpenRemote(gpa, conn, session_path);
     const streams = started.streams[0..@min(started.streams.len, pw.max_nodes)];
     var node_ids: [pw.max_nodes]u32 = undefined;
