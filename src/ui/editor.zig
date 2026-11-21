@@ -610,7 +610,7 @@ pub const Editor = struct {
                     try self.onRightClick();
                 }
             },
-            .pointer_axis => |a| try self.onScroll(a.value),
+            .pointer_axis => |a| try self.onScroll(a.value, a.value120),
             .key => |k| {
                 if (k.code == 0) {
                     // input method: committed text or a preedit change,
@@ -636,8 +636,9 @@ pub const Editor = struct {
         self.pane_i = surface;
     }
 
-    fn onScroll(self: *Editor, value: f64) !void {
-        const steps = scrollSteps(&self.scroll_acc, value);
+    fn onScroll(self: *Editor, value: f64, value120: ?i32) !void {
+        // exact notches when the wheel reports them (8 units = 1/15 notch)
+        const steps = if (value120) |v| scrollSteps(&self.scroll_acc, @as(f64, @floatFromInt(v)) / 8.0) else scrollSteps(&self.scroll_acc, value);
         if (steps != 0) try self.setThickness(self.thickness + steps);
     }
 
@@ -1872,7 +1873,10 @@ pub const Editor = struct {
             try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = false, .x = 0, .y = 0 } });
             std.log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, nowMs() - t1 });
         } else if (eql(u8, op, "scroll")) {
-            try self.handle(.{ .pointer_axis = .{ .value = try std.fmt.parseFloat(f64, arg) } });
+            // scroll V, or scroll v120:N for a high-resolution wheel
+            if (std.mem.startsWith(u8, arg, "v120:")) {
+                try self.handle(.{ .pointer_axis = .{ .value = 0, .value120 = try std.fmt.parseInt(i32, arg[5..], 10) } });
+            } else try self.handle(.{ .pointer_axis = .{ .value = try std.fmt.parseFloat(f64, arg) } });
         } else if (eql(u8, op, "key")) {
             try self.handle(.{ .key = try parseKey(arg) });
         } else if (eql(u8, op, "type")) {

@@ -82,6 +82,7 @@ pub const wl_pointer = struct {
     pub const ev_button = 3;
     pub const ev_axis = 4;
     pub const ev_frame = 5;
+    pub const ev_axis_value120 = 9; // since v8
 };
 
 pub const wl_keyboard = struct {

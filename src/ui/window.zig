@@ -69,8 +69,9 @@ const keyboard = @import("keyboard.zig");
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64, surface: u8 = 0 },
     pointer_button: struct { button: u32, pressed: bool, x: f64, y: f64, surface: u8 = 0 },
-    /// vertical scroll, positive = down
-    pointer_axis: struct { value: f64, surface: u8 = 0 },
+    /// vertical scroll, positive = down. `value120`: exact wheel notches
+    /// (120 per notch, wl_pointer v8) when the device reports them
+    pointer_axis: struct { value: f64, value120: ?i32 = null, surface: u8 = 0 },
     key: Key,
     /// buffer was (re)created at this pixel size; caller must redraw.
     /// w == h == 0: the surface is gone (output unplugged)
@@ -423,6 +424,10 @@ pub const Window = struct {
     ptr_y: f64 = 0,
     /// surface index under the pointer / with keyboard focus
     ptr_surface: u8 = 0,
+    /// vertical scroll gathered until the pointer frame
+    axis_value: f64 = 0,
+    axis_v120: ?i32 = null,
+    axis_pending: bool = false,
     key_surface: u8 = 0,
     ctrl: bool = false,
     shift: bool = false,
@@ -508,7 +513,9 @@ pub const Window = struct {
         } else if (eql(u8, iface, "xdg_wm_base")) {
             self.wm_base = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wl_seat") and self.seat == 0) {
-            self.seat_version = @min(version, 5);
+            // v8 adds axis_value120 (exact wheel notches); keymaps are
+            // already mapped MAP_PRIVATE as v7 requires
+            self.seat_version = @min(version, 8);
             self.seat = try self.conn.bind(self.registry, name, iface, self.seat_version);
         } else if (eql(u8, iface, "wl_data_device_manager")) {
             self.ddm = try self.conn.bind(self.registry, name, iface, 1);
@@ -1294,11 +1301,33 @@ pub const Window = struct {
                 const axis = try r.uint();
                 const value = try r.fixed();
                 if (axis == 0) { // vertical
-                    try self.queue.append(self.alloc, .{ .pointer_axis = .{ .value = value, .surface = self.ptr_surface } });
+                    self.axis_value += value;
+                    self.axis_pending = true;
+                    // before v5 there is no frame event to wait for
+                    if (self.seat_version < 5) try self.flushAxis();
                 }
             },
+            wl.wl_pointer.ev_axis_value120 => {
+                const axis = try r.uint();
+                const v120 = try r.int();
+                if (axis == 0) {
+                    self.axis_v120 = (self.axis_v120 orelse 0) + v120;
+                    self.axis_pending = true;
+                }
+            },
+            wl.wl_pointer.ev_frame => try self.flushAxis(),
             else => {},
         }
+    }
+
+    /// One scroll event per pointer frame, carrying both the smooth value
+    /// and the wheel's exact notches when it sent them.
+    fn flushAxis(self: *Window) !void {
+        if (!self.axis_pending) return;
+        try self.queue.append(self.alloc, .{ .pointer_axis = .{ .value = self.axis_value, .value120 = self.axis_v120, .surface = self.ptr_surface } });
+        self.axis_value = 0;
+        self.axis_v120 = null;
+        self.axis_pending = false;
     }
 
     fn pointerScale(self: *const Window) f64 {
