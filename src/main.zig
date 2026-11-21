@@ -11,6 +11,10 @@ const usage =
     \\usage:
     \\  shotlet             capture + editor (copy/save)
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
+    \\  shotlet history     recent captures (history clear: forget them)
+    \\  shotlet pin FILE    pin a PNG to the screen
+    \\  shotlet gnome-integration [status|install|uninstall]
+    \\                      the GNOME Shell extension for floating windows
     \\  shotlet --help      show this help
     \\
 ;
@@ -87,6 +91,24 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
+    } else if (std.mem.eql(u8, cmd, "quick") and args.len > 3) {
+        try @import("app/quick.zig").run(gpa, env, args[2], args[3]);
+    } else if (std.mem.eql(u8, cmd, "history")) {
+        if (args.len > 2 and std.mem.eql(u8, args[2], "clear")) {
+            var buf: [1024]u8 = undefined;
+            @import("app/history.zig").clear(try @import("app/history.zig").historyRoot(&buf, env.home));
+            std.debug.print("history cleared\n", .{});
+            return;
+        }
+        const smoke: i64 = if (args.len > 3 and std.mem.eql(u8, args[2], "--smoke"))
+            std.fmt.parseInt(i64, args[3], 10) catch 0
+        else
+            0;
+        try @import("app/history_ui.zig").run(gpa, env, smoke);
+    } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {
+        try @import("app/pin.zig").run(gpa, env, args[2]);
+    } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
+        try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status");
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
     } else if (try devtools.run(gpa, env, cmd, args)) {
@@ -140,6 +162,12 @@ test {
     _ = @import("app/history.zig");
     _ = @import("app/annot.zig");
     _ = @import("app/keep.zig");
+    _ = @import("app/quick.zig");
+    _ = @import("app/gnome.zig");
+    _ = @import("app/pin.zig");
+    _ = @import("app/history_ui.zig");
+    _ = @import("platform/ocr.zig");
+    _ = @import("ui/floatui.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
     _ = @import("ui/textbox.zig");

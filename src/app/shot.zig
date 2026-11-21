@@ -457,7 +457,7 @@ fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, buf: []u
 }
 
 /// "shotlet-20260701-140501" in local time.
-fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
+pub fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
     const lt = clock.localTime(gpa, env.tz, sys.realtimeSec());
     return std.fmt.bufPrint(buf, "shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}", .{
         lt.year, lt.month, lt.day, lt.hour, lt.minute, lt.second,
@@ -465,7 +465,7 @@ fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
 }
 
 /// Save into the screenshots folder. Returns the path written (owned).
-fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
+pub fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755); // best effort; may already exist
@@ -498,7 +498,7 @@ pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ex
 /// Ask where to save with the FileChooser portal. Null when the person
 /// cancelled (nothing is written). Falls back to the screenshots folder
 /// when there is no FileChooser portal.
-fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
+pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755);

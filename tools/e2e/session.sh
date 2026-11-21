@@ -11,6 +11,8 @@
 #      HL_IBUS=hangul                   IBus engine as the input source
 #      HL_PORTAL_APP_ID=shotlet         app id the portal gives every client
 #      HL_APPS="x.desktop"              desktop files to install
+#      HL_EXTENSIONS="dir..."           GNOME Shell extensions to install
+#                                       and enable before the shell starts
 #      HL_KEEP=1                        keep the temp HOME (prints it)
 # Inside CMD: WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HOME,
 # XDG_RUNTIME_DIR point at the private session; HL_SHELL_LOG is the
@@ -91,6 +93,18 @@ if [ -n "${HL_IBUS:-}" ] && command -v ibus-daemon >/dev/null; then
         >"$HOME/ibus.log" 2>&1 & pids+=($!)
     for i in $(seq 1 50); do ibus engine >/dev/null 2>&1 && break; sleep 0.1; done
     gsettings set org.gnome.desktop.input-sources sources "[('ibus','$HL_IBUS')]"
+fi
+# HL_EXTENSIONS="path/uuid ...": user extensions, enabled before gnome-shell
+# starts (a running shell on Wayland never discovers new ones)
+if [ -n "${HL_EXTENSIONS:-}" ]; then
+    uuids=
+    for e in $HL_EXTENSIONS; do
+        mkdir -p "$XDG_DATA_HOME/gnome-shell/extensions"
+        cp -r "$e" "$XDG_DATA_HOME/gnome-shell/extensions/"
+        uuids="$uuids${uuids:+, }'$(basename "$e")'"
+    done
+    gsettings set org.gnome.shell disable-user-extensions false
+    gsettings set org.gnome.shell enabled-extensions "[$uuids]"
 fi
 MONS=()
 for m in ${HL_MONITORS:-1600x900}; do MONS+=(--virtual-monitor "$m"); done
