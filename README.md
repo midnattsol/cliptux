@@ -12,15 +12,20 @@ Wayland and DBus wire protocols directly.
   rectangle (outline, filled, rounded), ellipse, highlighter, blur,
   pixelate, solid redaction, counter badges, editable multi-line text.
   Every annotation can be selected again to move, resize, recolour or
-  delete. Undo/redo, 8 colours plus a custom picker, mouse-wheel size,
+  delete. Undo/redo, 11 colours plus a custom picker, mouse-wheel size,
   and a "beautify" frame (gradient, solid or transparent background,
   padding, rounded corners, shadow).
+- One floating toolbar in a translucent, blurred material; colour, size
+  and style in a popover, the rest under More. Light or dark and the
+  accent colour follow the desktop (Settings portal), and transitions
+  stop when the desktop asks for reduced motion.
 - Copies straight to the clipboard (nothing written to disk), saves to
   your Pictures folder, or asks where to save (Save As, through the
   desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
   save, `Esc` cancels then quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
   time and never overwrite an existing file (`-2`, `-3`, ... are added).
-- Tray icon with menu, and a Settings window with rebindable shortcuts.
+- Tray icon with menu, and a Settings window (general, editor and
+  shortcut views) with rebindable shortcuts and a save folder picker.
 
 Shotlet was called **cliptux** until its rename; settings in
 `~/.config/cliptux` (or `$XDG_CONFIG_HOME/cliptux`) are moved to the new
