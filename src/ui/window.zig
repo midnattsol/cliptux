@@ -149,6 +149,8 @@ pub const Window = struct {
     pool_mem: []align(std.heap.page_size_min) u8 = &.{},
     buffers: [2]Buffer = .{ .{}, .{} },
     cur_buf: usize = 0,
+    /// buffer index of the last present(), for SHOTLET_DUMP_FRAME
+    last_presented: ?usize = null,
 
     // state
     width: u32 = 0, // buffer pixels
@@ -234,6 +236,7 @@ pub const Window = struct {
     }
 
     pub fn deinit(self: *Window) void {
+        self.dumpFrames();
         self.dropClipboardSource();
         self.destroyPool();
         if (self.cursor_pool_mem.len > 0) sys.munmap(self.cursor_pool_mem);
@@ -396,7 +399,37 @@ pub const Window = struct {
         try c.request(self.surface, wl.wl_surface.commit, &.{});
         try c.flush();
         b.busy = true;
+        self.last_presented = self.cur_buf;
         self.cur_buf = 1 - self.cur_buf;
+    }
+
+    /// Debug aid: with SHOTLET_DUMP_FRAME=/path/prefix set, write the last
+    /// presented frame of each surface to <prefix>-<index>.png. Runs once,
+    /// when the window closes, so headless runs can be inspected.
+    fn dumpFrames(self: *Window) void {
+        const prefix = std.mem.span(std.c.getenv("SHOTLET_DUMP_FRAME") orelse return);
+        if (prefix.len == 0) return;
+        const idx = self.last_presented orelse return;
+        const b = &self.buffers[idx];
+        if (b.pixels.len == 0) return;
+        const px = @as([*]const u32, @ptrCast(b.pixels.ptr))[0 .. b.pixels.len / 4];
+        writeDump(self.alloc, prefix, 0, px, self.width, self.height);
+        self.last_presented = null;
+    }
+
+    fn writeDump(alloc: std.mem.Allocator, prefix: []const u8, index: usize, px: []const u32, w: u32, h: u32) void {
+        var path_buf: [4096]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}-{d}.png", .{ prefix, index }) catch return;
+        const data = png.encode(alloc, px, w, h) catch |err| {
+            std.log.warn("frame dump: encode failed: {t}", .{err});
+            return;
+        };
+        defer alloc.free(data);
+        sys.writeFile(path, data) catch |err| {
+            std.log.warn("frame dump: cannot write {s}: {t}", .{ path, err });
+            return;
+        };
+        std.log.info("frame dump: wrote {s} ({d}x{d})", .{ path, w, h });
     }
 
     /// Blocking: next logical input event.
@@ -801,6 +834,7 @@ pub const Window = struct {
     /// Destroy the visible window (keeps the connection alive so an offered
     /// clipboard selection can still be served).
     pub fn closeWindow(self: *Window) void {
+        self.dumpFrames();
         const c = &self.conn;
         if (self.toplevel != 0) c.request(self.toplevel, wl.xdg_toplevel.destroy, &.{}) catch {};
         if (self.xdg_surf != 0) c.request(self.xdg_surf, wl.xdg_surface.destroy, &.{}) catch {};
