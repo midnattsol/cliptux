@@ -136,6 +136,7 @@ test {
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
+    _ = @import("app/clock.zig");
     _ = @import("app/env.zig");
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
