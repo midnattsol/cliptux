@@ -14,6 +14,10 @@ const shapes = @import("shapes.zig");
 const dbus = @import("../platform/dbus.zig");
 const portal = @import("../platform/portal.zig");
 const sys = @import("../platform/sys.zig");
+const env_mod = @import("../app/env.zig");
+const gnome = @import("../app/gnome.zig");
+const history = @import("../app/history.zig");
+const keep = @import("../app/keep.zig");
 
 const Canvas = render.Canvas;
 const Window = window.Window;
@@ -35,7 +39,67 @@ const Hit = union(enum) {
     bind: config.Action,
     reset_binds,
     win_close,
+    toggle_quick,
+    quick_minus,
+    quick_plus,
+    toggle_history,
+    hist_minus,
+    hist_plus,
+    hist_mb_minus,
+    hist_mb_plus,
+    open_history,
+    clear_history,
+    gnome_enable,
 };
+
+/// The GNOME Shell integration as the Settings window shows it.
+const GnomeState = enum { not_gnome, active, installed, missing, failed };
+
+fn gnomeState(alloc: std.mem.Allocator, bus: ?*dbus.Connection) GnomeState {
+    if (!gnome.isGnome()) return .not_gnome;
+    const b = bus orelse return .missing;
+    if (gnome.extensionActive(b)) return .active;
+    const st = gnome.shellState(alloc, b) orelse return .missing;
+    return if (st == 99) .missing else .installed;
+}
+
+/// Steps of the numeric settings: seconds, captures, MiB.
+pub fn stepSeconds(v: u16, up: bool) u16 {
+    const steps = [_]u16{ 3, 5, 8, 10, 15, 20, 30, 45, 60, 120, 300 };
+    return stepIn(u16, &steps, v, up);
+}
+pub fn stepCount(v: u16, up: bool) u16 {
+    const steps = [_]u16{ 5, 10, 20, 30, 50, 100, 200, 500, 1000 };
+    return stepIn(u16, &steps, v, up);
+}
+pub fn stepMb(v: u32, up: bool) u32 {
+    const steps = [_]u32{ 50, 100, 200, 500, 1000, 2000, 5000 };
+    return stepIn(u32, &steps, v, up);
+}
+
+/// The next value of `steps` above (or below) v; off-list values snap in.
+fn stepIn(comptime T: type, steps: []const T, v: T, up: bool) T {
+    if (up) {
+        for (steps) |x| if (x > v) return x;
+        return steps[steps.len - 1];
+    }
+    var i = steps.len;
+    while (i > 0) {
+        i -= 1;
+        if (steps[i] < v) return steps[i];
+    }
+    return steps[0];
+}
+
+test "numeric settings step along their scales" {
+    try std.testing.expectEqual(@as(u16, 10), stepSeconds(8, true));
+    try std.testing.expectEqual(@as(u16, 5), stepSeconds(8, false));
+    try std.testing.expectEqual(@as(u16, 3), stepSeconds(3, false));
+    try std.testing.expectEqual(@as(u16, 300), stepSeconds(300, true));
+    try std.testing.expectEqual(@as(u16, 50), stepCount(42, true));
+    try std.testing.expectEqual(@as(u16, 30), stepCount(42, false));
+    try std.testing.expectEqual(@as(u32, 1000), stepMb(500, true));
+}
 
 fn headerHeight(win: *const Window) i32 {
     return @intFromFloat(@round(52.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0));
@@ -55,7 +119,8 @@ const Region = struct {
     }
 };
 
-pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8, home: []const u8, bus_addr: []const u8, smoke_ms: i64) !void {
+pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
+    const home = env.home;
     var smoke_deadline: i64 = 0;
     if (smoke_ms > 0) smoke_deadline = sys.monoMs() + smoke_ms;
     var cfg = config.load(alloc, home);
@@ -64,7 +129,7 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
     defer icons.deinit();
 
     // the session bus: appearance (and its changes) and the folder chooser
-    var bus: ?dbus.Connection = dbus.Connection.connectSession(alloc, bus_addr) catch null;
+    var bus: ?dbus.Connection = portal.connectApp(alloc, env.bus_addr) catch null;
     defer if (bus) |*b| b.deinit();
     var st: State = .{};
     if (bus) |*b| {
@@ -72,8 +137,10 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
         theme_mod.watch(b) catch {};
     }
     st.theme = st.prefs.theme();
+    st.env = env;
+    st.gnome = gnomeState(alloc, if (bus) |*b| b else null);
 
-    var win = try Window.init(alloc, runtime_dir, display);
+    var win = try Window.init(alloc, env.runtime_dir, env.wayland_display);
     defer win.deinit();
     win.current_cursor = .arrow;
     try win.open("Shotlet settings", .{ .fullscreen = false, .width = 720, .height = 780 });
@@ -263,6 +330,9 @@ const State = struct {
     pending_focus: ?usize = null,
     /// scroll the focused control into view after the next draw
     reveal_focus: bool = false,
+    env: env_mod.Env = undefined,
+    gnome: GnomeState = .not_gnome,
+    history_cleared: bool = false,
 
     fn scrollBy(self: *State, step: i32, win: *const Window) void {
         const max_scroll = @max(0, self.content_h - @as(i32, @intCast(win.height)));
@@ -400,6 +470,32 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
             return false;
         },
         .reset_binds => cfg.binds = config.default_binds,
+        .toggle_quick => cfg.quick_access = !cfg.quick_access,
+        .quick_minus, .quick_plus => cfg.quick_access_seconds = stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
+        .toggle_history => cfg.history = !cfg.history,
+        .hist_minus, .hist_plus => cfg.history_max = stepCount(cfg.history_max, hit == .hist_plus),
+        .hist_mb_minus, .hist_mb_plus => cfg.history_max_mb = stepMb(cfg.history_max_mb, hit == .hist_mb_plus),
+        .open_history => {
+            keep.spawnSelf(st.env, &.{"history"});
+            return false;
+        },
+        .clear_history => {
+            var buf: [1024]u8 = undefined;
+            if (history.historyRoot(&buf, home)) |root| history.clear(root) else |_| {}
+            std.log.info("history cleared from Settings", .{});
+            st.history_cleared = true;
+            st.dirty = true;
+            return false;
+        },
+        .gnome_enable => {
+            st.gnome = switch (gnome.install(alloc, st.env, bus)) {
+                .active => .active,
+                .installed_relogin => .installed,
+                .failed => .failed,
+            };
+            st.dirty = true;
+            return false;
+        },
         .win_close => {
             config.save(alloc, home, cfg) catch |err|
                 std.log.warn("could not save config: {t}", .{err});
@@ -503,6 +599,56 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
                 if (remembered) try chipButton(&ui, r, .forget_monitors, null, "Choose again", true);
             }
             y = endCard(&card) + ui.sc(26);
+
+            y = try groupTitle(&ui, cx, y, col_w, "Quick access", null);
+            card = beginCard(&ui, cx, y, col_w, 2 * rh);
+            try switchRow(&ui, &card, "Thumbnail after Copy and Save", "Copy again, save, drag into apps, annotate or pin it", cfg.quick_access, .toggle_quick);
+            {
+                const r = rowBegin(&ui, &card, rh);
+                rowTitle(&ui, r, "Stays for", "Longer while the pointer is on it");
+                var buf: [16]u8 = undefined;
+                try valueStepper(&ui, r, std.fmt.bufPrint(&buf, "{d} s", .{cfg.quick_access_seconds}) catch "?", .quick_minus, .quick_plus);
+            }
+            y = endCard(&card) + ui.sc(26);
+
+            y = try groupTitle(&ui, cx, y, col_w, "Recent captures", null);
+            card = beginCard(&ui, cx, y, col_w, 4 * rh);
+            try switchRow(&ui, &card, "Keep copied and saved captures", "Private to you, in ~/.local/state/shotlet", cfg.history, .toggle_history);
+            {
+                const r = rowBegin(&ui, &card, rh);
+                rowTitle(&ui, r, "Keep at most", null);
+                var buf: [24]u8 = undefined;
+                try valueStepper(&ui, r, std.fmt.bufPrint(&buf, "{d} captures", .{cfg.history_max}) catch "?", .hist_minus, .hist_plus);
+            }
+            {
+                const r = rowBegin(&ui, &card, rh);
+                rowTitle(&ui, r, "Using at most", null);
+                var buf: [24]u8 = undefined;
+                try valueStepper(&ui, r, std.fmt.bufPrint(&buf, "{d} MB", .{cfg.history_max_mb}) catch "?", .hist_mb_minus, .hist_mb_plus);
+            }
+            {
+                const r = rowBegin(&ui, &card, rh);
+                rowTitle(&ui, r, "Captures kept so far", if (st.history_cleared) "Cleared" else null);
+                try chipButton(&ui, r, .clear_history, null, "Clear history", false);
+                try chipButtonAt(&ui, r, .open_history, "Open\u{2026}", ui.sc(150));
+            }
+            y = endCard(&card) + ui.sc(26);
+
+            if (st.gnome != .not_gnome) {
+                y = try groupTitle(&ui, cx, y, col_w, "GNOME integration", null);
+                card = beginCard(&ui, cx, y, col_w, ui.sc(64));
+                {
+                    const r = rowBegin(&ui, &card, ui.sc(64));
+                    rowTitle(&ui, r, "Shell extension", switch (st.gnome) {
+                        .active => "On: thumbnails and pins stay above other windows",
+                        .installed => "Installed; log out and in once to finish",
+                        .failed => "Could not install it; see shotlet gnome-integration",
+                        else => "Off: the thumbnail is an ordinary window",
+                    });
+                    if (st.gnome == .missing or st.gnome == .failed) try chipButton(&ui, r, .gnome_enable, null, "Enable", true);
+                }
+                y = endCard(&card) + ui.sc(26);
+            }
 
             y = try groupTitle(&ui, cx, y, col_w, "Global shortcut", null);
             card = beginCard(&ui, cx, y, col_w, ui.sc(64));
@@ -798,6 +944,40 @@ fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {
     var buf: [8]u8 = undefined;
     const label = std.fmt.bufPrint(&buf, "{d}", .{value}) catch "?";
     ui.label(x + ui.sc(32), by, bs, 15, th.text, .regular, label);
+}
+
+/// A chip button whose right edge is `right_gap` in from the row's.
+fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i32) !void {
+    const th = ui.th;
+    const bw = ui.width(14, .regular, label_s) + ui.sc(28);
+    const bh = ui.sc(34);
+    const bx = r.x + r.w - right_gap - bw;
+    const by = r.y + @divTrunc(r.h - bh, 2);
+    const hov = ui.hovered(bx, by, bw, bh);
+    ui.c.fillRoundRectAA(bx, by, bw, bh, 8 * ui.f, if (hov) theme_mod.mix(th.chip, th.switch_off, 0.8) else th.chip);
+    ui.label(bx + ui.sc(14), by, bh, 14, th.text, .regular, label_s);
+    try ui.add(.{ .x = bx, .y = by, .w = bw, .h = bh, .hit = hit, .radius = 8 });
+}
+
+/// - value + on the right of row `r`.
+fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
+    const th = ui.th;
+    const bs = ui.sc(34);
+    const val_w = @max(ui.sc(64), ui.width(15, .regular, value) + ui.sc(20));
+    const x = r.x + r.w - ui.sc(16) - 2 * bs - val_w;
+    const by = r.y + @divTrunc(r.h - bs, 2);
+    for ([_]Hit{ minus, plus }, 0..) |hit, i| {
+        const bx = if (i == 0) x else x + bs + val_w;
+        const hov = ui.hovered(bx, by, bs, bs);
+        ui.c.fillRoundRectAA(bx, by, bs, bs, 8 * ui.f, if (hov) theme_mod.mix(th.chip, th.switch_off, 0.8) else th.chip);
+        const is = ui.sc(16);
+        if (i == 0) {
+            ui.c.fillRoundRectAA(bx + @divTrunc(bs - is, 2) + ui.sc(2), by + @divTrunc(bs, 2) - ui.sc(1), is - ui.sc(4), @max(2, ui.sc(2)), 1, th.text);
+        } else icons.drawStroke(&ui.c, .plus, bx + @divTrunc(bs - is, 2), by + @divTrunc(bs - is, 2), is, 2, th.text);
+        try ui.add(.{ .x = bx, .y = by, .w = bs, .h = bs, .hit = hit, .radius = 8 });
+    }
+    const tw = ui.width(15, .regular, value);
+    ui.label(x + bs + @divTrunc(val_w - tw, 2), by, bs, 15, th.text, .regular, value);
 }
 
 /// Key caps right-aligned in row `r`; returns their left edge.

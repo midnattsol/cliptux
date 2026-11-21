@@ -90,7 +90,7 @@ pub fn main(init: std.process.Init) !void {
             std.fmt.parseInt(i64, args[3], 10) catch 0
         else
             0;
-        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, env.bus_addr, smoke);
+        try @import("ui/settings.zig").run(gpa, env, smoke);
     } else if (std.mem.eql(u8, cmd, "quick") and args.len > 3) {
         try @import("app/quick.zig").run(gpa, env, args[2], args[3]);
     } else if (std.mem.eql(u8, cmd, "history")) {
