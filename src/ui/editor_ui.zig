@@ -230,7 +230,7 @@ fn ff(v: i32) f64 {
 
 // --- layout ---
 
-const Item = struct { kind: ButtonKind, w: i32, group: u8 };
+pub const Item = struct { kind: ButtonKind, w: i32, group: u8 };
 
 fn copyButtonWidth(self: *const Editor) i32 {
     return self.sc(10) + self.sc(16) + self.sc(6) + text_mod.widthStyled(theme.font_label * self.uf(), .bold, "Copy") + self.sc(14);
@@ -289,7 +289,7 @@ pub fn layoutToolbar(self: *Editor) !void {
         .none, .picking, .size_slider => false,
         else => true,
     };
-    if (sel_b == null or dragging) {
+    if (sel_b == null or dragging or tui.hideBar(self)) {
         self.toolbar_rect = Rect.empty;
         self.panel_rect = Rect.empty;
         self.popover = .none;
@@ -305,23 +305,7 @@ pub fn layoutToolbar(self: *Editor) !void {
     const margin = self.sc(8);
 
     var items: [24]Item = undefined;
-    var n: usize = 0;
-    for (tool_list) |t| {
-        items[n] = .{ .kind = .{ .tool = t }, .w = btn, .group = 0 };
-        n += 1;
-    }
-    items[n] = .{ .kind = .colors, .w = self.sc(8 + 18 + 8 + 12 + 8), .group = 1 };
-    n += 1;
-    for ([_]ButtonKind{ .undo, .redo }) |k| {
-        items[n] = .{ .kind = k, .w = btn, .group = 2 };
-        n += 1;
-    }
-    for ([_]ButtonKind{ .save, .more }) |k| {
-        items[n] = .{ .kind = k, .w = btn, .group = 3 };
-        n += 1;
-    }
-    items[n] = .{ .kind = .copy, .w = copyButtonWidth(self) + self.sc(2), .group = 3 };
-    n += 1;
+    const n = tui.barItems(self, &items) orelse mainItems(self, &items);
 
     var xs: [24]i32 = undefined;
     var rows: [24]u8 = undefined;
@@ -377,8 +361,10 @@ pub fn layoutToolbar(self: *Editor) !void {
     }
     // the copy button sits 2 px apart from More
     const cb = &self.buttons.items[self.buttons.items.len - 1];
-    cb.rect.x += self.sc(2);
-    cb.rect.w -= self.sc(2);
+    if (cb.kind == .copy) {
+        cb.rect.x += self.sc(2);
+        cb.rect.w -= self.sc(2);
+    }
     for (seps[0..fl.n_seps]) |sp| {
         if (self.n_seps == self.seps.len) break;
         const sy = ay + pad + sp[1] * (btn + gap) + @divTrunc(btn - self.sc(theme.sep_h), 2);
@@ -425,6 +411,31 @@ pub fn layoutToolbar(self: *Editor) !void {
     if (self.focus) |f| {
         if (f >= self.buttons.items.len) self.focus = if (self.buttons.items.len > 0) self.buttons.items.len - 1 else null;
     }
+}
+
+/// The toolbar's usual controls: tools, colour and size, undo and redo,
+/// save, More and Copy.
+fn mainItems(self: *const Editor, items: *[24]Item) usize {
+    const btn = self.sc(theme.button);
+    var n: usize = 0;
+    for (tool_list) |t| {
+        items[n] = .{ .kind = .{ .tool = t }, .w = btn, .group = 0 };
+        n += 1;
+    }
+    n = tui.barTools(self, items, n);
+    items[n] = .{ .kind = .colors, .w = self.sc(8 + 18 + 8 + 12 + 8), .group = 1 };
+    n += 1;
+    for ([_]ButtonKind{ .undo, .redo }) |k| {
+        items[n] = .{ .kind = k, .w = btn, .group = 2 };
+        n += 1;
+    }
+    for ([_]ButtonKind{ .save, .more }) |k| {
+        items[n] = .{ .kind = k, .w = btn, .group = 3 };
+        n += 1;
+    }
+    items[n] = .{ .kind = .copy, .w = copyButtonWidth(self) + self.sc(2), .group = 3 };
+    n += 1;
+    return n;
 }
 
 /// The beautify panel: its own small bar beside the toolbar while
@@ -524,6 +535,7 @@ fn layoutPopover(self: *Editor) !void {
         .colors => {
             pw = 2 * pad + 6 * sw + 5 * sgap;
             ph = pad + 2 * sw + sgap + self.sc(14) + text_mod.height(theme.font_small * f) + self.sc(8) + self.sc(20) + pad;
+            ph += tui.historyHeight(self);
             ph += @as(i32, @intCast(n_seg_rows)) * (self.sc(10) + self.sc(30));
         },
         .more => {
@@ -557,6 +569,7 @@ fn layoutPopover(self: *Editor) !void {
             }
             try self.buttons.append(self.alloc, .{ .rect = .{ .x = x + pad + 5 * (sw + sgap), .y = y + pad + sw + sgap, .w = sw, .h = sw }, .kind = .custom_color, .layer = .popover });
             var cy = y + pad + 2 * sw + sgap + self.sc(14);
+            cy = try tui.layoutHistory(self, x + pad, cy, pw - 2 * pad);
             const lh = text_mod.height(theme.font_small * f);
             // slider: the whole row is the hit area
             try self.buttons.append(self.alloc, .{ .rect = .{ .x = x + pad, .y = cy + lh + self.sc(8), .w = pw - 2 * pad, .h = self.sc(20) }, .kind = .thickness, .layer = .popover });
@@ -663,7 +676,7 @@ fn chromePad(self: *const Editor) i32 {
 }
 
 /// What a floating surface with `sh` covers: itself plus its shadow.
-fn shadowFootprint(self: *const Editor, r: Rect, sh: theme.Shadow) Rect {
+pub fn shadowFootprint(self: *const Editor, r: Rect, sh: theme.Shadow) Rect {
     const b = self.sc(sh.blur);
     const dy = self.sc(sh.dy);
     return .{ .x = r.x - b, .y = r.y - b + @min(0, dy), .w = r.w + 2 * b, .h = r.h + 2 * b + @as(i32, @intCast(@abs(dy))) };
@@ -697,6 +710,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.picker.open and !self.toolbar_rect.isEmpty()) list.add(shadowFootprint(self, self.picker.rect.expand(self.sc(1)), th.popover_shadow));
     if (self.copy_notice != .none) list.add(shadowFootprint(self, noticeRect(self), th.bar_shadow));
     if (self.help_open) list.add(shadowFootprint(self, helpRect(self), th.popover_shadow));
+    tools.collectOverlays(self, list);
 }
 
 fn shapeChromeRect(self: *const Editor, i: usize) ?Rect {
@@ -727,12 +741,14 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (self.textHandleShape()) |i| drawTextHandle(self, canvas, i);
     drawSelectionChrome(self, canvas);
     if (self.isMousePane()) drawLoupe(self, canvas);
+    tools.drawChrome(self, canvas);
     if (!self.isTbPane()) return;
     drawToolbar(self, canvas);
     if (self.popover != .none and !self.pop_rect.isEmpty()) drawPopover(self, canvas);
     if (self.picker.open and !self.toolbar_rect.isEmpty()) drawPicker(self, canvas);
     drawTooltip(self, canvas);
     if (self.copy_notice != .none) drawCopyNotice(self, canvas);
+    tools.drawTop(self, canvas);
     if (self.help_open) drawHelp(self, canvas);
 }
 
@@ -1110,7 +1126,7 @@ fn drawShadow(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, 
 
 /// The floating material: shadow, the tinted blurred backdrop clipped to
 /// the rounded rect, and a hairline edge.
-fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow) void {
+pub fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow) void {
     if (r.w <= 0 or r.h <= 0) return;
     const th = self.theme;
     drawShadow(self, canvas, slot, r, radius, sh, 1);
@@ -1236,12 +1252,13 @@ fn buttonActive(self: *const Editor, kind: ButtonKind) bool {
         .shadow => self.beautify.shadow,
         .beautify => self.beautify.enabled,
         .help => self.help_open,
+        .ext => |e| tui.active(self, e),
         else => false,
     };
 }
 
 /// Hover highlight strength of button `bi` (fades in and out).
-fn hoverAmount(self: *const Editor, bi: usize) f64 {
+pub fn hoverAmount(self: *const Editor, bi: usize) f64 {
     const t = motion.now();
     const k = self.hov.at(t);
     if (self.hover_btn >= 0 and bi == @as(usize, @intCast(self.hover_btn))) return k;
@@ -1249,7 +1266,7 @@ fn hoverAmount(self: *const Editor, bi: usize) f64 {
     return 0;
 }
 
-fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
+pub fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
     const g = self.sc(theme.focus_gap);
     const fw = theme.focus_w * self.uf();
     const rr = r.expand(g + @as(i32, @intFromFloat(@ceil(fw / 2))));
@@ -1369,7 +1386,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
                     if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
                 }
                 const fg: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
-                if (kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg);
+                if (kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
             },
         }
         if (self.focus == bi) focusRing(self, canvas, r, rad);
@@ -1515,6 +1532,7 @@ fn drawColorsContent(self: *Editor, canvas: *Canvas) void {
                 text_mod.draw(canvas, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, if (on) th.fg else th.muted, l);
                 if (self.focus == bi) focusRing(self, canvas, r, 7.0 * f);
             },
+            .ext => tui.drawPopoverButton(self, canvas, b, bi),
             else => {},
         }
     }
@@ -1844,7 +1862,7 @@ pub fn rgbToHsv(c: u32) [3]f64 {
 // --- loupe ---
 
 pub fn loupeVisible(self: *const Editor) bool {
-    if (self.help_open) return false;
+    if (self.help_open or self.tools.mode != .none) return false;
     const m = self.mouse;
     if (!self.screenRect().contains(m.x, m.y)) return false;
     return switch (self.drag) {
@@ -1938,6 +1956,7 @@ const help_lines = [_][2][]const u8{
     .{ "X (again)", "Blur, then pixelate, then solid redaction" },
     .{ "N  T", "Counter badge, text" },
     .{ "S  U", "Spotlight (dims the rest); ruler (snaps to edges, Alt: free)" },
+    .{ "I", "Colour picker: click copies #RRGGBB, Shift rgb(), Alt uses it" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },

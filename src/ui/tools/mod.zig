@@ -14,6 +14,11 @@ const ruler = @import("ruler.zig");
 const spotlight = @import("spotlight.zig");
 const edges = @import("edges.zig");
 const ui = @import("../editor_ui.zig");
+const render = @import("../../gfx/render.zig");
+const color = @import("color.zig");
+const toast_mod = @import("toast.zig");
+const eyedrop = @import("eyedrop.zig");
+const tui = @import("tui.zig");
 
 const Editor = editor_mod.Editor;
 const Shape = shapes.Shape;
@@ -49,7 +54,67 @@ pub const State = struct {
     export_measures: bool = true,
     /// dimming of new spotlights, percent
     spot_dim: u8 = spotlight.default_dim,
+    /// colours picked with the eyedropper, newest first
+    history: color.History = .{},
+    toast: toast_mod.Toast = .{},
+    /// `shotlet text`: select a region, its text goes to the clipboard
+    text_capture: bool = false,
 };
+
+// --- events ---
+
+/// A press on the picture (not on the chrome). True when a tool took it.
+pub fn onPress(ed: *Editor) !bool {
+    return eyedrop.onPress(ed);
+}
+
+/// The pointer moved with nothing dragged.
+pub fn onHover(ed: *Editor) void {
+    if (ed.tools.mode != .none) ed.needs_render = true;
+}
+
+/// Esc or a right click: leave a mode. True when there was one.
+pub fn cancel(ed: *Editor) bool {
+    if (ed.tools.mode == .none) return false;
+    ed.tools.mode = .none;
+    ed.needs_render = true;
+    return true;
+}
+
+/// Timers and background work, once per loop; the longest the loop may
+/// wait for the next event (ms).
+pub fn tick(ed: *Editor, now: i64) i32 {
+    var wait: i64 = 1000;
+    if (ed.tools.toast.tick(now)) |left| {
+        if (left == 0) ed.needs_render = true;
+        wait = @min(wait, @max(1, left));
+    }
+    return @intCast(wait);
+}
+
+// --- chrome ---
+
+pub fn collectOverlays(ed: *Editor, list: anytype) void {
+    if (eyedrop.loupeRect(ed)) |r| list.add(r.expand(ed.sc(4)));
+    if (toast_mod.footprint(ed)) |r| list.add(r);
+}
+
+pub fn drawChrome(ed: *Editor, canvas: *render.Canvas) void {
+    eyedrop.drawLoupe(ed, canvas);
+}
+
+/// Over everything but the help: the toast.
+pub fn drawTop(ed: *Editor, canvas: *render.Canvas) void {
+    toast_mod.draw(ed, canvas);
+}
+
+/// The cursor a mode wants.
+pub fn cursor(ed: *const Editor) ?window.Cursor {
+    return switch (ed.tools.mode) {
+        .none => null,
+        .eyedropper, .crop => .crosshair,
+    };
+}
 
 // --- shapes: ruler and spotlight ---
 
@@ -219,17 +284,24 @@ pub fn onAction(ed: *Editor, a: config.Action) !void {
     switch (a) {
         .ruler => try ed.setTool(.ruler),
         .spotlight => try ed.setTool(.spotlight),
+        .eyedropper => try eyedrop.toggle(ed),
         else => {},
     }
 }
 
 /// A tool control was pressed.
 pub fn onButton(ed: *Editor, e: Ext) !void {
-    _ = ed;
-    _ = e;
+    switch (e) {
+        .eyedropper => try eyedrop.toggle(ed),
+        .picked => |i| if (i < ed.tools.history.len) {
+            _ = try eyedrop.useColor(ed, ed.tools.history.items[i]);
+        },
+        else => {},
+    }
 }
 
 test {
+    _ = color;
     _ = ruler;
     _ = spotlight;
     _ = edges;

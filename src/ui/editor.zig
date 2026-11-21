@@ -433,6 +433,7 @@ pub const Editor = struct {
             const anim = ui.animating(self);
             if (anim) self.needs_render = true;
             var wait: i32 = if (scripted) 5 else if (anim) 8 else 100;
+            wait = @min(wait, tools.tick(self, now));
             const tip = ui.tooltipDueMs(self);
             if (tip != 0) {
                 if (tip <= now) self.needs_render = true else wait = @min(wait, @as(i32, @intCast(std.math.clamp(tip - now, 1, 100))));
@@ -841,6 +842,7 @@ pub const Editor = struct {
                     self.needs_render = true;
                 }
                 if (ui.loupeVisible(self)) self.needs_render = true;
+                tools.onHover(self);
             },
             .size_slider => try self.setThickness(ui.sliderValue(self, m)),
             .selecting => {
@@ -942,6 +944,7 @@ pub const Editor = struct {
 
     fn cursorFor(self: *Editor, m: Point) window.Cursor {
         if (self.onToolbar(m) or self.help_open) return .arrow;
+        if (tools.cursor(self)) |c| return c;
         if (self.textHandleAt(m) != null) return .resize_ew;
         if (self.picker.open and (self.mouse_pane == self.tb_pane and self.picker.rect.contains(m.x, m.y))) return .crosshair;
         if (self.selected) |i| {
@@ -1077,6 +1080,7 @@ pub const Editor = struct {
             self.closePopover();
             return;
         }
+        if (try tools.onPress(self)) return;
         const ip = self.imgAt(m);
         const now = nowMs();
         const double = now - self.last_click_ms < 400 and @abs(m.x - self.last_click.x) < 5 and @abs(m.y - self.last_click.y) < 5;
@@ -1418,6 +1422,7 @@ pub const Editor = struct {
             self.closePopover();
             return true;
         }
+        if (tools.cancel(self)) return true;
         if (self.drag == .text_width) {
             const tw = self.drag.text_width;
             self.drag = .none;
@@ -1798,7 +1803,7 @@ pub const Editor = struct {
         self.running = false;
     }
 
-    fn applyColor(self: *Editor) !void {
+    pub fn applyColor(self: *Editor) !void {
         try self.editTarget(2, struct {
             fn f(s: *Shape, c: u32) void {
                 s.color = c;
@@ -2021,7 +2026,7 @@ pub const Editor = struct {
     }
 
     /// End whatever is in progress so the document is consistent.
-    fn settle(self: *Editor) !void {
+    pub fn settle(self: *Editor) !void {
         try self.endText();
         switch (self.drag) {
             .drawing => try self.commitCur(),
