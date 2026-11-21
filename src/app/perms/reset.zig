@@ -60,24 +60,24 @@ fn removeAll(bus: *dbus.Connection, entries: []const store.Entry) usize {
     return failed;
 }
 
-/// One short line about a reset, for Settings.
+/// One short line about a reset, for Settings (beside its button).
 pub fn summary(o: Outcome, buf: []u8) []const u8 {
-    if (o.store_error != null and !o.token) return "Could not reach the portal permission store";
-    if (o.nothing()) return "Nothing to reset: the next capture asks as it is";
-    if (o.failed > 0) return std.fmt.bufPrint(buf, "Could not remove {d} permission(s); see shotlet permissions", .{o.failed}) catch "";
+    if (o.store_error != null and !o.token) return "Permission store not reachable";
+    if (o.nothing()) return "Nothing was remembered";
+    if (o.failed > 0) return std.fmt.bufPrint(buf, "{d} could not be removed", .{o.failed}) catch "";
     const n = o.entries.len;
-    const tok = if (o.token) "the remembered screens" else "";
-    const join = if (o.token and n > 0) " and " else "";
-    if (n == 0) return std.fmt.bufPrint(buf, "Forgot {s}; the next capture asks again", .{tok}) catch "";
-    return std.fmt.bufPrint(buf, "Forgot {s}{s}{d} permission{s}; the next capture asks again", .{ tok, join, n, if (n == 1) "" else "s" }) catch "";
+    const s = if (n == 1) "" else "s";
+    if (n == 0) return "Forgot the remembered screens";
+    if (o.token) return std.fmt.bufPrint(buf, "Forgot the screens and {d} permission{s}", .{ n, s }) catch "";
+    return std.fmt.bufPrint(buf, "Forgot {d} permission{s}", .{ n, s }) catch "";
 }
 
 test "the Settings line says what a reset did" {
     var buf: [128]u8 = undefined;
     const e: store.Entry = .{ .table = .screencast, .id = "x", .pick = .{ .whole = true, .apps = &.{"shotlet"} } };
-    try std.testing.expectEqualStrings("Nothing to reset: the next capture asks as it is", summary(.{}, &buf));
-    try std.testing.expectEqualStrings("Forgot the remembered screens and 1 permission; the next capture asks again", summary(.{ .token = true, .entries = &.{e} }, &buf));
-    try std.testing.expectEqualStrings("Forgot 2 permissions; the next capture asks again", summary(.{ .entries = &.{ e, e } }, &buf));
-    try std.testing.expectEqualStrings("Forgot the remembered screens; the next capture asks again", summary(.{ .token = true }, &buf));
-    try std.testing.expectEqualStrings("Could not reach the portal permission store", summary(.{ .store_error = error.X }, &buf));
+    try std.testing.expectEqualStrings("Nothing was remembered", summary(.{}, &buf));
+    try std.testing.expectEqualStrings("Forgot the screens and 1 permission", summary(.{ .token = true, .entries = &.{e} }, &buf));
+    try std.testing.expectEqualStrings("Forgot 2 permissions", summary(.{ .entries = &.{ e, e } }, &buf));
+    try std.testing.expectEqualStrings("Forgot the remembered screens", summary(.{ .token = true }, &buf));
+    try std.testing.expectEqualStrings("Permission store not reachable", summary(.{ .store_error = error.X }, &buf));
 }

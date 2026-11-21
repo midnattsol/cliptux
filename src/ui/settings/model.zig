@@ -23,6 +23,8 @@ pub const Hit = union(enum) {
     toggle_copy_on_save,
     /// forget the ScreenCast restore token so the next capture asks again
     forget_monitors,
+    /// forget the token and Shotlet's portal permissions (permissions.zig)
+    reset_permissions,
     /// pick the folder Ctrl+S saves to (FileChooser portal)
     choose_folder,
     th_minus,
@@ -95,6 +97,10 @@ pub const State = struct {
     /// the last capture went through the desktop's own interface, not
     /// the portal (app/direct.zig)
     direct: bool = false,
+    /// how the last capture went (app/capture_path.zig)
+    last_path: ?@import("../../app/capture_path.zig").Path = null,
+    /// what Reset permissions did
+    perm_note: @import("permissions.zig").Note = .{},
     pending_focus: ?usize = null,
     /// scroll the focused control into view after the next draw
     reveal_focus: bool = false,

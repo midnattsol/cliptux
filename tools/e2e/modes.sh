@@ -252,7 +252,7 @@ modes-keys)
     sleep 2
     check "  ... and its old key does nothing" not_grep "capture mode: 2880" "$HL_SHELL_LOG"
     # Settings: the after-capture choice, and recording a mode's key
-    SHOTLET_SETTINGS_FOCUS=13 run_shotlet settings settings
+    SHOTLET_SETTINGS_FOCUS=14 run_shotlet settings settings
     wait_log 10 "keyboard focus"
     sleep 0.5
     keys space

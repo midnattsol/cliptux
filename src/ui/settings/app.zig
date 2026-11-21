@@ -207,7 +207,8 @@ pub const App = struct {
 /// The window's state from the desktop: appearance, GNOME integration,
 /// capture modes, and the headless test overrides.
 fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) model.State {
-    var st: model.State = .{ .direct = capture_path.last(env.home) == .direct };
+    const last = capture_path.last(env.home);
+    var st: model.State = .{ .direct = last == .direct, .last_path = last };
     if (bus) |b| {
         st.prefs = theme_mod.readPrefs(b, 1500);
         theme_mod.watch(b) catch {};

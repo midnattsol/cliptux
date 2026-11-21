@@ -11,6 +11,7 @@ const settings_modes = @import("../settings_modes.zig");
 const settings_rec = @import("../recui/settings_rec.zig");
 const model = @import("model.zig");
 const w = @import("widgets.zig");
+const perms = @import("permissions.zig");
 
 const Ui = w.Ui;
 const State = model.State;
@@ -77,11 +78,9 @@ fn capture(p: Page, y0: i32) !i32 {
     const ui = p.ui;
     const st = p.st;
     const y = try p.title(y0, "Capture", null);
-    var card = p.card(y, 2 * p.rowH());
-    w.rowTitle(ui, w.rowBegin(ui, &card, p.rowH()), "Capture", if (st.capture.capture)
-        "Through the GNOME integration (no prompts)"
-    else
-        "Through the screen-sharing portal");
+    var card = p.card(y, 3 * p.rowH());
+    var line_buf: [160]u8 = undefined;
+    w.rowTitle(ui, w.rowBegin(ui, &card, p.rowH()), "Capture", perms.captureLine(st, &line_buf));
     const r = w.rowBegin(ui, &card, p.rowH());
     const remembered = p.cfg.scToken() != null;
     if (st.direct) {
@@ -91,6 +90,7 @@ fn capture(p: Page, y0: i32) !i32 {
         w.rowTitle(ui, r, "Monitors", if (remembered) "Your choice is remembered" else "Asks on the next capture");
         if (remembered) try w.chipButton(ui, r, .forget_monitors, null, "Choose again", true);
     }
+    try perms.drawRow(ui, &card, p.rowH(), &st.perm_note);
     return w.endCard(&card) + ui.sc(26);
 }
 

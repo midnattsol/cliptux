@@ -21,6 +21,7 @@ pub fn activate(app: *App, hit: Hit) bool {
     switch (hit) {
         .view => |v| showView(st, v),
         .forget_monitors => forgetMonitors(app),
+        .reset_permissions => @import("permissions.zig").resetAll(app),
         .choose_folder => chooseFolder(app),
         .bind => |action| {
             st.recording = if (st.recording == action) null else action;
