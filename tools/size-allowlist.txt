@@ -4,7 +4,6 @@
 906 src/app/quick.zig
 1120 src/platform/portal.zig
 734 src/platform/pw.zig
-2575 src/ui/editor.zig
 1979 src/ui/editor_ui.zig
 1092 src/ui/settings.zig
 867 src/ui/shapes.zig
