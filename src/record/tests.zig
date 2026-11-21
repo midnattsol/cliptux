@@ -5,4 +5,7 @@ test {
     _ = @import("../encode/lzw.zig");
     _ = @import("../encode/gif.zig");
     _ = @import("../encode/gifdec.zig");
+    _ = @import("../encode/yuv.zig");
+    _ = @import("../encode/av.zig");
+    _ = @import("../encode/av_mp4.zig");
 }
