@@ -36,7 +36,9 @@ pub const Latest = struct {
     /// first frame: later ones of another size are cropped or padded).
     fn area(self: *const Latest, w: u32, h: u32) ?region.Rect {
         const c = self.crop orelse return .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
-        return region.toPixels(c, self.stream_rect, w, h);
+        var r = self.stream_rect;
+        if (r.w <= 0 or r.h <= 0) r = .{ .x = r.x, .y = r.y, .w = @intCast(w), .h = @intCast(h) };
+        return region.toPixels(c, r, w, h);
     }
 
     /// PipeWire callback: copy the area out of the mapped buffer.

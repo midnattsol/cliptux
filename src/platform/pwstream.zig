@@ -247,7 +247,7 @@ fn onProcess(data: ?*anyopaque) callconv(.c) void {
     if (slot.audio) |cb| {
         const n = (avail - chunk.offset) / 4;
         const samples: [*]const i16 = @ptrCast(@alignCast(base + chunk.offset));
-        cb(slot.ctx, samples[0 .. n * 2], now - @as(i64, @intCast(n)) * std.time.ns_per_s / rate);
+        cb(slot.ctx, samples[0 .. n * 2], now - @divTrunc(@as(i64, @intCast(n)) * std.time.ns_per_s, rate));
         return;
     }
     const cb = slot.video orelse return;

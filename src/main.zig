@@ -13,6 +13,8 @@ const usage =
     \\  shotlet             capture + editor (copy/save)
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
     \\  shotlet history     recent captures (history clear: forget them)
+    \\  shotlet record      record an area or the screen (MP4 or GIF);
+    \\                      again (or --stop) stops it; --help for more
     \\  shotlet pin FILE    pin a PNG to the screen
     \\  shotlet gnome-integration [status|install|uninstall]
     \\                      the GNOME Shell extension: prompt-free captures,
@@ -130,6 +132,8 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("app/history_ui.zig").run(gpa, env, smoke);
+    } else if (std.mem.eql(u8, cmd, "record")) {
+        try @import("record/cli.zig").main(gpa, env, args[2..]);
     } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {
         try @import("app/pin.zig").run(gpa, env, args[2]);
     } else if (std.mem.eql(u8, cmd, "gnome-integration")) {

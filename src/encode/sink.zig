@@ -88,7 +88,7 @@ pub const Sink = struct {
     }
 
     fn openGif(gpa: std.mem.Allocator, path: [:0]const u8, cfg: Config) !Sink {
-        const fd = try sys.createExclusive(path, 0o644);
+        const fd = try sys.createWrite(path);
         errdefer sys.close(fd);
         const enc = try gif.Encoder.init(gpa, cfg.width, cfg.height, .{ .dither = cfg.dither }, fd);
         return .{ .backend = .gif, .cfg = cfg, .gif_enc = enc, .gif_fd = fd };

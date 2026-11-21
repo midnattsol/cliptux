@@ -75,6 +75,7 @@ pub const Engine = struct {
     sink: ?sink_mod.Sink = null,
     sink_ready: std.atomic.Value(bool) = .init(false),
     err: ?anyerror = null,
+    has_err: std.atomic.Value(bool) = .init(false),
     // results
     frames: u64 = 0,
     out_w: u32 = 0,
@@ -172,7 +173,8 @@ pub const Engine = struct {
     /// A failure on the encoder thread (the recording stopped).
     pub fn failed(self: *const Engine) ?anyerror {
         if (self.stopping.load(.acquire)) return null;
-        return @atomicLoad(?anyerror, &self.err, .acquire);
+        if (!self.has_err.load(.acquire)) return null;
+        return self.err;
     }
 
     fn media(self: *Engine) i64 {
@@ -215,7 +217,8 @@ pub const Engine = struct {
     fn videoMain(self: *Engine) void {
         self.videoLoop() catch |err| {
             std.log.warn("recording: stopped: {t}", .{err});
-            @atomicStore(?anyerror, &self.err, err, .release);
+            self.err = err;
+            self.has_err.store(true, .release);
             if (self.sink) |*s| s.abort();
             self.sink = null;
         };

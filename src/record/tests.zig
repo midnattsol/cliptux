@@ -19,4 +19,12 @@ test {
     _ = @import("frames.zig");
     _ = @import("strip.zig");
     _ = @import("engine.zig");
+    _ = @import("settings.zig");
+    _ = @import("keepvid.zig");
+    _ = @import("ctlsock.zig");
+    _ = @import("source.zig");
+    _ = @import("cli.zig");
+    _ = @import("run.zig");
+    _ = @import("../ui/recui/control.zig");
+    _ = @import("../ui/recui/control_draw.zig");
 }
