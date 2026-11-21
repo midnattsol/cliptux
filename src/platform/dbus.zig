@@ -692,6 +692,17 @@ pub const Connection = struct {
         reply.deinit(self.alloc);
     }
 
+    pub fn nameHasOwner(self: *Connection, name: []const u8) !bool {
+        var m = Marshal.init(self.alloc);
+        defer m.deinit();
+        try m.putString(name);
+        const serial = try self.callMethod("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s", m.buf.items);
+        var reply = try self.waitReply(serial);
+        defer reply.deinit(self.alloc);
+        var r = reply.reader();
+        return (try r.readU32()) != 0;
+    }
+
     /// Request a well-known name (DO_NOT_QUEUE). Returns true if we are
     /// the primary owner; false means another instance already holds it.
     pub fn requestName(self: *Connection, name: []const u8) !bool {

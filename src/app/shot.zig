@@ -29,23 +29,38 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
+    const t_dbus = nowMs();
     portal.ensureAppScope(gpa, &conn);
+    const t_scope = nowMs();
 
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
+    const t_config = nowMs();
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
+    const t_wayland = nowMs();
 
     if (pw_thread) |t| t.join();
+    const t_pw = nowMs();
     var img = try acquireImage(gpa, env, &conn, &cfg, from_file);
     defer img.deinit(gpa);
     const t_capture = nowMs();
 
     try win.open("cliptux", .{ .fullscreen = true });
-    std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, nowMs() - t0 });
+    const t_open = nowMs();
+    std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
+    std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
+        t_dbus - t0,
+        t_scope - t_dbus,
+        t_config - t_scope,
+        t_wayland - t_config,
+        t_pw - t_wayland,
+        t_capture - t_pw,
+        t_open - t_capture,
+    });
     var ed = editor_mod.Editor.init(gpa, &win, &img);
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;

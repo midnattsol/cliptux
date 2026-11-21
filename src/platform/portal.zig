@@ -199,6 +199,18 @@ fn ensureAppScopeInner(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
         defer alloc.free(cg);
         if (std.mem.indexOf(u8, cg, "app-cliptux") != null) return; // already there
     }
+
+    const systemd_name = "org.freedesktop.systemd1";
+    const has_systemd = conn.nameHasOwner(systemd_name) catch |err| {
+        std.log.debug("skipping app scope: could not query {s}: {t}", .{ systemd_name, err });
+        return;
+    };
+    if (!has_systemd) {
+        // dbus-daemon may list systemd1 as activatable even when activating it
+        // only spawns a child that exits. Do not pay that cost on every shot.
+        std.log.debug("skipping app scope: {s} has no bus owner", .{systemd_name});
+        return;
+    }
     const pid: u32 = @intCast(std.os.linux.getpid());
     var name_buf: [64]u8 = undefined;
     const name = try std.fmt.bufPrint(&name_buf, "app-cliptux-{d}.scope", .{pid});
