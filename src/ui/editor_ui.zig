@@ -381,6 +381,15 @@ pub fn layoutToolbar(self: *Editor) !void {
     try layoutPanel(self, s);
     if (self.popover != .none) try layoutPopover(self) else self.pop_rect = Rect.empty;
     if (self.picker.open) layoutPicker(self);
+    // the controls moved: what is under a still pointer may have changed
+    const hv: i32 = if (self.drag == .none) (if (buttonAt(self, self.mouse)) |bi| @intCast(bi) else -1) else -1;
+    if (hv != self.hover_btn) {
+        self.hover_prev = -1;
+        self.hover_btn = hv;
+        self.hover_since_ms = now;
+        self.hov.snap(0);
+        self.hov.to(1, now);
+    }
     if (self.focus_into_popover) {
         self.focus_into_popover = false;
         for (self.buttons.items, 0..) |b, i| {
