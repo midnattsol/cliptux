@@ -69,6 +69,8 @@ pub fn label(ed: *const Editor, e: Ext, kb: []u8) ui.Label {
         }, "" },
         .picked => |i| return .{ .name = "Use this colour", .key = if (i < ed.tools.history.len) color.hex(kb, ed.tools.history.items[i]) else "" },
     };
+    // without libtesseract these say what they need
+    if ((e == .copy_text or e == .redact_sensitive) and !@import("ocr_job.zig").available()) return .{ .name = n, .key = "needs Tesseract" };
     const key = if (actionOf(e)) |a| config.bindName(ed.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = n, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
 }

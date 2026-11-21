@@ -144,6 +144,8 @@ pub fn main(init: std.process.Init) !void {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
+    } else if (std.mem.eql(u8, cmd, "toast") and args.len > 2) {
+        try @import("app/toastwin.zig").run(gpa, env, args[2], if (args.len > 3) args[3] else "");
     } else if (std.mem.eql(u8, cmd, "edit") and args.len == 3) {
         try @import("app/editfile.zig").run(gpa, env, args[2]);
     } else if (try devtools.run(gpa, env, cmd, args)) {
@@ -212,6 +214,7 @@ test {
     _ = @import("ui/help.zig");
     _ = @import("ui/transfer.zig");
     _ = @import("app/editfile.zig");
+    _ = @import("app/toastwin.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
     _ = @import("ocr/page.zig");

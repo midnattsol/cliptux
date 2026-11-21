@@ -22,6 +22,8 @@ const help_lines = [_][2][]const u8{
     .{ "S  U", "Spotlight (dims the rest); ruler (snaps to edges, Alt: free)" },
     .{ "I", "Colour picker: click copies #RRGGBB, Shift rgb(), Alt uses it" },
     .{ "C", "Crop the picture: 1:1, 16:9, 4:3; Enter applies, Esc cancels" },
+    .{ "Ctrl+Shift+C / R", "Copy the text (OCR); redact sensitive data" },
+    .{ "Ctrl+P", "Pin to the screen" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },

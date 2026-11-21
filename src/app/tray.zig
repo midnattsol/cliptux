@@ -11,7 +11,7 @@ const sni_iface = "org.kde.StatusNotifierItem";
 const menu_iface = "com.canonical.dbusmenu";
 const props_iface = "org.freedesktop.DBus.Properties";
 
-pub const MenuAction = enum { capture, history, settings, quit, none };
+pub const MenuAction = enum { capture, capture_text, history, settings, quit, none };
 
 pub const Tray = struct {
     alloc: std.mem.Allocator,
@@ -206,6 +206,7 @@ pub const Tray = struct {
 
     const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
         .{ .id = 1, .label = "Take screenshot", .separator = false },
+        .{ .id = 6, .label = "Capture text", .separator = false },
         .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
@@ -290,6 +291,7 @@ pub const Tray = struct {
             if (std.mem.eql(u8, event_type, "clicked")) {
                 return switch (id) {
                     1 => .capture,
+                    6 => .capture_text,
                     5 => .history,
                     2 => .settings,
                     4 => .quit,
@@ -490,6 +492,7 @@ test "menu items map to their actions, Recent captures included" {
     var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
     for ([_]struct { id: i32, want: MenuAction }{
         .{ .id = 1, .want = .capture },
+        .{ .id = 6, .want = .capture_text },
         .{ .id = 5, .want = .history },
         .{ .id = 2, .want = .settings },
         .{ .id = 4, .want = .quit },

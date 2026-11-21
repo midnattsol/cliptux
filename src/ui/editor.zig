@@ -605,7 +605,7 @@ pub const Editor = struct {
     }
 
     /// Recompose image rect `r` of the layer and everything derived.
-    fn recompose(self: *Editor, r: Rect) !void {
+    pub fn recompose(self: *Editor, r: Rect) !void {
         if (self.layer.len == 0) return;
         var margin: i32 = 0;
         for (self.doc.shapes.items) |*s| margin += s.readMargin();
@@ -1359,6 +1359,7 @@ pub const Editor = struct {
                     self.doc.sel = s;
                 }
                 self.selDirty();
+                tools.onSelected(self);
             },
             .moving_sel, .resizing_sel => {
                 self.selDirty();

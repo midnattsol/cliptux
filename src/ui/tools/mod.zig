@@ -23,6 +23,7 @@ const crop = @import("crop.zig");
 const crop_mode = @import("crop_mode.zig");
 const open = @import("open.zig");
 const launch = @import("launch.zig");
+const ocr_job = @import("ocr_job.zig");
 
 const Editor = editor_mod.Editor;
 const Shape = shapes.Shape;
@@ -65,6 +66,8 @@ pub const State = struct {
     text_capture: bool = false,
     /// pictures before and after each crop, and opened ones
     crops: crop.Store = .{},
+    /// text recognition running in the background
+    ocr: ocr_job.Job = .{},
 };
 
 /// Once, when the editor first shows: how it was started.
@@ -76,6 +79,7 @@ pub fn start(ed: *Editor) void {
 }
 
 pub fn deinit(ed: *Editor) void {
+    ocr_job.deinit(ed);
     ed.tools.crops.deinit(ed.alloc);
 }
 
@@ -93,11 +97,22 @@ pub fn afterSelDrag(ed: *Editor) void {
 
 /// Keys a mode takes before the editor (Enter applies a crop).
 pub fn onKey(ed: *Editor, k: window.Key) !bool {
+    // capturing text: Enter reads the selection instead of copying it
+    if (ed.tools.text_capture and (k.code == window.KEY_ENTER or k.code == 96) and ed.doc.sel != null) {
+        try ocr_job.start(ed, .copy_text);
+        return true;
+    }
     if (ed.tools.mode == .crop and (k.code == window.KEY_ENTER or k.code == 96) and ed.focus == null) {
         try crop_mode.apply(ed);
         return true;
     }
     return false;
+}
+
+/// A region was just selected (`shotlet text` reads it at once).
+pub fn onSelected(ed: *Editor) void {
+    if (!ed.tools.text_capture or ed.doc.sel == null) return;
+    ocr_job.start(ed, .copy_text) catch |err| std.log.warn("copy text: {t}", .{err});
 }
 
 /// After undo (`undone`) or redo: what the step crossed besides shapes.
@@ -122,7 +137,8 @@ pub fn cancel(ed: *Editor) bool {
 /// wait for the next event (ms).
 pub fn tick(ed: *Editor, now: i64) i32 {
     open.poll(ed);
-    var wait: i64 = 1000;
+    ocr_job.poll(ed) catch |err| std.log.warn("text recognition: {t}", .{err});
+    var wait: i64 = if (ocr_job.busy(ed)) 40 else 1000;
     if (ed.tools.toast.tick(now)) |left| {
         if (left == 0) ed.needs_render = true;
         wait = @min(wait, @max(1, left));
@@ -327,6 +343,8 @@ pub fn onAction(ed: *Editor, a: config.Action) !void {
         .eyedropper => try eyedrop.toggle(ed),
         .crop => try crop_mode.enter(ed),
         .pin => try open.pinExport(ed),
+        .copy_text => try ocr_job.start(ed, .copy_text),
+        .redact_sensitive => try ocr_job.start(ed, .redact),
         else => {},
     }
 }
@@ -338,11 +356,14 @@ pub fn onButton(ed: *Editor, e: Ext) !void {
         .crop, .crop_apply => try crop_mode.enter(ed),
         .crop_cancel => _ = cancel(ed),
         .pin => try open.pinExport(ed),
+        .copy_text, .redact_sensitive => {
+            ed.closePopover();
+            try ocr_job.start(ed, if (e == .copy_text) .copy_text else .redact);
+        },
         .aspect => |a| try crop_mode.setAspect(ed, a),
         .picked => |i| if (i < ed.tools.history.len) {
             _ = try eyedrop.useColor(ed, ed.tools.history.items[i]);
         },
-        else => {},
     }
 }
 
@@ -350,6 +371,8 @@ test {
     _ = color;
     _ = crop;
     _ = launch;
+    _ = ocr_job;
+    _ = @import("redact.zig");
     _ = ruler;
     _ = spotlight;
     _ = edges;
