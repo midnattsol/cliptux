@@ -4,6 +4,5 @@
 734 src/platform/pw.zig
 1979 src/ui/editor_ui.zig
 867 src/ui/shapes.zig
-2597 src/ui/window.zig
 782 tools/container/wldrive.zig
 1270 tools/e2e.sh
