@@ -68,64 +68,85 @@ fn keepInner(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: 
     const thumb_png = try png.encodeWith(gpa, thumb_px.pixels, thumb_px.width, thumb_px.height, .{ .alpha = .auto });
     defer gpa.free(thumb_png);
 
-    var source_png: ?[]u8 = null;
-    defer if (source_png) |s| gpa.free(s);
-    var doc_text: ?[]u8 = null;
-    defer if (doc_text) |s| gpa.free(s);
-    if (what.source != null and what.doc != null) {
-        const src = what.source.?;
-        const d = what.doc.?;
-        const crop = sourceCrop(d);
-        const cw: u32 = @intCast(crop.w);
-        const ch: u32 = @intCast(crop.h);
-        const px = try gpa.alloc(u32, @as(usize, cw) * ch);
-        defer gpa.free(px);
-        for (0..ch) |y| {
-            const off = (@as(usize, @intCast(crop.y)) + y) * src.width + @as(usize, @intCast(crop.x));
-            @memcpy(px[y * cw ..][0..cw], src.pixels[off..][0..cw]);
-        }
-        source_png = try png.encode(gpa, px, cw, ch);
-        // shapes relative to the cropped source
-        var moved: std.ArrayList(shapes.Shape) = .empty;
-        defer {
-            for (moved.items) |*s| s.deinit(gpa);
-            moved.deinit(gpa);
-        }
-        for (d.shapes.items) |*s| {
-            var c = try s.clone(gpa);
-            c.translate(-crop.x, -crop.y);
-            moved.append(gpa, c) catch |err| {
-                c.deinit(gpa);
-                return err;
-            };
-        }
-        var sel = d.exportRect();
-        sel.x -= crop.x;
-        sel.y -= crop.y;
-        doc_text = try annot.write(gpa, sel, what.beautify, moved.items);
-    }
+    var editable: Editable = .{};
+    defer editable.deinit(gpa);
+    if (what.source != null and what.doc != null) editable = try Editable.make(gpa, what.source.?, what.doc.?, what.beautify);
 
     const meta: history.Meta = .{ .time_ms = sys.realtimeMs(), .width = img.width, .height = img.height, .saved = what.saved };
     if (what.replace != null) {
         const id = k.id.slice();
         try history.replaceFile(k.root(), id, "image.png", what.image_png);
         try history.replaceFile(k.root(), id, "thumb.png", thumb_png);
-        if (source_png) |s| try history.replaceFile(k.root(), id, "source.png", s);
-        if (doc_text) |s| try history.replaceFile(k.root(), id, "doc", s);
+        if (editable.source_png) |s| try history.replaceFile(k.root(), id, "source.png", s);
+        if (editable.doc_text) |s| try history.replaceFile(k.root(), id, "doc", s);
         try history.writeMeta(gpa, k.root(), id, &meta);
     } else {
         k.id = try history.create(gpa, k.root(), .{
             .meta = meta,
             .image_png = what.image_png,
             .thumb_png = thumb_png,
-            .source_png = source_png,
-            .doc = doc_text,
+            .source_png = editable.source_png,
+            .doc = editable.doc_text,
         });
     }
     if (cfg.history) {
         _ = history.prune(gpa, k.root(), cfg.history_max, @as(u64, cfg.history_max_mb) * 1024 * 1024) catch 0;
     }
     return k;
+}
+
+/// What it takes to edit a capture again: the cropped source PNG and the
+/// annotations relative to it (both owned).
+const Editable = struct {
+    source_png: ?[]u8 = null,
+    doc_text: ?[]u8 = null,
+
+    fn deinit(e: *Editable, gpa: std.mem.Allocator) void {
+        if (e.source_png) |s| gpa.free(s);
+        if (e.doc_text) |s| gpa.free(s);
+    }
+
+    fn make(gpa: std.mem.Allocator, src: *const png.Image, d: *const doc_mod.Document, beautify: doc_mod.Beautify) !Editable {
+        const crop = sourceCrop(d);
+        var e: Editable = .{ .source_png = try encodeCrop(gpa, src, crop) };
+        errdefer e.deinit(gpa);
+        e.doc_text = try docRelativeTo(gpa, d, crop, beautify);
+        return e;
+    }
+};
+
+/// `crop` of `src` as a PNG.
+fn encodeCrop(gpa: std.mem.Allocator, src: *const png.Image, crop: shapes.Rect) ![]u8 {
+    const cw: u32 = @intCast(crop.w);
+    const ch: u32 = @intCast(crop.h);
+    const px = try gpa.alloc(u32, @as(usize, cw) * ch);
+    defer gpa.free(px);
+    for (0..ch) |y| {
+        const off = (@as(usize, @intCast(crop.y)) + y) * src.width + @as(usize, @intCast(crop.x));
+        @memcpy(px[y * cw ..][0..cw], src.pixels[off..][0..cw]);
+    }
+    return png.encode(gpa, px, cw, ch);
+}
+
+/// The document as annot text, shapes relative to the cropped source.
+fn docRelativeTo(gpa: std.mem.Allocator, d: *const doc_mod.Document, crop: shapes.Rect, beautify: doc_mod.Beautify) ![]u8 {
+    var moved: std.ArrayList(shapes.Shape) = .empty;
+    defer {
+        for (moved.items) |*s| s.deinit(gpa);
+        moved.deinit(gpa);
+    }
+    for (d.shapes.items) |*s| {
+        var c = try s.clone(gpa);
+        c.translate(-crop.x, -crop.y);
+        moved.append(gpa, c) catch |err| {
+            c.deinit(gpa);
+            return err;
+        };
+    }
+    var sel = d.exportRect();
+    sel.x -= crop.x;
+    sel.y -= crop.y;
+    return annot.write(gpa, sel, beautify, moved.items);
 }
 
 /// The part of the capture kept for editing again: the selection plus
