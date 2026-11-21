@@ -332,6 +332,7 @@ pub const Editor = struct {
         self.text = null;
         if (self.cur) |*s| s.deinit(self.alloc);
         if (self.drag == .resizing_shape) self.drag.resizing_shape.orig.deinit(self.alloc);
+        tools.deinit(self);
         self.doc.deinit();
         self.buttons.deinit(self.alloc);
         self.releaseCaches();
@@ -632,7 +633,7 @@ pub const Editor = struct {
     }
 
     /// Mark the on-screen selection area (or its beautify frame) dirty.
-    fn selDirty(self: *Editor) void {
+    pub fn selDirty(self: *Editor) void {
         const saved = self.pane_i;
         defer self.pane_i = saved;
         for (self.panes[0..self.n_panes], 0..) |*p, i| {
@@ -852,6 +853,7 @@ pub const Editor = struct {
                 const cs = shapes_mod.dragCorners(self.drag_anchor, q, self.mod_shift, self.mod_alt);
                 self.doc.sel = Rect.intersect(Rect.fromCorners(cs[0], cs[1]), self.doc.imageRect()) orelse Rect.fromCorners(q, q);
                 self.selDirty();
+                tools.afterSelDrag(self);
             },
             .moving_sel => |mv| {
                 self.selDirty();
@@ -863,6 +865,7 @@ pub const Editor = struct {
                 self.selDirty();
                 self.doc.sel = shapes_mod.resizeWithHandle(rs.orig, rs.handle, self.clampImg(ip));
                 self.selDirty();
+                tools.afterSelDrag(self);
             },
             .drawing => try self.updateDrawing(ip),
             .moving_shape => |*mv| {
@@ -1898,6 +1901,7 @@ pub const Editor = struct {
             try self.endText();
         }
 
+        if (try tools.onKey(self, k)) return;
         // fixed chords that must win over configurable binds
         if (k.ctrl and !k.shift and k.code == KEY_Y) return self.redo();
         if (k.ctrl and k.code == KEY_D) return self.duplicateSelected();
@@ -2039,13 +2043,46 @@ pub const Editor = struct {
     fn undo(self: *Editor) !void {
         try self.settle();
         self.selected = null;
-        if (try self.doc.undo()) try self.recomposeAll();
+        if (try self.doc.undo()) {
+            try tools.afterHistory(self, true);
+            try self.recomposeAll();
+        }
     }
 
     fn redo(self: *Editor) !void {
         try self.settle();
         self.selected = null;
-        if (try self.doc.redo()) try self.recomposeAll();
+        if (try self.doc.redo()) {
+            try tools.afterHistory(self, false);
+            try self.recomposeAll();
+        }
+    }
+
+    /// Show `img` instead (a crop, an opened file): the layer, every
+    /// view and its caches start over; the shapes stay as they are.
+    pub fn replaceImage(self: *Editor, img: *const png.Image) !void {
+        self.img = img;
+        self.doc.width = img.width;
+        self.doc.height = img.height;
+        self.monitors = &.{};
+        self.selected = null;
+        self.lifted = null;
+        self.alloc.free(self.layer);
+        self.layer = &.{};
+        self.layer = try self.alloc.alloc(u32, img.pixels.len);
+        try doc_mod.composeRegion(self.alloc, self.layer, img.pixels, img.width, img.height, self.doc.shapes.items, null, self.doc.imageRect());
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |*p, i| {
+            if (!p.alive or p.viewc.len == 0) continue;
+            self.pane_i = @intCast(i);
+            p.view = self.viewFor(@intCast(i));
+            p.bcache_valid = false;
+            for (&p.backdrops) |*b| b.hash = 0;
+            self.refreshView(self.screenRect());
+            for (&p.pending) |*q| q.add(self.screenRect());
+        }
+        self.needs_render = true;
     }
 
     fn copyToClipboard(self: *Editor) !void {
@@ -2454,12 +2491,13 @@ pub const Editor = struct {
                     }
                 }
                 if (attempt == 1) break;
-                const want: ui.Popover = switch (ui.nameLayer(arg) orelse return error.NoSuchButton) {
+                // not laid out yet: open what holds it, lay it all out again
+                const want: ?ui.Popover = switch (ui.nameLayer(arg) orelse .bar) {
                     .popover => .colors,
                     .menu => .more,
-                    else => return error.NoSuchButton,
+                    else => null,
                 };
-                if (self.popover != want) self.togglePopover(want);
+                if (want) |w| if (self.popover != w) self.togglePopover(w);
                 self.pane_i = self.tb_pane;
                 defer self.pane_i = self.mouse_pane;
                 try ui.layoutToolbar(self);

@@ -101,7 +101,7 @@ pub fn active(ed: *const Editor, e: Ext) bool {
 pub fn barTools(ed: *const Editor, items: *[24]ui.Item, n_in: usize) usize {
     var n = n_in;
     const btn = ed.sc(theme.button);
-    for ([_]Ext{.eyedropper}) |e| {
+    for ([_]Ext{ .eyedropper, .crop }) |e| {
         items[n] = .{ .kind = .{ .ext = e }, .w = btn, .group = 0 };
         n += 1;
     }

@@ -19,6 +19,8 @@ const color = @import("color.zig");
 const toast_mod = @import("toast.zig");
 const eyedrop = @import("eyedrop.zig");
 const tui = @import("tui.zig");
+const crop = @import("crop.zig");
+const crop_mode = @import("crop_mode.zig");
 
 const Editor = editor_mod.Editor;
 const Shape = shapes.Shape;
@@ -59,13 +61,38 @@ pub const State = struct {
     toast: toast_mod.Toast = .{},
     /// `shotlet text`: select a region, its text goes to the clipboard
     text_capture: bool = false,
+    /// pictures before and after each crop, and opened ones
+    crops: crop.Store = .{},
 };
+
+pub fn deinit(ed: *Editor) void {
+    ed.tools.crops.deinit(ed.alloc);
+}
 
 // --- events ---
 
 /// A press on the picture (not on the chrome). True when a tool took it.
 pub fn onPress(ed: *Editor) !bool {
-    return eyedrop.onPress(ed);
+    return crop_mode.onPress(ed) or try eyedrop.onPress(ed);
+}
+
+/// The selection was dragged (crop keeps its aspect ratio).
+pub fn afterSelDrag(ed: *Editor) void {
+    crop_mode.constrain(ed);
+}
+
+/// Keys a mode takes before the editor (Enter applies a crop).
+pub fn onKey(ed: *Editor, k: window.Key) !bool {
+    if (ed.tools.mode == .crop and (k.code == window.KEY_ENTER or k.code == 96) and ed.focus == null) {
+        try crop_mode.apply(ed);
+        return true;
+    }
+    return false;
+}
+
+/// After undo (`undone`) or redo: what the step crossed besides shapes.
+pub fn afterHistory(ed: *Editor, undone: bool) !void {
+    try crop_mode.afterHistory(ed, undone);
 }
 
 /// The pointer moved with nothing dragged.
@@ -96,10 +123,12 @@ pub fn tick(ed: *Editor, now: i64) i32 {
 
 pub fn collectOverlays(ed: *Editor, list: anytype) void {
     if (eyedrop.loupeRect(ed)) |r| list.add(r.expand(ed.sc(4)));
+    if (crop_mode.overlay(ed)) |r| list.add(r);
     if (toast_mod.footprint(ed)) |r| list.add(r);
 }
 
 pub fn drawChrome(ed: *Editor, canvas: *render.Canvas) void {
+    crop_mode.draw(ed, canvas);
     eyedrop.drawLoupe(ed, canvas);
 }
 
@@ -285,6 +314,7 @@ pub fn onAction(ed: *Editor, a: config.Action) !void {
         .ruler => try ed.setTool(.ruler),
         .spotlight => try ed.setTool(.spotlight),
         .eyedropper => try eyedrop.toggle(ed),
+        .crop => try crop_mode.enter(ed),
         else => {},
     }
 }
@@ -293,6 +323,9 @@ pub fn onAction(ed: *Editor, a: config.Action) !void {
 pub fn onButton(ed: *Editor, e: Ext) !void {
     switch (e) {
         .eyedropper => try eyedrop.toggle(ed),
+        .crop, .crop_apply => try crop_mode.enter(ed),
+        .crop_cancel => _ = cancel(ed),
+        .aspect => |a| try crop_mode.setAspect(ed, a),
         .picked => |i| if (i < ed.tools.history.len) {
             _ = try eyedrop.useColor(ed, ed.tools.history.items[i]);
         },
@@ -302,6 +335,7 @@ pub fn onButton(ed: *Editor, e: Ext) !void {
 
 test {
     _ = color;
+    _ = crop;
     _ = ruler;
     _ = spotlight;
     _ = edges;

@@ -912,7 +912,7 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
     const th = self.theme;
     if (self.selBuf()) |s| {
         canvas.rectOutline(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 1, th.sel_edge);
-        if (self.tool == .select and self.drag == .none and self.selected == null) {
+        if (self.tool == .select and self.drag == .none and self.selected == null and self.tools.mode == .none) {
             for (handlePoints(s), 0..) |p, i| {
                 if (!showHandle(self, s, i)) continue;
                 drawHandle(self, canvas, ff(p.x), ff(p.y), handleDrawRadius(self));
@@ -1957,6 +1957,7 @@ const help_lines = [_][2][]const u8{
     .{ "N  T", "Counter badge, text" },
     .{ "S  U", "Spotlight (dims the rest); ruler (snaps to edges, Alt: free)" },
     .{ "I", "Colour picker: click copies #RRGGBB, Shift rgb(), Alt uses it" },
+    .{ "C", "Crop the picture: 1:1, 16:9, 4:3; Enter applies, Esc cancels" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },

@@ -177,7 +177,7 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
                 ed.releaseCaches(); // serving may outlive the session; drop ~140MB
                 if (result.action == .copied) {
                     if (win.clipboardPng()) |data| {
-                        if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = &cap.image, .doc = &ed.doc, .beautify = ed.beautify, .replace = replace })) |k| {
+                        if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .replace = replace })) |k| {
                             if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
                         }
                     }
@@ -211,7 +211,7 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
                 var buf: [512]u8 = undefined;
                 const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
                 if (cfg.notify) portal.notify(gpa, conn, "Shotlet", msg);
-                if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = &cap.image, .doc = &ed.doc, .beautify = ed.beautify, .saved = path, .replace = replace })) |k| {
+                if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = path, .replace = replace })) |k| {
                     if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
                 }
                 if (win.hasClipboard()) try win.serveClipboard();
