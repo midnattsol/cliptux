@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-mixed shell-tray shell-terminal"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -429,8 +429,9 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... that stays above after clicking the app" drv find 0 ff453a 40 4
         ;;
     shell)
-        # prompt-free captures through the GNOME Shell extension, from its
-        # own key; install moves a custom shortcut running shotlet to it
+        # stock GNOME: Print opens GNOME's screenshot tool. install offers
+        # Print to Shotlet (GNOME's tool moves to Shift+Super+S), the key
+        # then captures without any prompt, uninstall restores it all
         drv_start Meta-0 || { fail "driver"; exit 1; }
         drv key esc
         drv move 0 800 450
@@ -438,27 +439,23 @@ if [ "${1:-}" = "--inner" ]; then
         check "the extension leaves GNOME's Print alone" shell_wait 5 "Print is GNOME's screenshot shortcut" 1
         shell1_prop BlockedShortcuts >"$OUT/blocked.txt"
         check "  ... and says so on the bus" grep -q "Print" "$OUT/blocked.txt"
-        # a custom shortcut running shotlet, as the README suggested before
-        CK=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/
-        CKS=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$CK
-        gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['$CK']"
-        gsettings set "$CKS" name 'Shotlet'
-        gsettings set "$CKS" command "$BIN"
-        gsettings set "$CKS" binding '<Control><Alt>p'
+        dump_keys() { for k in show-screenshot-ui screenshot screenshot-window show-screen-recording-ui; do
+            echo "$k $(gsettings get org.gnome.shell.keybindings $k) [$(dconf read /org/gnome/shell/keybindings/$k)]"; done; }
+        dump_keys >"$OUT/keys-before.txt"
         "$BIN" gnome-integration install </dev/null >"$OUT/install.log" 2>&1
-        check "install moves the custom shortcut running shotlet" grep -q "Moved" "$OUT/install.log"
-        check "  ... off GNOME's custom shortcuts" eq "$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)" "@as []"
-        check "  ... to the extension's key" eq "$(ext_gsettings get capture-shortcut)" "['<Control><Alt>p']"
-        check "  ... which it binds" eval 'shell1_prop Shortcuts | grep -q "<Control><Alt>p"'
+        check "install gives Print to Shotlet" grep -q "Print now captures with Shotlet" "$OUT/install.log"
+        check "  ... moving GNOME's screenshot tool to Shift+Super+S" eq "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "['<Shift><Super>s']"
+        check "  ... and no other GNOME shortcut" eq "$(gsettings get org.gnome.shell.keybindings screenshot) $(gsettings get org.gnome.shell.keybindings screenshot-window)" "['<Shift>Print'] ['<Alt>Print']"
+        check "  ... the extension binds Print" eval 'shell1_prop Shortcuts | grep -q Print'
         check "  ... pointing it at this shotlet" eq "$(ext_gsettings get shotlet-path)" "'$BIN'"
         "$BIN" gnome-integration status >"$OUT/status.log" 2>&1
         check "status: captures through the integration" grep -q "capture: through the GNOME integration (no prompts)" "$OUT/status.log"
         # the capture
-        mkdir -p "$HOME/.local/state" && touch "$OUT/marker"
+        touch "$OUT/marker"
         sleep 1
         t0=$(date +%s%N)
-        drv key ctrl+alt+p
-        check "the key opens the editor" shell_wait 10 "startup: capture=" 1
+        drv key print
+        check "Print opens Shotlet's editor" shell_wait 10 "startup: capture=" 1
         t1=$(date +%s%N)
         echo "  key to editor (measured outside): $(((t1 - t0) / 1000000)) ms; shotlet says: $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
         sleep 0.8
@@ -476,7 +473,6 @@ if [ "${1:-}" = "--inner" ]; then
         check "Copy gives the selection" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
         drv pixel "$OUT/clip.png" 200 100
         check "  ... with the desktop's pixels, not the cursor or a dim" near "$VAL" "$BG"
-        # the key, again, while the editor is open: one more editor, fine;
         # anyone else asking over the bus is refused
         gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
             --method dev.shotlet.Shell1.Capture >"$OUT/gdbus.txt" 2>&1
@@ -484,19 +480,40 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 1
         check "  ... and takes no screenshot" eq "$(shell_count "startup: capture=")" 1
         check "  ... nor leaves a file" capture_dir_empty
-        # Print once GNOME lets go of it, after moving the key back
-        "$BIN" gnome-integration shortcut Print >"$OUT/shortcut.log" 2>&1
-        free_print
-        check "Print is the extension's once GNOME's screenshot UI lets go" eval 'shell1_prop Shortcuts | grep -q Print'
+        "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
+        dump_keys >"$OUT/keys-after.txt"
+        check "uninstall gives GNOME its screenshot keys back exactly" cmp -s "$OUT/keys-before.txt" "$OUT/keys-after.txt"
+        check "  ... and the extension is gone" test ! -e "$XDG_DATA_HOME/gnome-shell/extensions/shotlet@midnattsol.github.io"
+        ;;
+    shell-owner)
+        # GNOME's screenshot tool off Print and a custom shortcut running
+        # shotlet on Print: install moves that shortcut to the extension
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"
+        CK=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/
+        CKS=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$CK
+        gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['$CK']"
+        gsettings set "$CKS" name 'Shotlet'
+        gsettings set "$CKS" command "$BIN"
+        gsettings set "$CKS" binding 'Print'
+        dump() { dconf dump /org/gnome/settings-daemon/plugins/media-keys/; dconf dump /org/gnome/shell/keybindings/; }
+        dump >"$OUT/before.txt"
+        "$BIN" gnome-integration install </dev/null >"$OUT/install.log" 2>&1
+        check "install moves the custom shortcut running shotlet" grep -q "Moved" "$OUT/install.log"
+        check "  ... off GNOME's custom shortcuts" eq "$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)" "@as []"
+        check "  ... to the extension's key" eq "$(ext_gsettings get capture-shortcut)" "['Print']"
+        check "  ... which it binds" eval 'shell1_prop Shortcuts | grep -q Print'
+        check "  ... leaving GNOME's shortcuts alone" eq "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "@as []"
         drv key print
-        check "  ... and captures" shell_wait 10 "startup: capture=" 2
+        check "Print opens Shotlet's editor" shell_wait 10 "startup: capture=" 1
+        check "  ... without any consent dialog" no_dialog
         sleep 0.8
         keys esc
-        # uninstall puts the custom shortcut back
         "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
-        check "uninstall puts the custom shortcut back" eq "$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)" "['$CK']"
-        check "  ... as it was" eq "$(gsettings get "$CKS" command) $(gsettings get "$CKS" binding)" "'$BIN' '<Control><Alt>p'"
-        check "  ... and the extension is gone" test ! -e "$XDG_DATA_HOME/gnome-shell/extensions/shotlet@midnattsol.github.io"
+        dump >"$OUT/after.txt"
+        check "uninstall puts the custom shortcut back exactly" cmp -s "$OUT/before.txt" "$OUT/after.txt"
         ;;
     shell-mixed)
         # Meta-0 2560x1440 at 2 (1280x720 logical), Meta-1 1280x720 at 1:
