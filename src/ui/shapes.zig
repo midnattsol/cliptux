@@ -374,8 +374,9 @@ pub const palette = [8]u32{
 // --- shape drawing ---
 
 /// Paint `s` through `xf`. `alloc` is scratch for transformed polylines
-/// and blur; `caret` is a byte offset into a text shape being edited.
-pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, caret: ?usize) void {
+/// and blur; `cursor` marks the caret and selection of a text shape being
+/// edited.
+pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const tf = @max(1.0, s.th() * xf.scale);
     switch (s.tool) {
         .pen, .highlight => {
@@ -440,12 +441,20 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
                 label,
             );
         },
-        .text => drawText(canvas, s, xf, caret),
+        .text => drawText(canvas, s, xf, cursor),
         .select => {},
     }
 }
 
-fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, caret: ?usize) void {
+/// Caret (byte offset) and selected byte range of a text being edited.
+pub const TextCursor = struct {
+    caret: usize,
+    sel: ?[2]usize = null,
+};
+
+pub const selection_color: u32 = 0x804DABF7;
+
+fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const fs = s.fontPx() * xf.scale;
     const lh = text_mod.height(fs);
     const fg = if (s.pill) contrastColor(s.color) else s.color;
@@ -458,8 +467,20 @@ fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, caret: ?usize) void {
     var start: usize = 0;
     var it = std.mem.splitScalar(u8, s.str.items, '\n');
     while (it.next()) |line| {
+        if (cursor) |cur| if (cur.sel) |sel| {
+            // the part of the selection on this line (+ a sliver for its newline)
+            const a = @max(sel[0], start);
+            const b = @min(sel[1], start + line.len + 1);
+            if (a < b) {
+                const sx = x0 + text_mod.width(fs, line[0 .. a - start]);
+                const ex = x0 + text_mod.width(fs, line[0 .. @min(b, start + line.len) - start]) +
+                    (if (b > start + line.len) @as(i32, @intFromFloat(@round(fs * 0.25))) else 0);
+                canvas.fillRect(sx, y, ex - sx, lh, selection_color);
+            }
+        };
         text_mod.draw(canvas, x0, y, fs, fg, line);
-        if (caret) |c| {
+        if (cursor) |cur| {
+            const c = cur.caret;
             if (c >= start and c <= start + line.len) {
                 const cx = x0 + text_mod.width(fs, line[0 .. c - start]);
                 const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));

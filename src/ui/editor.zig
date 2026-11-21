@@ -66,6 +66,8 @@ pub const DragMode = union(enum) {
     moving_shape: struct { start: Point, applied: Point },
     resizing_shape: struct { handle: u3, orig: Shape },
     picking: ui.PickPart,
+    /// dragging inside the text being edited
+    text_select,
 };
 
 const TextState = struct {
@@ -115,6 +117,9 @@ const KEY_LEFTBRACE = 26;
 const KEY_RIGHTBRACE = 27;
 const KEY_S = 31;
 const KEY_V = 47;
+const KEY_A = 30;
+const KEY_C = 46;
+const KEY_X = 45;
 const KEY_INSERT = 110;
 const KEY_D = 32;
 const KEY_Y = 21;
@@ -779,6 +784,10 @@ pub const Editor = struct {
                 ui.pickAt(self, part, m);
                 try self.applyPickerColor();
             },
+            .text_select => if (self.text) |*t| {
+                t.te.caret = caretAt(&self.doc.shapes.items[t.idx], ip);
+                self.needs_render = true;
+            },
         }
     }
 
@@ -866,7 +875,15 @@ pub const Editor = struct {
         if (self.text) |*t| {
             const s = &self.doc.shapes.items[t.idx];
             if (self.pn().view.rectToBuf(s.frame()).expand(self.sc(4)).contains(m.x, m.y)) {
-                t.te.caret = caretAt(s, ip);
+                const at = caretAt(s, ip);
+                if (double) {
+                    t.te.selectWord(s.str.items, at);
+                } else {
+                    // Shift+click extends; a drag selects
+                    if (!self.mod_shift) t.te.anchor = at else if (t.te.anchor == null) t.te.anchor = t.te.caret;
+                    t.te.caret = at;
+                    self.drag = .text_select;
+                }
                 self.needs_render = true;
                 return;
             }
@@ -1125,7 +1142,7 @@ pub const Editor = struct {
                 orig.deinit(self.alloc);
                 try self.unlift();
             },
-            .picking, .none => {},
+            .picking, .text_select, .none => {},
         }
         self.needs_render = true;
     }
@@ -1175,7 +1192,7 @@ pub const Editor = struct {
             return true;
         }
         switch (self.drag) {
-            .none, .picking => {},
+            .none, .picking, .text_select => {},
             .drawing => {
                 if (self.cur) |*s| s.deinit(self.alloc);
                 self.cur = null;
@@ -1315,19 +1332,33 @@ pub const Editor = struct {
             },
             window.KEY_BACKSPACE => if (k.ctrl) t.te.backspaceWord(buf) else t.te.backspace(buf),
             window.KEY_DELETE => t.te.delete(buf),
-            KEY_LEFT => if (k.ctrl) t.te.wordLeft(buf.items) else t.te.left(buf.items),
-            KEY_RIGHT => if (k.ctrl) t.te.wordRight(buf.items) else t.te.right(buf.items),
-            KEY_UP => t.te.up(buf.items),
-            KEY_DOWN => t.te.down(buf.items),
-            KEY_HOME => if (k.ctrl) {
-                t.te.caret = 0;
-            } else t.te.home(buf.items),
-            KEY_END => if (k.ctrl) {
-                t.te.caret = buf.items.len;
-            } else t.te.end(buf.items),
+            KEY_LEFT => t.te.move(buf.items, if (k.ctrl) .word_left else .left, k.shift),
+            KEY_RIGHT => t.te.move(buf.items, if (k.ctrl) .word_right else .right, k.shift),
+            KEY_UP => t.te.move(buf.items, .up, k.shift),
+            KEY_DOWN => t.te.move(buf.items, .down, k.shift),
+            KEY_HOME => t.te.move(buf.items, if (k.ctrl) .doc_start else .home, k.shift),
+            KEY_END => t.te.move(buf.items, if (k.ctrl) .doc_end else .end, k.shift),
+            KEY_A => if (k.ctrl) t.te.selectAll(buf.items) else try self.typeText(k),
+            KEY_C, KEY_X => if (k.ctrl) try self.copyTextSelection(k.code == KEY_X) else try self.typeText(k),
             KEY_MINUS, KEY_EQUAL => if (k.ctrl) try self.setThickness(self.thickness + @as(i32, if (k.code == KEY_EQUAL) 1 else -1)) else try self.typeText(k),
             else => try self.typeText(k),
         }
+    }
+
+    /// Ctrl+C / Ctrl+X: the selected text to the clipboard.
+    fn copyTextSelection(self: *Editor, cut: bool) !void {
+        const t = &(self.text orelse return);
+        const buf = &self.doc.shapes.items[t.idx].str;
+        const sel = t.te.selectedText(buf.items);
+        if (sel.len == 0) return;
+        const copy = try self.alloc.dupe(u8, sel);
+        self.win.setClipboardText(copy) catch |e| {
+            self.alloc.free(copy);
+            std.log.warn("copy text failed: {t}", .{e});
+            return;
+        };
+        if (cut) _ = t.te.deleteSelection(buf);
+        self.needs_render = true;
     }
 
     /// Paste the clipboard's plain text at the caret, newlines kept.
@@ -1468,7 +1499,9 @@ pub const Editor = struct {
         }
         if (self.text != null) {
             const editing_chord = switch (k.code) {
-                window.KEY_ENTER, KEY_KPENTER, window.KEY_BACKSPACE, window.KEY_DELETE, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_MINUS, KEY_EQUAL => true,
+                window.KEY_ENTER, KEY_KPENTER, window.KEY_BACKSPACE, window.KEY_DELETE, KEY_LEFT, KEY_RIGHT, KEY_HOME, KEY_END, KEY_MINUS, KEY_EQUAL, KEY_A => true,
+                // copy/cut stay in the text when something is selected
+                KEY_C, KEY_X => self.text.?.te.selection() != null,
                 else => false,
             };
             // other Ctrl chords (copy, save, undo...) end the edit and run
@@ -1819,8 +1852,8 @@ pub const Editor = struct {
             if (s.tool != .pen and s.tool != .highlight) shapes_mod.drawShape(canvas, self.alloc, s, xf, null);
         }
         if (self.lifted) |i| {
-            const caret: ?usize = if (self.text) |t| t.te.caret else null;
-            shapes_mod.drawShape(canvas, self.alloc, &self.doc.shapes.items[i], xf, caret);
+            const cursor: ?shapes_mod.TextCursor = if (self.text) |t| .{ .caret = t.te.caret, .sel = t.te.selection() } else null;
+            shapes_mod.drawShape(canvas, self.alloc, &self.doc.shapes.items[i], xf, cursor);
         }
     }
 
