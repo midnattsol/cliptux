@@ -653,7 +653,15 @@ const Quick = struct {
                 }
             },
             .pointer_axis => {},
-            .key => |k| if (k.pressed) self.onKey(k),
+            .key => |k| if (k.pressed) {
+                // a layer surface has the keyboard only while the pointer
+                // is over it, but KWin keeps it focused after that: keys
+                // then belong to whatever the person went back to typing
+                // in, not to the thumbnail's shortcuts
+                if (self.layer and !self.win.pointer_in) {
+                    std.log.debug("quick access: key ignored, the pointer is elsewhere", .{});
+                } else self.onKey(k);
+            },
         }
     }
 
