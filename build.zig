@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
+    addSizeChecks(b, test_step);
 
     // end-to-end suite: shotlet driven by a virtual keyboard and pointer in
     // a private headless GNOME session (tools/e2e.sh skips without one)
@@ -129,4 +130,23 @@ fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
     // compiled with glib-compile-schemas and committed: the extension
     // directory is copied as is (GNOME Shell does not compile schemas)
     m.addAnonymousImport("gnome_ext_schema_compiled", .{ .root_source_file = b.path(dir ++ "schemas/gschemas.compiled") });
+}
+
+/// `check-size` fails when a source file outgrows the line limit (files
+/// still over it are allowlisted in tools/size-allowlist.txt and may only
+/// shrink); `test` runs it too. `long-fns` lists overlong functions.
+fn addSizeChecks(b: *std.Build, test_step: *std.Build.Step) void {
+    const check = b.addSystemCommand(&.{ "sh", "tools/check-size.sh" });
+    check.setName("check-size.sh");
+    check.setCwd(b.path("."));
+    check.has_side_effects = true;
+    b.step("check-size", "Fail when a source file grows past 600 lines").dependOn(&check.step);
+    test_step.dependOn(&check.step);
+
+    const fns = b.addSystemCommand(&.{ "sh", "tools/long-fns.sh" });
+    fns.setName("long-fns.sh");
+    fns.setCwd(b.path("."));
+    fns.addPassthruArgs();
+    fns.has_side_effects = true;
+    b.step("long-fns", "List functions longer than 80 lines (a report, never fails)").dependOn(&fns.step);
 }
