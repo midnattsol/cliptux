@@ -431,6 +431,196 @@ fn askYes(question: []const u8) bool {
     return a.len == 0 or a[0] == 'y' or a[0] == 'Y';
 }
 
+/// "<Ctrl><Shift>s" and "<Shift><Control>S" are the same key.
+pub fn sameAccel(a: []const u8, b: []const u8) bool {
+    var na: [128]u8 = undefined;
+    var nb: [128]u8 = undefined;
+    const x = normalizeAccel(a, &na) orelse return false;
+    const y = normalizeAccel(b, &nb) orelse return false;
+    return std.mem.eql(u8, x, y);
+}
+
+/// Modifier flags, then the key in lower case.
+fn normalizeAccel(accel: []const u8, buf: []u8) ?[]const u8 {
+    const mods = [_]struct { []const u8, u8 }{
+        .{ "shift", 'S' }, .{ "control", 'C' }, .{ "ctrl", 'C' },  .{ "primary", 'C' },
+        .{ "ctl", 'C' },   .{ "alt", 'A' },     .{ "mod1", 'A' },  .{ "super", 'W' },
+        .{ "mod4", 'W' },  .{ "meta", 'M' },    .{ "hyper", 'H' },
+    };
+    var flags: [6]bool = @splat(false);
+    const order = "SCAWMH";
+    var i: usize = 0;
+    while (i < accel.len and accel[i] == '<') {
+        const end = std.mem.indexOfScalarPos(u8, accel, i, '>') orelse return null;
+        const name = accel[i + 1 .. end];
+        const f = for (mods) |m| {
+            if (std.ascii.eqlIgnoreCase(m[0], name)) break m[1];
+        } else return null;
+        flags[std.mem.indexOfScalar(u8, order, f).?] = true;
+        i = end + 1;
+    }
+    const key = accel[i..];
+    if (key.len == 0 or key.len + 6 > buf.len) return null;
+    var n: usize = 0;
+    for (flags, 0..) |on, k| if (on) {
+        buf[n] = order[k];
+        n += 1;
+    };
+    buf[n] = '+';
+    n += 1;
+    for (key) |c| {
+        buf[n] = std.ascii.toLower(c);
+        n += 1;
+    }
+    return buf[0..n];
+}
+
+const shell_keys_schema = "org.gnome.shell.keybindings";
+/// GNOME's own screenshot shortcuts (the extension yields to them)
+const gnome_shot_keys = [_][]const u8{ "show-screenshot-ui", "screenshot", "screenshot-window", "show-screen-recording-ui" };
+/// where GNOME's screenshot UI goes when Shotlet takes its key
+const ui_moved_to = "<Shift><Super>s";
+/// schemas whose keys hold keyboard shortcuts
+const binding_schemas = [_][]const u8{
+    "org.gnome.shell.keybindings",                  "org.gnome.desktop.wm.keybindings",
+    "org.gnome.mutter.keybindings",                 "org.gnome.mutter.wayland.keybindings",
+    "org.gnome.settings-daemon.plugins.media-keys",
+};
+
+/// Some GNOME shortcut (or a custom one) uses `accel`.
+fn accelInUse(arena: std.mem.Allocator, env: Env, accel: []const u8) bool {
+    for (binding_schemas) |schema| {
+        const all = gsettings.run(arena, env, null, &.{ "list-recursively", schema }) catch continue;
+        var lines = std.mem.splitScalar(u8, all, '\n');
+        while (lines.next()) |line| {
+            const strs = gsettings.quotedStrings(arena, line) catch continue;
+            for (strs) |str| if (sameAccel(str, accel)) return true;
+        }
+    }
+    const list = gsettings.parseStrv(arena, gsettings.get(arena, env, null, media_keys, "custom-keybindings") catch return false) catch return false;
+    for (list) |path| {
+        const schema = customPathSchema(arena, path) catch continue;
+        const b = getString(arena, env, schema, "binding") catch continue;
+        if (sameAccel(b, accel)) return true;
+    }
+    return false;
+}
+
+/// Where GNOME's own shortcuts that Shotlet took are remembered.
+fn keysBackupPath(buf: []u8, home: []const u8) ![]u8 {
+    var dir_buf: [1024]u8 = undefined;
+    const dir = try env_mod.configDir(&dir_buf, home);
+    return std.fmt.bufPrint(buf, "{s}/gnome-moved-keys", .{dir});
+}
+
+/// GNOME's screenshot shortcuts that hold one of `ours`.
+const Taken = struct { key: []const u8, old: []const u8, new: [][]const u8 };
+
+fn keysToTake(arena: std.mem.Allocator, env: Env, ours: []const []const u8) ![]Taken {
+    var out: std.ArrayList(Taken) = .empty;
+    for (gnome_shot_keys) |key| {
+        const old = std.mem.trim(u8, gsettings.get(arena, env, null, shell_keys_schema, key) catch continue, " \n");
+        const list = gsettings.parseStrv(arena, old) catch continue;
+        var keep: std.ArrayList([]const u8) = .empty;
+        var hit = false;
+        for (list) |a| {
+            const clash = for (ours) |o| {
+                if (sameAccel(a, o)) break true;
+            } else false;
+            if (clash) hit = true else try keep.append(arena, a);
+        }
+        if (!hit) continue;
+        // GNOME's screenshot UI keeps a key when a free one is at hand
+        if (std.mem.eql(u8, key, "show-screenshot-ui") and keep.items.len == 0 and !accelInUse(arena, env, ui_moved_to))
+            try keep.append(arena, ui_moved_to);
+        try out.append(arena, .{ .key = key, .old = old, .new = keep.items });
+    }
+    return out.toOwnedSlice(arena);
+}
+
+fn takeKeys(arena: std.mem.Allocator, env: Env, taken: []const Taken) !void {
+    var pbuf: [1100]u8 = undefined;
+    const bpath = try keysBackupPath(&pbuf, env.home);
+    var backup: std.ArrayList(u8) = .empty;
+    if (sys.readFileAlloc(arena, bpath, 1024 * 1024)) |old| try backup.appendSlice(arena, old) else |_| {}
+    for (taken) |t| try backup.print(arena, "{s}\t{s}\t{s}\n", .{ shell_keys_schema, t.key, t.old });
+    var dir_buf: [1024]u8 = undefined;
+    sys.mkdirAll(try env_mod.configDir(&dir_buf, env.home), 0o700);
+    // remembered before anything changes
+    try sys.writeFile(bpath, backup.items);
+    for (taken) |t| try gsettings.set(arena, env, null, shell_keys_schema, t.key, try gsettings.formatStrv(arena, t.new));
+}
+
+/// Give GNOME's screenshot shortcuts back exactly as they were (a key
+/// that was at its default is reset, not set to the same value).
+fn restoreKeys(arena: std.mem.Allocator, env: Env) !usize {
+    var pbuf: [1100]u8 = undefined;
+    const bpath = try keysBackupPath(&pbuf, env.home);
+    const data = sys.readFileAlloc(arena, bpath, 1024 * 1024) catch return 0;
+    var n: usize = 0;
+    // the earliest record of a key is what it was before Shotlet
+    var seen: std.ArrayList([]const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, data, '\n');
+    while (lines.next()) |line| {
+        var f = std.mem.splitScalar(u8, line, '\t');
+        const schema = f.next() orelse continue;
+        const key = f.next() orelse continue;
+        const old = f.next() orelse continue;
+        if (!std.mem.eql(u8, schema, shell_keys_schema)) continue;
+        for (gnome_shot_keys) |k| {
+            if (std.mem.eql(u8, k, key)) break;
+        } else continue;
+        for (seen.items) |k| {
+            if (std.mem.eql(u8, k, key)) break;
+        } else {
+            try seen.append(arena, key);
+            try gsettings.reset(arena, env, null, schema, key);
+            const now = std.mem.trim(u8, try gsettings.get(arena, env, null, schema, key), " \n");
+            if (!std.mem.eql(u8, now, old)) try gsettings.set(arena, env, null, schema, key, old);
+            n += 1;
+        }
+    }
+    sys.unlink(bpath) catch {};
+    return n;
+}
+
+/// A line for the Settings window about the last install.
+pub var note_buf: [256]u8 = undefined;
+pub var note_len: usize = 0;
+pub fn note() ?[]const u8 {
+    return if (note_len > 0) note_buf[0..note_len] else null;
+}
+fn setNote(comptime fmt: []const u8, args: anytype) void {
+    const s = std.fmt.bufPrint(&note_buf, fmt, args) catch note_buf[0..0];
+    note_len = s.len;
+}
+
+fn displayAccel(buf: []u8, accel: []const u8) []const u8 {
+    // "<Shift><Super>s" -> "Shift+Super+S"
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < accel.len) {
+        if (accel[i] == '<') {
+            const end = std.mem.indexOfScalarPos(u8, accel, i, '>') orelse break;
+            const name = accel[i + 1 .. end];
+            if (n + name.len + 1 > buf.len) break;
+            @memcpy(buf[n..][0..name.len], name);
+            n += name.len;
+            buf[n] = '+';
+            n += 1;
+            i = end + 1;
+        } else {
+            const key = accel[i..];
+            if (n + key.len > buf.len) break;
+            @memcpy(buf[n..][0..key.len], key);
+            if (key.len == 1) buf[n] = std.ascii.toUpper(key[0]);
+            n += key.len;
+            break;
+        }
+    }
+    return buf[0..n];
+}
+
 /// The extension is active: point it at this binary and sort out the
 /// shortcut (see the top of the file). Messages go to stderr.
 fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShortcuts) void {
@@ -473,6 +663,7 @@ fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShor
             out("Kept it; it captures without prompts too (shotlet asks the integration).\n", .{});
         }
     }
+    takeGnomeKey(arena, env, schemadir, move);
     // let the extension pick up its settings
     var tries: usize = 0;
     var info = captureInfo(gpa, bus);
@@ -482,6 +673,46 @@ fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShor
         info = captureInfo(gpa, bus);
     }
     printShortcut(&info);
+}
+
+/// The extension's key is one of GNOME's own screenshot shortcuts (stock
+/// GNOME: Print opens its screenshot tool): offer to give it to Shotlet,
+/// moving GNOME's screenshot tool to Shift+Super+S when that is free.
+/// Only the shortcuts holding that key change; uninstall restores them.
+fn takeGnomeKey(arena: std.mem.Allocator, env: Env, schemadir: []const u8, move: MoveShortcuts) void {
+    const out = std.debug.print;
+    const ours = gsettings.parseStrv(arena, gsettings.get(arena, env, schemadir, ext_schema_id, "capture-shortcut") catch return) catch return;
+    if (ours.len == 0) return;
+    var cs: std.ArrayList([]const u8) = .empty;
+    for (ours) |o| cs.append(arena, o) catch return;
+    const taken = keysToTake(arena, env, cs.items) catch return;
+    if (taken.len == 0) return;
+    var kb: [64]u8 = undefined;
+    var mb: [64]u8 = undefined;
+    const key = displayAccel(&kb, ours[0]);
+    const ui_new = for (taken) |t| {
+        if (std.mem.eql(u8, t.key, "show-screenshot-ui")) break if (t.new.len > 0) displayAccel(&mb, t.new[0]) else "";
+    } else "";
+    const where = if (ui_new.len > 0)
+        std.fmt.allocPrint(arena, "GNOME's screenshot tool moves to {s}", .{ui_new}) catch return
+    else
+        "GNOME's screenshot tool stays in the system menu";
+    out("{s} opens GNOME's own screenshot tool.\n", .{key});
+    const yes = switch (move) {
+        .yes => true,
+        .no => false,
+        .ask => askYes(std.fmt.allocPrint(arena, "Give {s} to Shotlet? ({s}; uninstall puts it back)", .{ key, where }) catch return),
+    };
+    if (!yes) {
+        out("Kept it: Shotlet's key {s} stays unbound (see `shotlet gnome-integration shortcut`).\n", .{key});
+        return;
+    }
+    takeKeys(arena, env, taken) catch |err| {
+        out("Could not change GNOME's shortcuts ({t}).\n", .{err});
+        return;
+    };
+    out("{s} now captures with Shotlet; {s}.\n", .{ key, where });
+    setNote("{s} captures with Shotlet; {s}", .{ key, where });
 }
 
 fn printShortcut(info: *const CaptureInfo) void {
@@ -517,6 +748,9 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const [
     } else if (std.mem.eql(u8, sub, "uninstall")) {
         var arena_state = std.heap.ArenaAllocator.init(gpa);
         defer arena_state.deinit();
+        if (restoreKeys(arena_state.allocator(), env)) |n| {
+            if (n > 0) out("Gave {d} of GNOME's screenshot shortcut(s) back.\n", .{n});
+        } else |err| out("Could not give GNOME's screenshot shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-keys\n", .{err});
         if (restoreShortcuts(arena_state.allocator(), env)) |n| {
             if (n > 0) out("Put {d} custom shortcut(s) running shotlet back.\n", .{n});
         } else |err| out("Could not put the moved shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-shortcuts\n", .{err});
@@ -567,6 +801,18 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const [
         out("capture: {s}\n", .{if (info.capture) "through the GNOME integration (no prompts)" else "through the screen-sharing portal"});
         printShortcut(&info);
     }
+}
+
+test "accelerators compare as keys" {
+    try std.testing.expect(sameAccel("Print", "print"));
+    try std.testing.expect(sameAccel("<Ctrl><Shift>s", "<Shift><Control>S"));
+    try std.testing.expect(sameAccel("<Primary>p", "<Control>p"));
+    try std.testing.expect(!sameAccel("<Shift>Print", "Print"));
+    try std.testing.expect(!sameAccel("<Super>s", "<Shift><Super>s"));
+    try std.testing.expect(!sameAccel("<Bogus>s", "s"));
+    var b: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("Shift+Super+S", displayAccel(&b, "<Shift><Super>s"));
+    try std.testing.expectEqualStrings("Print", displayAccel(&b, "Print"));
 }
 
 test "custom shortcuts that run shotlet" {

@@ -146,6 +146,20 @@ fn parseQuoted(arena: std.mem.Allocator, s: []const u8, i: *usize) ![]u8 {
     return error.BadVariant;
 }
 
+/// Every quoted string in a line of GVariant text (gsettings
+/// list-recursively), whatever the value's type.
+pub fn quotedStrings(arena: std.mem.Allocator, text: []const u8) ![][]u8 {
+    var out: std.ArrayList([]u8) = .empty;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == '\'' or text[i] == '"') {
+            const str = parseQuoted(arena, text, &i) catch break;
+            try out.append(arena, str);
+        } else i += 1;
+    }
+    return out.toOwnedSlice(arena);
+}
+
 /// Quote a string for gsettings set: 'it\'s'.
 pub fn quote(out: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
     try out.append(gpa, '\'');
@@ -190,6 +204,9 @@ test "string lists round-trip through GVariant text" {
     try std.testing.expectError(error.BadVariant, parseStrv(arena, "['a' 'b']"));
     try std.testing.expectError(error.BadVariant, parseStrv(arena, "['a"));
     try std.testing.expectEqualStrings("<Super>s", try parseString(arena, "'<Super>s'\n"));
+    const q = try quotedStrings(arena, "org.gnome.x key ['<Super>a', \"it's\"] true 'b'");
+    try std.testing.expectEqual(@as(usize, 3), q.len);
+    try std.testing.expectEqualStrings("it's", q[1]);
     try std.testing.expectError(error.BadVariant, parseString(arena, "'a' x"));
 
     const f = try formatStrv(std.testing.allocator, &.{ "Print", "it's", "a\\b" });

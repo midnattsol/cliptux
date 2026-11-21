@@ -652,7 +652,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
                 {
                     const r = rowBegin(&ui, &card, ui.sc(64));
                     rowTitle(&ui, r, "Shell extension", switch (st.gnome) {
-                        .active => "On: thumbnails and pins stay above other windows",
+                        .active => gnome.note() orelse "On: no capture prompts; thumbnails and pins stay above other windows",
                         .installed => "Installed; log out and in once to finish",
                         .failed => "Could not install it; see shotlet gnome-integration",
                         else => "Off: the thumbnail is an ordinary window",
