@@ -525,6 +525,33 @@ if [ "${1:-}" = "--inner" ]; then
         check "menu Quit ends the daemon" wait_exit 5
         check "  ... with status 0" eq "$RC" 0
         ;;
+    fallback)
+        # no ScreenCast portal backend: shotlet falls back to the Screenshot
+        # portal. GNOME asks consent only from the focused app ("Only the
+        # focused app is allowed to show a system access dialog"); the
+        # first, unfocused request is refused, then shotlet shows its own
+        # small window to ask again from there.
+        mkdir -p "$HOME/.config/xdg-desktop-portal"
+        printf '[preferred]\ndefault=gnome;gtk;\norg.freedesktop.impl.portal.ScreenCast=none\n' \
+            >"$HOME/.config/xdg-desktop-portal/portals.conf"
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet fallback
+        check "ScreenCast unavailable: Screenshot portal tried" wait_log 10 "trying the screenshot portal"
+        # GNOME's access dialog call times out (~25 s) before the refusal
+        found=
+        for i in $(seq 1 45); do
+            drv find 0 1d2125 0 300 2>/dev/null && { found=1; break; }
+            alive || break
+            sleep 1
+        done
+        shot 0 permission
+        check "refused consent: shotlet asks from its own window" test -n "$found"
+        keys esc
+        check "  ... where Esc ends quietly" wait_exit 5
+        check "  ... with status 0" eq "$RC" 0
+        ;;
     *)
         skip "unknown scenario"
         ;;
