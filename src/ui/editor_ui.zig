@@ -374,7 +374,7 @@ pub fn layoutToolbar(self: *Editor) !void {
         if (b.kind == .tool and toolButtonActive(self, b.kind.tool)) {
             self.act_x.dur_ms = theme.motion;
             self.act_y.dur_ms = theme.motion;
-            if (fresh or self.act_x.start_ms == 0 and self.act_x.target == 0) {
+            if (fresh) {
                 self.act_x.snap(ff(b.rect.x - ax));
                 self.act_y.snap(ff(b.rect.y - ay));
             } else {
@@ -384,7 +384,7 @@ pub fn layoutToolbar(self: *Editor) !void {
         }
     }
 
-    try layoutPanel(self, s);
+    try layoutPanel(self);
     if (self.popover != .none) try layoutPopover(self) else self.pop_rect = Rect.empty;
     if (self.picker.open) layoutPicker(self);
     // the controls moved: what is under a still pointer may have changed
@@ -412,7 +412,7 @@ pub fn layoutToolbar(self: *Editor) !void {
 
 /// The beautify panel: its own small bar beside the toolbar while
 /// beautify is on.
-fn layoutPanel(self: *Editor, s: Rect) !void {
+fn layoutPanel(self: *Editor) !void {
     if (!self.beautify.enabled) {
         self.panel_rect = Rect.empty;
         return;
@@ -432,8 +432,6 @@ fn layoutPanel(self: *Editor, s: Rect) !void {
     const px = std.math.clamp(tb.x + @divTrunc(tb.w - pw, 2), margin, @max(margin, w - pw - margin));
     var py = if (self.tb_below) tb.bottom() + self.sc(8) else tb.y - ph - self.sc(8);
     if (py + ph > h - margin or py < margin) py = if (self.tb_below) tb.y - ph - self.sc(8) else tb.bottom() + self.sc(8);
-    // never over the selection's middle when avoidable
-    _ = s;
     py = std.math.clamp(py, margin, @max(margin, h - ph - margin));
     self.panel_rect = .{ .x = px, .y = py, .w = pw, .h = ph };
     var x = px + pad + label_w + gap;
@@ -1347,9 +1345,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
             else => {
                 const on_accent = active and b.kind == .tool;
                 if (!on_accent) {
-                    if (active) {
-                        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.mix(th.pressed, th.accent, 0.0));
-                    }
+                    if (active) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.pressed);
                     if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
                 }
                 const fg: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
