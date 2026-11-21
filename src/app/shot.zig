@@ -2,6 +2,7 @@
 //! permission dialog, and copy/save handling around the editor.
 
 const std = @import("std");
+const capture = @import("capture.zig");
 const dbus = @import("../platform/dbus.zig");
 const portal = @import("../platform/portal.zig");
 const png = @import("../gfx/png.zig");
@@ -45,8 +46,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 
     if (pw_thread) |t| t.join();
     const t_pw = nowMs();
-    var img = try acquireImage(gpa, env, &conn, &cfg, from_file);
-    defer img.deinit(gpa);
+    var cap = try capture.Capture.single(gpa, try acquireImage(gpa, env, &conn, &cfg, from_file));
+    defer cap.deinit(gpa);
     const t_capture = nowMs();
 
     try win.open("Shotlet", .{ .fullscreen = true });
@@ -61,7 +62,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
         t_capture - t_pw,
         t_open - t_capture,
     });
-    var ed = editor_mod.Editor.init(gpa, &win, &img);
+    var ed = editor_mod.Editor.init(gpa, &win, &cap.image);
+    ed.monitors = cap.monitors;
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
@@ -77,7 +79,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             ed.releaseCaches(); // serving may outlive the session; drop ~140MB
             if (win.hasClipboard()) try win.serveClipboard();
         },
-        .save => {
+        // TODO(platform): .save_as asks for a path with the FileChooser portal
+        .save, .save_as => {
             if (cfg.copy_on_save) {
                 const copy = try gpa.dupe(u8, result.png_data.?);
                 win.setClipboardPng(copy) catch |err| {

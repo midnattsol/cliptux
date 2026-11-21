@@ -3,6 +3,7 @@
 //! to clipboard or save. Pure software rendering into the window buffer.
 
 const std = @import("std");
+const capture = @import("../app/capture.zig");
 const window = @import("window.zig");
 const render = @import("../gfx/render.zig");
 const text_mod = @import("../gfx/text.zig");
@@ -23,7 +24,12 @@ const handleAt = shapes_mod.handleAt;
 const resizeWithHandle = shapes_mod.resizeWithHandle;
 const evdevToChar = shapes_mod.evdevToChar;
 
-pub const Action = enum { cancel, save };
+pub const Action = enum {
+    cancel,
+    save,
+    /// save to a path the user picks (the caller shows the dialog)
+    save_as,
+};
 
 pub const CopyNotice = enum { none, copying, copied, failed };
 
@@ -117,6 +123,9 @@ pub const Editor = struct {
     binds: [config.n_actions]config.Bind = config.default_binds,
     copy_notice: CopyNotice = .none,
     copy_notice_hide_at_ms: i64 = 0,
+
+    /// where each captured monitor lies inside `img`; set by the caller
+    monitors: []const capture.Monitor = &.{},
 
     pub fn init(alloc: std.mem.Allocator, win: *Window, img: *const png.Image) Editor {
         return .{ .alloc = alloc, .win = win, .img = img };

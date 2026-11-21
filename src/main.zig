@@ -85,6 +85,8 @@ test {
     _ = @import("ui/shapes.zig");
     _ = @import("ui/editor_ui.zig");
     _ = @import("gfx/png.zig");
+    _ = @import("gfx/effects.zig");
+    _ = @import("app/capture.zig");
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
     _ = @import("platform/wayland.zig");
