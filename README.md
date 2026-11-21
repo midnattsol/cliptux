@@ -144,15 +144,18 @@ installing the extension is the consent. The extension takes the
 screenshot itself, inside GNOME Shell, and starts Shotlet's editor on it:
 
 - **Its own shortcut**, `capture-shortcut` in its settings, default
-  `Print`. While one of GNOME's own screenshot shortcuts (Print opens
-  GNOME's screenshot tool) holds the same key, the extension leaves it
-  alone and binds nothing: pick another key with
+  `Print`. On stock GNOME, Print opens GNOME's screenshot tool:
+  `shotlet gnome-integration install` offers to give Print to Shotlet
+  (it asks on a terminal, yes by default; the Enable button in Settings
+  just does it and says so), moving GNOME's screenshot tool to
+  Shift+Super+S when nothing else uses that key. Only the GNOME shortcuts
+  holding Print change, what they held is remembered
+  (`~/.config/shotlet/gnome-moved-keys`), and `uninstall` restores them
+  exactly. Decline, and the extension leaves the key alone and binds
+  nothing (Settings and `status` say so); pick another key with
   `shotlet gnome-integration shortcut '<Shift><Super>s'` (`none` for no
-  key), or free Print in GNOME Settings › Keyboard › View and Customize
-  Shortcuts › Screenshots. `shotlet gnome-integration install` finds
-  custom shortcuts that run `shotlet`, offers to move them to the
-  extension's key (it asks on a terminal; from Settings it moves them),
-  and `uninstall` puts them back.
+  key). install also finds custom shortcuts that run `shotlet`, offers
+  to move them to the extension's key, and `uninstall` puts them back.
 - **`shotlet` and the tray's Take screenshot** ask the extension
   (`dev.shotlet.Shell1.Capture()`), so they need no prompt either.
 
@@ -260,10 +263,12 @@ bindings for "another app" (`tools/e2e/target.py`: focus, clicks, drops;
 `python3-gi gir1.2-gtk-4.0`). They load the bundled GNOME Shell extension
 into the private session (`HL_EXTENSIONS`), except `quick-plain`, which
 checks the fallback without it. So do the prompt-free capture scenarios:
-`shell` (its key, no dialog and nothing in the permission store, the
-capture files gone and no PNG written anywhere else, the pixels, a
-Capture() from another program refused, install moving a custom shortcut
-and uninstall putting it back), `shell-mixed` (two monitors at scales 2
+`shell` (stock bindings: install takes Print, Print captures with no
+dialog and nothing in the permission store, the capture files gone and
+no PNG written anywhere else, the pixels, a Capture() from another
+program refused, uninstall restoring GNOME's keys), `shell-owner`
+(a custom shortcut running shotlet on Print, moved and put back),
+`shell-mixed` (two monitors at scales 2
 and 1, checked across the seam), `shell-tray` (the tray's Activate and
 menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
 and the portal when the extension cannot capture). The portal scenarios
