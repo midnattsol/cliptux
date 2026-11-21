@@ -139,6 +139,7 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     st.theme = st.prefs.theme();
     st.env = env;
     st.gnome = gnomeState(alloc, if (bus) |*b| b else null);
+    if (st.gnome == .active) st.capture = gnome.captureInfo(alloc, &bus.?);
 
     var win = try Window.init(alloc, env.runtime_dir, env.wayland_display);
     defer win.deinit();
@@ -332,6 +333,7 @@ const State = struct {
     reveal_focus: bool = false,
     env: env_mod.Env = undefined,
     gnome: GnomeState = .not_gnome,
+    capture: gnome.CaptureInfo = .{},
     history_cleared: bool = false,
 
     fn scrollBy(self: *State, step: i32, win: *const Window) void {
@@ -493,6 +495,9 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
                 .installed_relogin => .installed,
                 .failed => .failed,
             };
+            if (st.gnome == .active) if (bus) |b| {
+                st.capture = gnome.captureInfo(alloc, b);
+            };
             st.dirty = true;
             return false;
         },
@@ -591,7 +596,14 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             y = endCard(&card) + ui.sc(26);
 
             y = try groupTitle(&ui, cx, y, col_w, "Capture", null);
-            card = beginCard(&ui, cx, y, col_w, rh);
+            card = beginCard(&ui, cx, y, col_w, 2 * rh);
+            {
+                const r = rowBegin(&ui, &card, rh);
+                rowTitle(&ui, r, "Capture", if (st.capture.capture)
+                    "Through the GNOME integration (no prompts)"
+                else
+                    "Through the screen-sharing portal");
+            }
             {
                 const r = rowBegin(&ui, &card, ui.sc(theme_mod.row_h));
                 const remembered = cfg.scToken() != null;
@@ -654,7 +666,16 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             card = beginCard(&ui, cx, y, col_w, ui.sc(64));
             {
                 const r = rowBegin(&ui, &card, ui.sc(64));
-                rowTitle(&ui, r, "Bind a key to \u{201C}shotlet\u{201D}", "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts");
+                var buf: [128]u8 = undefined;
+                if (st.capture.capture) {
+                    if (st.capture.shortcut()) |k| {
+                        const t = std.fmt.bufPrint(&buf, "{s}", .{k}) catch "";
+                        rowTitle(&ui, r, t, if (st.capture.blocked)
+                            "GNOME\u{2019}s screenshot key: pick another with shotlet gnome-integration shortcut"
+                        else
+                            "Set by the GNOME integration: shotlet gnome-integration shortcut");
+                    } else rowTitle(&ui, r, "No shortcut", "Pick one with shotlet gnome-integration shortcut KEY");
+                } else rowTitle(&ui, r, "Bind a key to \u{201C}shotlet\u{201D}", "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts");
             }
             y = endCard(&card) + ui.sc(26);
         },
