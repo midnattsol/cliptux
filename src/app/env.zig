@@ -26,6 +26,8 @@ pub const Xdg = struct {
     state_home: ?[]const u8 = null,
     /// XDG_PICTURES_DIR from the environment, if exported
     pictures_dir: ?[]const u8 = null,
+    /// XDG_CACHE_HOME, absolute only
+    cache_home: ?[]const u8 = null,
 };
 
 pub var xdg: Xdg = .{};
@@ -53,6 +55,12 @@ pub fn configDir(buf: []u8, home: []const u8) ![]u8 {
 pub fn stateDir(buf: []u8, home: []const u8) ![]u8 {
     if (xdg.state_home) |d| return std.fmt.bufPrint(buf, "{s}/shotlet", .{d});
     return std.fmt.bufPrint(buf, "{s}/.local/state/shotlet", .{home});
+}
+
+/// $XDG_CACHE_HOME/shotlet, or ~/.cache/shotlet.
+pub fn cacheDir(buf: []u8, home: []const u8) ![]u8 {
+    if (xdg.cache_home) |d| return std.fmt.bufPrint(buf, "{s}/shotlet", .{d});
+    return std.fmt.bufPrint(buf, "{s}/.cache/shotlet", .{home});
 }
 
 /// Expand a leading `~/`, `$HOME/` or `${HOME}/` (and a bare `~`/`$HOME`).

@@ -46,6 +46,7 @@ pub fn main(init: std.process.Init) !void {
         .config_home = env_mod.absolute(vars.get("XDG_CONFIG_HOME")),
         .state_home = env_mod.absolute(vars.get("XDG_STATE_HOME")),
         .pictures_dir = env_mod.absolute(vars.get("XDG_PICTURES_DIR")),
+        .cache_home = env_mod.absolute(vars.get("XDG_CACHE_HOME")),
     };
 
     const cmd = if (args.len > 1) args[1] else "shot";
@@ -134,6 +135,8 @@ test {
     _ = @import("platform/pw.zig");
     _ = @import("platform/portal_test.zig");
     _ = @import("app/config.zig");
+    _ = @import("app/history.zig");
+    _ = @import("app/annot.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
     _ = @import("ui/textbox.zig");
