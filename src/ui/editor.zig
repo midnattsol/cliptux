@@ -400,6 +400,17 @@ pub const Editor = struct {
         self.needs_render = true;
     }
 
+    /// Shape `i` changed and is the topmost one: paint just it.
+    fn paintTop(self: *Editor, i: usize) !void {
+        if (i + 1 != self.doc.shapes.items.len or self.lifted != null or self.layer.len == 0) {
+            return self.recompose(self.doc.shapes.items[i].bounds());
+        }
+        const s = &self.doc.shapes.items[i];
+        try doc_mod.paintOnTop(self.alloc, self.layer, self.img.width, self.img.height, s);
+        if (self.viewc.len > 0) self.refreshView(self.view.rectToBufOuter(s.bounds()));
+        self.needs_render = true;
+    }
+
     fn recomposeAll(self: *Editor) !void {
         try self.recompose(self.doc.imageRect());
     }
@@ -773,7 +784,7 @@ pub const Editor = struct {
                     .p0 = ip,
                     .number = self.doc.nextNumber(),
                 });
-                try self.recompose(self.doc.shapes.items[i].bounds());
+                try self.paintTop(i);
             },
             .text => {
                 if (self.doc.hit(ip, self.hitTol())) |i| {
@@ -946,7 +957,7 @@ pub const Editor = struct {
             return e;
         };
         const i = try self.doc.add(s);
-        try self.recompose(self.doc.shapes.items[i].bounds());
+        try self.paintTop(i);
     }
 
     fn onRightClick(self: *Editor) !void {
@@ -1045,7 +1056,7 @@ pub const Editor = struct {
     fn unlift(self: *Editor) !void {
         const i = self.lifted orelse return;
         self.lifted = null;
-        try self.recompose(self.doc.shapes.items[i].bounds());
+        try self.paintTop(i);
     }
 
     // --- text ---
@@ -1095,7 +1106,7 @@ pub const Editor = struct {
                 before[t.idx].p0.x == s.p0.x and before[t.idx].p0.y == s.p0.y;
             if (same) self.doc.dropCheckpoint();
         }
-        try self.recompose(s.bounds());
+        try self.paintTop(t.idx);
     }
 
     fn onTextKey(self: *Editor, k: window.Key) !void {
@@ -1362,7 +1373,7 @@ pub const Editor = struct {
         const off: i32 = @max(4, @as(i32, @intFromFloat(@round(self.view.lenToImg(@floatFromInt(self.sc(14)))))));
         const n = try self.doc.duplicate(i, off, off);
         self.selected = n;
-        try self.recompose(self.doc.shapes.items[n].bounds());
+        try self.paintTop(n);
     }
 
     fn bringSelectedToFront(self: *Editor) !void {

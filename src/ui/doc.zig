@@ -266,6 +266,34 @@ pub fn composeRegion(
     }
 }
 
+/// Paint `s` over the layer as the new topmost shape: no recompose of
+/// what lies under it, so committing a stroke costs only the stroke.
+pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *const Shape) !void {
+    const full: Rect = .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
+    const r = Rect.intersect(s.bounds(), full) orelse return;
+    const e = Rect.intersect(r.expand(s.readMargin()), full).?;
+    const ew: usize = @intCast(e.w);
+    const eh: usize = @intCast(e.h);
+    const tmp = try alloc.alloc(u32, ew * eh);
+    defer alloc.free(tmp);
+    const mask = try alloc.alloc(u8, ew * eh);
+    defer alloc.free(mask);
+    @memset(mask, 0);
+    for (0..eh) |y| {
+        const src = (@as(usize, @intCast(e.y)) + y) * w + @as(usize, @intCast(e.x));
+        @memcpy(tmp[y * ew ..][0..ew], layer[src..][0..ew]);
+    }
+    var canvas = render.Canvas.init(tmp, @intCast(ew), @intCast(eh));
+    canvas.mask = mask;
+    shapes.drawShape(&canvas, alloc, s, .{ .ox = @floatFromInt(-e.x), .oy = @floatFromInt(-e.y) }, null);
+    const rw: usize = @intCast(r.w);
+    for (0..@intCast(r.h)) |ry| {
+        const t = (@as(usize, @intCast(r.y - e.y)) + ry) * ew + @as(usize, @intCast(r.x - e.x));
+        const dst = (@as(usize, @intCast(r.y)) + ry) * w + @as(usize, @intCast(r.x));
+        @memcpy(layer[dst..][0..rw], tmp[t..][0..rw]);
+    }
+}
+
 // --- beautify and export ---
 
 pub const Background = struct { from: u32, to: u32, name: []const u8 };
@@ -556,6 +584,10 @@ test "region recompose matches a full redraw" {
         .{ .x = 0, .y = 45, .w = 60, .h = 45 }, .{ .x = 60, .y = 45, .w = 60, .h = 45 },
     };
     for (tiles) |t| try composeRegion(alloc, part, img, w, h, d.shapes.items, null, t);
+    try testing.expectEqualSlices(u32, full, part);
+    // painting the top shape over a layer of the others matches too
+    try composeRegion(alloc, part, img, w, h, d.shapes.items[0..2], null, d.imageRect());
+    try paintOnTop(alloc, part, w, h, &d.shapes.items[2]);
     try testing.expectEqualSlices(u32, full, part);
     // skipping a shape leaves its pixels as the image underneath
     try composeRegion(alloc, part, img, w, h, d.shapes.items[1..2], 0, d.imageRect());
