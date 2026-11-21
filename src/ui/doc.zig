@@ -20,8 +20,11 @@ pub const Document = struct {
     shapes: std.ArrayList(Shape) = .empty,
     /// selected region in image pixels (normalized except mid-drag)
     sel: ?Rect = null,
-    undo_stack: std.ArrayList([]Shape) = .empty,
-    redo_stack: std.ArrayList([]Shape) = .empty,
+    undo_stack: std.ArrayList(Snap) = .empty,
+    redo_stack: std.ArrayList(Snap) = .empty,
+    /// the mark of the change the last undo or redo crossed (0: none);
+    /// changes beyond the shapes (a crop) are marked to be found again
+    last_mark: u32 = 0,
 
     pub fn init(alloc: std.mem.Allocator, width: u32, height: u32) Document {
         return .{ .alloc = alloc, .width = width, .height = height };
@@ -50,6 +53,9 @@ pub const Document = struct {
 
     // --- undo ---
 
+    /// Shapes as they were before a change, and that change's mark.
+    pub const Snap = struct { shapes: []Shape, mark: u32 = 0 };
+
     fn snapshot(self: *Document) ![]Shape {
         const snap = try self.alloc.alloc(Shape, self.shapes.items.len);
         var n: usize = 0;
@@ -66,7 +72,12 @@ pub const Document = struct {
 
     /// Record the current shapes so the next change can be undone.
     pub fn checkpoint(self: *Document) !void {
-        const snap = try self.snapshot();
+        return self.checkpointMarked(0);
+    }
+
+    /// checkpoint() for a change `mark` names (see last_mark).
+    pub fn checkpointMarked(self: *Document, mark: u32) !void {
+        const snap: Snap = .{ .shapes = try self.snapshot(), .mark = mark };
         errdefer freeSnapshot(self.alloc, snap);
         if (self.undo_stack.items.len >= max_undo) {
             freeSnapshot(self.alloc, self.undo_stack.orderedRemove(0));
@@ -90,28 +101,26 @@ pub const Document = struct {
     }
 
     pub fn undo(self: *Document) !bool {
-        if (self.undo_stack.items.len == 0) return false;
-        const cur = try self.snapshot();
-        errdefer freeSnapshot(self.alloc, cur);
-        try self.redo_stack.ensureUnusedCapacity(self.alloc, 1);
-        const snap = self.undo_stack.items[self.undo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
-        _ = self.undo_stack.pop();
-        self.swapIn(snap);
-        self.redo_stack.appendAssumeCapacity(cur);
-        return true;
+        return self.step(&self.undo_stack, &self.redo_stack);
     }
 
     pub fn redo(self: *Document) !bool {
-        if (self.redo_stack.items.len == 0) return false;
-        const cur = try self.snapshot();
+        return self.step(&self.redo_stack, &self.undo_stack);
+    }
+
+    /// Back to the top of `from`; the current shapes go onto `to` with
+    /// the same mark, so the change can be crossed again either way.
+    fn step(self: *Document, from: *std.ArrayList(Snap), to: *std.ArrayList(Snap)) !bool {
+        if (from.items.len == 0) return false;
+        const snap = from.items[from.items.len - 1];
+        const cur: Snap = .{ .shapes = try self.snapshot(), .mark = snap.mark };
         errdefer freeSnapshot(self.alloc, cur);
-        try self.undo_stack.ensureUnusedCapacity(self.alloc, 1);
-        const snap = self.redo_stack.items[self.redo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
-        _ = self.redo_stack.pop();
-        self.swapIn(snap);
-        self.undo_stack.appendAssumeCapacity(cur);
+        try to.ensureUnusedCapacity(self.alloc, 1);
+        try self.shapes.ensureTotalCapacity(self.alloc, snap.shapes.len);
+        _ = from.pop();
+        self.swapIn(snap.shapes);
+        to.appendAssumeCapacity(cur);
+        self.last_mark = snap.mark;
         return true;
     }
 
@@ -119,9 +128,9 @@ pub const Document = struct {
     pub fn revert(self: *Document) !void {
         if (self.undo_stack.items.len == 0) return;
         const snap = self.undo_stack.items[self.undo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
+        try self.shapes.ensureTotalCapacity(self.alloc, snap.shapes.len);
         _ = self.undo_stack.pop();
-        self.swapIn(snap);
+        self.swapIn(snap.shapes);
     }
 
     // --- shape edits (callers checkpoint first) ---
@@ -206,9 +215,9 @@ fn freeShapes(alloc: std.mem.Allocator, list: []Shape) void {
     for (list) |*s| s.deinit(alloc);
 }
 
-fn freeSnapshot(alloc: std.mem.Allocator, snap: []Shape) void {
-    freeShapes(alloc, snap);
-    alloc.free(snap);
+fn freeSnapshot(alloc: std.mem.Allocator, snap: Document.Snap) void {
+    freeShapes(alloc, snap.shapes);
+    alloc.free(snap.shapes);
 }
 
 // --- composite layer ---
@@ -628,4 +637,23 @@ test "undo covers a text box's width" {
     try testing.expectEqual(@as(i32, 0), d.shapes.items[i].box_w);
     try testing.expect(try d.redo());
     try testing.expectEqual(@as(i32, 40), d.shapes.items[i].box_w);
+}
+
+test "a marked change is named again by the undo and redo crossing it" {
+    const alloc = testing.allocator;
+    var d = Document.init(alloc, 100, 100);
+    defer d.deinit();
+    try d.checkpoint();
+    _ = try d.add(.{ .tool = .rect, .color = 1, .thickness = 2 });
+    try d.checkpointMarked(7);
+    d.shapes.items[0].translate(-10, -10);
+    try testing.expect(try d.undo());
+    try testing.expectEqual(@as(u32, 7), d.last_mark);
+    try testing.expectEqual(@as(i32, 0), d.shapes.items[0].p0.x);
+    try testing.expect(try d.redo());
+    try testing.expectEqual(@as(u32, 7), d.last_mark);
+    try testing.expectEqual(@as(i32, -10), d.shapes.items[0].p0.x);
+    try testing.expect(try d.undo());
+    try testing.expect(try d.undo());
+    try testing.expectEqual(@as(u32, 0), d.last_mark);
 }

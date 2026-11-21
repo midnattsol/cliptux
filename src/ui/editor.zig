@@ -1551,7 +1551,7 @@ pub const Editor = struct {
         }
         if (unchanged) {
             // colour or size may still have changed while editing
-            const before = self.doc.undo_stack.items[self.doc.undo_stack.items.len - 1];
+            const before = self.doc.undo_stack.items[self.doc.undo_stack.items.len - 1].shapes;
             const same = before.len == self.doc.shapes.items.len and before[t.idx].color == s.color and
                 before[t.idx].thickness == s.thickness and before[t.idx].pill == s.pill and
                 before[t.idx].box_w == s.box_w and
