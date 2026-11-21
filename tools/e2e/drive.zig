@@ -23,6 +23,8 @@
 //!                         (at least MINW wide)
 //!   png PATH              answer the image size, WxH
 //!   pixel PATH X Y        answer one pixel as AARRGGBB hex
+//!   sni-watcher MS        own org.kde.StatusNotifierWatcher; answer the
+//!                         first RegisterStatusNotifierItem within MS
 //!   sleep MS
 //!   quit
 
@@ -262,6 +264,22 @@ const Driver = struct {
             const y = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
             if (x >= img.width or y >= img.height) return error.OutOfImage;
             return std.fmt.bufPrint(&self.out, "{x:0>8}", .{img.pixels[@as(usize, y) * img.width + x]});
+        }
+        if (eql(cmd, "sni-watcher")) {
+            // play org.kde.StatusNotifierWatcher until an item registers
+            const ms = try std.fmt.parseInt(u32, it.next() orelse "5000", 10);
+            if (!try self.conn.requestName("org.kde.StatusNotifierWatcher")) return error.NameTaken;
+            const deadline = sys.monoMs() + ms;
+            while (try self.conn.nextMessageDeadline(deadline)) |msg_| {
+                var msg = msg_;
+                defer msg.deinit(self.gpa);
+                if (!msg.isCall("org.kde.StatusNotifierWatcher", "RegisterStatusNotifierItem")) continue;
+                try self.conn.replyTo(&msg, "", &.{});
+                var r = msg.reader();
+                const item = try r.readString();
+                return std.fmt.bufPrint(&self.out, "{s} {s}", .{ msg.sender orelse "?", item }) catch "?";
+            }
+            return error.NoRegistration;
         }
         if (eql(cmd, "sleep")) {
             sleepMs(try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10));

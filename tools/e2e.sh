@@ -99,6 +99,15 @@ if [ "${1:-}" = "--inner" ]; then
     }
     not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
     no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }
+    gdbus_owner() {
+        gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+            --method org.freedesktop.DBus.NameHasOwner "$1" 2>/dev/null | grep -q true
+    }
+    sni() { # sni METHOD ARGS...: call the daemon's StatusNotifierItem
+        local m=$1; shift
+        gdbus call --session --dest org.midnattsol.shotlet --object-path /StatusNotifierItem \
+            --method "org.kde.StatusNotifierItem.$m" "$@" >/dev/null
+    }
     eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
 
     # --- portal dialogs (xdg-desktop-portal-gnome), found by colour
@@ -478,6 +487,43 @@ if [ "${1:-}" = "--inner" ]; then
             wait "$SHOT_PID"; RC=$?
             fail "  ... and returns to the editor (shotlet exited, status $RC)"
         fi
+        ;;
+    daemon)
+        # headless GNOME has no StatusNotifierWatcher (that needs the
+        # AppIndicator extension): the daemon must just wait for one.
+        # Here the test plays the tray host and calls the item directly.
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet daemon --daemon -f
+        sleep 2
+        check "daemon runs without a StatusNotifierWatcher" alive
+        daemon_pid=$SHOT_PID
+        check "  ... owning org.midnattsol.shotlet" gdbus_owner org.midnattsol.shotlet
+        run_shotlet second --daemon -f
+        check "a second daemon exits at once" wait_exit 3
+        check "  ... with status 0" eq "$RC" 0
+        check "  ... saying one already runs" grep -q "already running" "$SHOT_LOG"
+        "$BIN" --daemon >"$OUT/detached.log" 2>&1
+        check "detaching (no -f) returns at once" eq "$?" 0
+        sleep 1
+        SHOT_PID=$daemon_pid SHOT_LOG=$OUT/daemon.log
+        check "  ... and the first daemon is unaffected" alive
+        # a tray host showing up later (extension enabled, panel restart)
+        drv sni-watcher 5000
+        check "daemon registers its item once a tray host appears" test -n "$VAL"
+        check "  ... (logged)" wait_log 3 "tray icon registered"
+        sni Activate 0 0
+        check "tray Activate starts a capture" share_dialog 0
+        check "  ... opening the editor" wait_log 10 "startup: capture="
+        sleep 0.8
+        keys esc
+        sleep 1
+        check "  ... whose Esc leaves the daemon running" alive
+        gdbus call --session --dest org.midnattsol.shotlet --object-path /MenuBar \
+            --method com.canonical.dbusmenu.Event 4 clicked "<0>" 0 >/dev/null 2>&1
+        check "menu Quit ends the daemon" wait_exit 5
+        check "  ... with status 0" eq "$RC" 0
         ;;
     *)
         skip "unknown scenario"
