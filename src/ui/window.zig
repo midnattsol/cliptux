@@ -215,6 +215,10 @@ pub const Surface = struct {
     toplevel: u32 = 0,
     /// zwlr_layer_surface_v1, used instead of xdg_surf/toplevel
     layer_surf: u32 = 0,
+    /// surface size minus its window geometry (a drawn shadow): xdg
+    /// configure sizes are the geometry's
+    geom_extra_w: u32 = 0,
+    geom_extra_h: u32 = 0,
     viewport: u32 = 0,
     fs_obj: u32 = 0, // wp_fractional_scale_v1
     frame_cb: u32 = 0,
@@ -1349,8 +1353,8 @@ pub const Window = struct {
             .xdg_surf => if (opcode == wl.xdg_surface.ev_configure) {
                 const serial = try r.uint();
                 try c.request(s.xdg_surf, wl.xdg_surface.ack_configure, &.{.{ .uint = serial }});
-                var want_w = if (s.pending_w > 0) s.pending_w else if (s.logical_w > 0) s.logical_w else if (s.out_w > 0) s.out_w else self.default_w;
-                var want_h = if (s.pending_h > 0) s.pending_h else if (s.logical_h > 0) s.logical_h else if (s.out_h > 0) s.out_h else self.default_h;
+                var want_w = if (s.pending_w > 0) s.pending_w + s.geom_extra_w else if (s.logical_w > 0) s.logical_w else if (s.out_w > 0) s.out_w else self.default_w;
+                var want_h = if (s.pending_h > 0) s.pending_h + s.geom_extra_h else if (s.logical_h > 0) s.logical_h else if (s.out_h > 0) s.out_h else self.default_h;
                 // respect compositor bounds for client-decided sizes
                 if (s.pending_w == 0 and s.bounds_w > 0) want_w = @min(want_w, s.bounds_w);
                 if (s.pending_h == 0 and s.bounds_h > 0) want_h = @min(want_h, s.bounds_h - @min(s.bounds_h / 20, 40));
@@ -1987,6 +1991,8 @@ pub const Window = struct {
     pub fn setWindowGeometry(self: *Window, idx: u8, r: Rect) !void {
         const s = &self.surfaces[idx];
         if (!s.alive or s.xdg_surf == 0) return;
+        s.geom_extra_w = s.logical_w -| @as(u32, @intCast(@max(0, r.w)));
+        s.geom_extra_h = s.logical_h -| @as(u32, @intCast(@max(0, r.h)));
         try self.conn.request(s.xdg_surf, wl.xdg_surface.set_window_geometry, &.{ .{ .int = r.x }, .{ .int = r.y }, .{ .int = r.w }, .{ .int = r.h } });
     }
 
