@@ -67,6 +67,54 @@ const Output = struct {
         return self.name_buf[0..self.name_len];
     }
 
+    fn setName(self: *Output, n: []const u8) void {
+        self.name_len = @min(n.len, self.name_buf.len);
+        @memcpy(self.name_buf[0..self.name_len], n[0..self.name_len]);
+    }
+
+    fn onOutputEvent(o: *Output, opcode: u16, r: *wl.ArgReader) !void {
+        switch (opcode) {
+            wl.wl_output.ev_geometry => {
+                o.geo_x = try r.int();
+                o.geo_y = try r.int();
+                _ = try r.int(); // physical size
+                _ = try r.int();
+                _ = try r.int(); // subpixel
+                _ = try r.string(); // make
+                _ = try r.string(); // model
+                o.transform = try r.uint() & 7;
+            },
+            wl.wl_output.ev_mode => {
+                const flags = try r.uint();
+                const w = try r.int();
+                const h = try r.int();
+                if (flags & wl.wl_output.mode_current != 0) {
+                    o.mode_w = w;
+                    o.mode_h = h;
+                }
+            },
+            wl.wl_output.ev_scale => o.scale = try r.int(),
+            wl.wl_output.ev_name => o.setName(try r.string()),
+            else => {},
+        }
+    }
+
+    fn onXdgOutputEvent(o: *Output, opcode: u16, r: *wl.ArgReader) !void {
+        switch (opcode) {
+            wl.zxdg_output_v1.ev_logical_position => {
+                o.lx = try r.int();
+                o.ly = try r.int();
+                o.has_logical = true;
+            },
+            wl.zxdg_output_v1.ev_logical_size => {
+                o.lw = try r.int();
+                o.lh = try r.int();
+            },
+            wl.zxdg_output_v1.ev_name => if (o.name_len == 0) o.setName(try r.string()),
+            else => {},
+        }
+    }
+
     fn logical(self: *const Output) capture.Monitor.Logical {
         if (self.has_logical and self.lw > 0 and self.lh > 0)
             return .{ .x = self.lx, .y = self.ly, .w = @intCast(self.lw), .h = @intCast(self.lh) };
@@ -152,82 +200,35 @@ const Client = struct {
             std.log.info("direct capture: wayland error {d}: {s}", .{ code, try r.string() });
             return error.ProtocolError;
         }
-        if (ev.object == self.registry and ev.opcode == wl.wl_registry.ev_global) {
-            const gname = try r.uint();
-            const iface = try r.string();
-            const version = try r.uint();
-            const eql = std.mem.eql;
-            if (eql(u8, iface, "wl_output")) {
-                if (self.n_outputs < max_outputs) {
-                    self.outputs[self.n_outputs] = .{ .global = gname, .version = @min(version, 4) };
-                    self.n_outputs += 1;
-                }
-            } else if (eql(u8, iface, "wl_shm")) {
-                self.shm = try self.conn.bind(self.registry, gname, iface, 1);
-            } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
-                self.xdg_mgr = try self.conn.bind(self.registry, gname, iface, @min(version, 3));
-            } else if (eql(u8, iface, "ext_output_image_capture_source_manager_v1")) {
-                self.ext_source_mgr = try self.conn.bind(self.registry, gname, iface, 1);
-            } else if (eql(u8, iface, "ext_image_copy_capture_manager_v1")) {
-                self.ext_copy_mgr = try self.conn.bind(self.registry, gname, iface, 1);
-            } else if (eql(u8, iface, "zwlr_screencopy_manager_v1")) {
-                self.screencopy_version = @min(version, 3);
-                self.screencopy = try self.conn.bind(self.registry, gname, iface, self.screencopy_version);
-            }
-            return;
-        }
+        if (ev.object == self.registry and ev.opcode == wl.wl_registry.ev_global) return self.onGlobal(&r);
         for (self.outputs[0..self.n_outputs]) |*o| {
-            if (o.id != 0 and ev.object == o.id) {
-                switch (ev.opcode) {
-                    wl.wl_output.ev_geometry => {
-                        o.geo_x = try r.int();
-                        o.geo_y = try r.int();
-                        _ = try r.int(); // physical size
-                        _ = try r.int();
-                        _ = try r.int(); // subpixel
-                        _ = try r.string(); // make
-                        _ = try r.string(); // model
-                        o.transform = try r.uint() & 7;
-                    },
-                    wl.wl_output.ev_mode => {
-                        const flags = try r.uint();
-                        const w = try r.int();
-                        const h = try r.int();
-                        if (flags & wl.wl_output.mode_current != 0) {
-                            o.mode_w = w;
-                            o.mode_h = h;
-                        }
-                    },
-                    wl.wl_output.ev_scale => o.scale = try r.int(),
-                    wl.wl_output.ev_name => {
-                        const n = try r.string();
-                        o.name_len = @min(n.len, o.name_buf.len);
-                        @memcpy(o.name_buf[0..o.name_len], n[0..o.name_len]);
-                    },
-                    else => {},
-                }
-                return;
+            if (o.id != 0 and ev.object == o.id) return o.onOutputEvent(ev.opcode, &r);
+            if (o.xdg != 0 and ev.object == o.xdg) return o.onXdgOutputEvent(ev.opcode, &r);
+        }
+    }
+
+    /// A registry global: outputs are noted, the capture interfaces bound.
+    fn onGlobal(self: *Client, r: *wl.ArgReader) !void {
+        const gname = try r.uint();
+        const iface = try r.string();
+        const version = try r.uint();
+        const eql = std.mem.eql;
+        if (eql(u8, iface, "wl_output")) {
+            if (self.n_outputs < max_outputs) {
+                self.outputs[self.n_outputs] = .{ .global = gname, .version = @min(version, 4) };
+                self.n_outputs += 1;
             }
-            if (o.xdg != 0 and ev.object == o.xdg) {
-                switch (ev.opcode) {
-                    wl.zxdg_output_v1.ev_logical_position => {
-                        o.lx = try r.int();
-                        o.ly = try r.int();
-                        o.has_logical = true;
-                    },
-                    wl.zxdg_output_v1.ev_logical_size => {
-                        o.lw = try r.int();
-                        o.lh = try r.int();
-                    },
-                    wl.zxdg_output_v1.ev_name => if (o.name_len == 0) {
-                        const n = try r.string();
-                        o.name_len = @min(n.len, o.name_buf.len);
-                        @memcpy(o.name_buf[0..o.name_len], n[0..o.name_len]);
-                    },
-                    else => {},
-                }
-                return;
-            }
+        } else if (eql(u8, iface, "wl_shm")) {
+            self.shm = try self.conn.bind(self.registry, gname, iface, 1);
+        } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
+            self.xdg_mgr = try self.conn.bind(self.registry, gname, iface, @min(version, 3));
+        } else if (eql(u8, iface, "ext_output_image_capture_source_manager_v1")) {
+            self.ext_source_mgr = try self.conn.bind(self.registry, gname, iface, 1);
+        } else if (eql(u8, iface, "ext_image_copy_capture_manager_v1")) {
+            self.ext_copy_mgr = try self.conn.bind(self.registry, gname, iface, 1);
+        } else if (eql(u8, iface, "zwlr_screencopy_manager_v1")) {
+            self.screencopy_version = @min(version, 3);
+            self.screencopy = try self.conn.bind(self.registry, gname, iface, self.screencopy_version);
         }
     }
 
@@ -274,6 +275,46 @@ const Client = struct {
         try c.request(pool, wl.wl_shm_pool.create_buffer, &.{ .{ .new_id = buffer }, .{ .int = 0 }, .{ .int = @intCast(w) }, .{ .int = @intCast(h) }, .{ .int = @intCast(stride) }, .{ .uint = format } });
         try c.request(pool, wl.wl_shm_pool.destroy, &.{});
         return .{ .fd = fd, .mem = mem, .buffer = buffer };
+    }
+
+    /// Binds the registry and every output, with its xdg_output, and
+    /// waits until their geometry is known.
+    fn discoverOutputs(cl: *Client) !void {
+        cl.registry = try cl.conn.getRegistry();
+        try cl.roundtrip();
+        for (cl.outputs[0..cl.n_outputs]) |*o| {
+            o.id = try cl.conn.bind(cl.registry, o.global, "wl_output", o.version);
+            if (cl.xdg_mgr != 0) {
+                o.xdg = cl.conn.newId();
+                try cl.conn.request(cl.xdg_mgr, wl.zxdg_output_manager_v1.get_xdg_output, &.{ .{ .new_id = o.xdg }, .{ .object = o.id } });
+            }
+        }
+        try cl.roundtrip();
+        try cl.roundtrip();
+    }
+
+    /// The best interface the compositor offers; KWin's when none.
+    fn method(cl: *const Client) Method {
+        return if (cl.ext_source_mgr != 0 and cl.ext_copy_mgr != 0 and cl.shm != 0)
+            .ext_image_copy_capture
+        else if (cl.screencopy != 0 and cl.shm != 0)
+            .wlr_screencopy
+        else
+            .kwin_screenshot;
+    }
+
+    /// One output's picture; null when KWin refused this binary.
+    fn grab(cl: *Client, o: *const Output, m: Method, bus: *dbus.Connection) !?Frame {
+        return switch (m) {
+            .ext_image_copy_capture => cl.grabExt(o) catch |err| {
+                // a compositor may offer both and fail one: try screencopy
+                if (cl.screencopy == 0) return err;
+                std.log.info("direct capture: ext-image-copy-capture failed ({t}); wlr-screencopy", .{err});
+                return try cl.grabScreencopy(o);
+            },
+            .wlr_screencopy => try cl.grabScreencopy(o),
+            .kwin_screenshot => try kwin.screen(cl.gpa, bus, o.name()),
+        };
     }
 
     /// One output with ext-image-copy-capture-v1.
@@ -370,176 +411,38 @@ const Client = struct {
     }
 };
 
-pub const Frame = struct { pixels: []u32, width: u32, height: u32 };
+const pixels = @import("direct/pixels.zig");
+pub const Frame = pixels.Frame;
+pub const fmt_argb8888 = pixels.fmt_argb8888;
+pub const fmt_xrgb8888 = pixels.fmt_xrgb8888;
+pub const fmt_abgr8888 = pixels.fmt_abgr8888;
+pub const fmt_xbgr8888 = pixels.fmt_xbgr8888;
+pub const fmt_argb2101010 = pixels.fmt_argb2101010;
+pub const fmt_xrgb2101010 = pixels.fmt_xrgb2101010;
+pub const fmt_abgr2101010 = pixels.fmt_abgr2101010;
+pub const fmt_xbgr2101010 = pixels.fmt_xbgr2101010;
+pub const convert = pixels.convert;
+const preferFormat = pixels.preferFormat;
+const toFrame = pixels.toFrame;
 
-// wl_shm formats (DRM fourcc, except the first two)
-pub const fmt_argb8888: u32 = 0;
-pub const fmt_xrgb8888: u32 = 1;
-pub const fmt_abgr8888: u32 = 0x34324241; // AB24
-pub const fmt_xbgr8888: u32 = 0x34324258; // XB24
-pub const fmt_argb2101010: u32 = 0x30335241; // AR30
-pub const fmt_xrgb2101010: u32 = 0x30335258; // XR30
-pub const fmt_abgr2101010: u32 = 0x30334241; // AB30
-pub const fmt_xbgr2101010: u32 = 0x30334258; // XB30
-
-/// How good a format is for us: 0 = not understood.
-fn formatRank(f: u32) u8 {
-    return switch (f) {
-        fmt_xrgb8888, fmt_argb8888 => 3,
-        fmt_xbgr8888, fmt_abgr8888 => 2,
-        fmt_xrgb2101010, fmt_argb2101010, fmt_xbgr2101010, fmt_abgr2101010 => 1,
-        else => 0,
-    };
-}
-
-fn preferFormat(have: ?u32, offered: u32) ?u32 {
-    const h = if (have) |x| formatRank(x) else 0;
-    return if (formatRank(offered) > h) offered else have;
-}
-
-/// One 32-bit pixel of `format` as opaque 0xFFRRGGBB.
-pub fn convert(format: u32, p: u32) u32 {
-    return 0xFF000000 | switch (format) {
-        fmt_xrgb8888, fmt_argb8888 => p & 0xFFFFFF,
-        fmt_xbgr8888, fmt_abgr8888 => (p & 0x00FF00) | ((p >> 16) & 0xFF) | ((p & 0xFF) << 16),
-        fmt_xrgb2101010, fmt_argb2101010 => (((p >> 22) & 0xFF) << 16) | (((p >> 12) & 0xFF) << 8) | ((p >> 2) & 0xFF),
-        fmt_xbgr2101010, fmt_abgr2101010 => (((p >> 2) & 0xFF) << 16) | (((p >> 12) & 0xFF) << 8) | ((p >> 22) & 0xFF),
-        else => 0,
-    };
-}
-
-/// The buffer as upright 0xAARRGGBB pixels: formats converted, flipped
-/// when y-inverted, and the output's transform applied so the picture
-/// reads as the monitor shows it.
-fn toFrame(gpa: std.mem.Allocator, mem: []const u8, format: u32, w: u32, h: u32, stride: u32, y_invert: bool, transform: u32) !Frame {
-    const src = try gpa.alloc(u32, @as(usize, w) * h);
-    defer gpa.free(src);
-    for (0..h) |y| {
-        const sy = if (y_invert) h - 1 - y else y;
-        const row = mem[sy * stride ..][0 .. w * 4];
-        for (0..w) |x| src[y * w + x] = convert(format, std.mem.readInt(u32, row[x * 4 ..][0..4], .little));
-    }
-    return transformed(gpa, src, w, h, transform);
-}
-
-/// Apply a wl_output transform to a buffer: the buffer is what the
-/// output's panel scans out, the result what the person sees.
-fn transformed(gpa: std.mem.Allocator, src: []const u32, w: u32, h: u32, transform: u32) !Frame {
-    const swap = transform & 1 != 0;
-    const dw = if (swap) h else w;
-    const dh = if (swap) w else h;
-    const out = try gpa.alloc(u32, @as(usize, w) * h);
-    for (0..dh) |y| for (0..dw) |x| {
-        const s = sourceOf(transform, @intCast(x), @intCast(y), w, h);
-        out[y * dw + x] = src[@as(usize, s[1]) * w + s[0]];
-    };
-    return .{ .pixels = out, .width = dw, .height = dh };
-}
-
-/// The buffer pixel shown at (x, y) of the transformed picture: for
-/// WL_OUTPUT_TRANSFORM_90 the picture's top row is the buffer's left
-/// column read bottom to top (checked against sway's screencopy, which
-/// hands out the untransformed buffer); "flipped" ones mirror around the
-/// vertical axis.
-fn sourceOf(transform: u32, x_in: u32, y: u32, w: u32, h: u32) [2]u32 {
-    // the mirror applies to the picture, then the rotation is undone
-    const swap = transform & 1 != 0;
-    const x = if (transform & 4 != 0) (if (swap) h else w) - 1 - x_in else x_in;
-    var sx: u32 = undefined;
-    var sy: u32 = undefined;
-    switch (transform & 3) {
-        0 => {
-            sx = x;
-            sy = y;
-        },
-        1 => {
-            sx = y;
-            sy = h - 1 - x;
-        },
-        2 => {
-            sx = w - 1 - x;
-            sy = h - 1 - y;
-        },
-        3 => {
-            sx = w - 1 - y;
-            sy = x;
-        },
-        else => unreachable,
-    }
-    return .{ sx, sy };
-}
-
-test "formats convert to opaque RGB" {
-    try std.testing.expectEqual(@as(u32, 0xFF112233), convert(fmt_xrgb8888, 0x00112233));
-    try std.testing.expectEqual(@as(u32, 0xFF112233), convert(fmt_xbgr8888, 0x00332211));
-    // 10 bits per channel: top 8 bits kept
-    const r10: u32 = 0x3FC;
-    const g10: u32 = 0x204;
-    const b10: u32 = 0x004;
-    try std.testing.expectEqual(@as(u32, 0xFFFF8101), convert(fmt_xrgb2101010, (r10 << 20) | (g10 << 10) | b10));
-    try std.testing.expectEqual(@as(u32, 0xFFFF8101), convert(fmt_xbgr2101010, (b10 << 20) | (g10 << 10) | r10));
-    try std.testing.expectEqual(@as(?u32, fmt_xrgb8888), preferFormat(fmt_xbgr2101010, fmt_xrgb8888));
-    try std.testing.expectEqual(@as(?u32, fmt_xbgr8888), preferFormat(fmt_xbgr8888, 0x12345678));
-}
-
-test "transforms turn the buffer upright" {
-    const gpa = std.testing.allocator;
-    // a 3x2 buffer: a b c / d e f
-    const src = [_]u32{ 'a', 'b', 'c', 'd', 'e', 'f' };
-    const cases = [_]struct { t: u32, w: u32, want: []const u8 }{
-        .{ .t = 0, .w = 3, .want = "abcdef" },
-        .{ .t = 1, .w = 2, .want = "daebfc" },
-        .{ .t = 2, .w = 3, .want = "fedcba" },
-        .{ .t = 3, .w = 2, .want = "cfbead" },
-        .{ .t = 4, .w = 3, .want = "cbafed" },
-    };
-    for (cases) |cs| {
-        const f = try transformed(gpa, &src, 3, 2, cs.t);
-        defer gpa.free(f.pixels);
-        try std.testing.expectEqual(cs.w, f.width);
-        for (f.pixels, cs.want) |p, ch| try std.testing.expectEqual(@as(u32, ch), p);
-    }
+comptime {
+    _ = pixels;
 }
 
 /// Capture every output directly. `bus` is used for KWin.
 pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u8, bus: *dbus.Connection) !Result {
     var cl: Client = .{ .gpa = gpa, .conn = try wl.Connection.connect(gpa, runtime_dir, display) };
     defer cl.conn.deinit();
-    cl.registry = try cl.conn.getRegistry();
-    try cl.roundtrip();
-    for (cl.outputs[0..cl.n_outputs]) |*o| {
-        o.id = try cl.conn.bind(cl.registry, o.global, "wl_output", o.version);
-        if (cl.xdg_mgr != 0) {
-            o.xdg = cl.conn.newId();
-            try cl.conn.request(cl.xdg_mgr, wl.zxdg_output_manager_v1.get_xdg_output, &.{ .{ .new_id = o.xdg }, .{ .object = o.id } });
-        }
-    }
-    try cl.roundtrip();
-    try cl.roundtrip();
+    try cl.discoverOutputs();
     if (cl.n_outputs == 0) return .{ .unavailable = "no outputs" };
-
-    const method: Method = if (cl.ext_source_mgr != 0 and cl.ext_copy_mgr != 0 and cl.shm != 0)
-        .ext_image_copy_capture
-    else if (cl.screencopy != 0 and cl.shm != 0)
-        .wlr_screencopy
-    else
-        .kwin_screenshot;
+    const method = cl.method();
 
     var frames: [max_outputs]Frame = undefined;
     var n: usize = 0;
     defer for (frames[0..n]) |f| gpa.free(f.pixels);
     var parts: [max_outputs]capture.Part = undefined;
     for (cl.outputs[0..cl.n_outputs]) |*o| {
-        frames[n] = switch (method) {
-            .ext_image_copy_capture => cl.grabExt(o) catch |err| blk: {
-                // a compositor may offer both and fail one: try screencopy
-                if (cl.screencopy == 0) return err;
-                std.log.info("direct capture: ext-image-copy-capture failed ({t}); wlr-screencopy", .{err});
-                break :blk try cl.grabScreencopy(o);
-            },
-            .wlr_screencopy => try cl.grabScreencopy(o),
-            .kwin_screenshot => (try kwin.screen(gpa, bus, o.name())) orelse return .{ .unavailable = kwin.refused },
-        };
+        frames[n] = (try cl.grab(o, method, bus)) orelse return .{ .unavailable = kwin.refused };
         parts[n] = .{ .pixels = frames[n].pixels, .width = frames[n].width, .height = frames[n].height, .logical = o.logical() };
         std.log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, o.logical() });
         n += 1;
