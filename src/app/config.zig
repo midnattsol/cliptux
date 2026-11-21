@@ -23,6 +23,10 @@ pub const Action = enum {
     save,
     undo,
     redo,
+    // added later; config files name binds, so order only sets defaults
+    save_as,
+    beautify,
+    style,
 
     pub fn label(self: Action) []const u8 {
         return switch (self) {
@@ -33,13 +37,16 @@ pub const Action = enum {
             .rect => "Rectangle",
             .ellipse => "Ellipse",
             .highlight => "Highlighter",
-            .pixelate => "Pixelate",
+            .pixelate => "Blur / pixelate / redact",
             .counter => "Counter badge",
             .text => "Text",
             .copy => "Copy to clipboard",
             .save => "Save and exit",
             .undo => "Undo",
             .redo => "Redo",
+            .save_as => "Save as...",
+            .beautify => "Beautify frame",
+            .style => "Fill / rounded / text background",
         };
     }
 };
@@ -63,7 +70,7 @@ pub const default_binds = [n_actions]Bind{
     .{ .code = 30 }, // A arrow
     .{ .code = 19 }, // R rect
     .{ .code = 18 }, // E ellipse
-    .{ .code = 35 }, // H highlight
+    .{ .code = 50 }, // M highlight (marker, as CleanShot X and Flameshot)
     .{ .code = 45 }, // X pixelate
     .{ .code = 49 }, // N counter
     .{ .code = 20 }, // T text
@@ -71,6 +78,9 @@ pub const default_binds = [n_actions]Bind{
     .{ .code = 31, .ctrl = true }, // Ctrl+S save
     .{ .code = 44, .ctrl = true }, // Ctrl+Z undo
     .{ .code = 44, .ctrl = true, .shift = true }, // Ctrl+Shift+Z redo
+    .{ .code = 31, .ctrl = true, .shift = true }, // Ctrl+Shift+S save as
+    .{ .code = 48 }, // B beautify (CleanShot X's background tool)
+    .{ .code = 33 }, // F fill style (CleanShot X: filled rectangle)
 };
 
 /// Human-readable name for an evdev key code (US-position based).

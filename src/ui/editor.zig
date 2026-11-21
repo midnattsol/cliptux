@@ -33,6 +33,8 @@ const palette = shapes_mod.palette;
 
 pub const Action = enum {
     cancel,
+    /// the export is on the clipboard; close and keep serving it
+    copied,
     save,
     /// save to a path the user picks (the caller shows the dialog)
     save_as,
@@ -115,14 +117,16 @@ const KEY_S = 31;
 const KEY_V = 47;
 const KEY_INSERT = 110;
 const KEY_D = 32;
-const KEY_F = 33;
 const KEY_Y = 21;
-const KEY_B = 48;
 const KEY_SLASH = 53;
 const KEY_F1 = 59;
 const KEY_KPMINUS = 74;
 const KEY_KPPLUS = 78;
 const KEY_KPENTER = 96;
+const KEY_LEFTSHIFT = 42;
+const KEY_RIGHTSHIFT = 54;
+const KEY_LEFTALT = 56;
+const KEY_RIGHTALT = 100;
 const KEY_HOME = 102;
 const KEY_UP = 103;
 const KEY_LEFT = 105;
@@ -212,6 +216,13 @@ pub const Editor = struct {
     drag: DragMode = .none,
     mouse: Point = .{ .x = -10000, .y = -10000 },
     scroll_acc: f64 = 0,
+    mod_shift: bool = false,
+    mod_alt: bool = false,
+    /// Space held during a drag moves the rectangle instead of sizing it
+    space_held: bool = false,
+    space_last: ?Point = null,
+    /// where the current drag started (image pixels)
+    drag_anchor: Point = .{ .x = 0, .y = 0 },
     last_click_ms: i64 = 0,
     last_click: Point = .{ .x = 0, .y = 0 },
     ck_kind: u8 = 0,
@@ -369,7 +380,7 @@ pub const Editor = struct {
             if (scripted and !self.needs_render) try self.scriptStep();
         }
         if (getenv("SHOTLET_EDITOR_DUMP")) |prefix| self.dumpAtExit(prefix);
-        if (self.action == .cancel) return .{ .action = .cancel };
+        if (self.action == .cancel or self.action == .copied) return .{ .action = self.action };
         return .{ .action = self.action, .png_data = try self.exportPng() };
     }
 
@@ -612,6 +623,7 @@ pub const Editor = struct {
             },
             .pointer_axis => |a| try self.onScroll(a.value, a.value120),
             .key => |k| {
+                try self.trackModifiers(k);
                 if (k.code == 0) {
                     // input method: committed text or a preedit change,
                     // never a shortcut
@@ -634,6 +646,26 @@ pub const Editor = struct {
         if (surface != self.mouse_pane) self.needs_render = true;
         self.mouse_pane = surface;
         self.pane_i = surface;
+    }
+
+    /// Held Shift/Alt/Space shape the drag in progress (constrain, draw
+    /// from the centre, move the selection), so track them, releases too.
+    fn trackModifiers(self: *Editor, k: window.Key) !void {
+        switch (k.code) {
+            KEY_LEFTSHIFT, KEY_RIGHTSHIFT => self.mod_shift = k.pressed,
+            KEY_LEFTALT, KEY_RIGHTALT => self.mod_alt = k.pressed,
+            window.KEY_SPACE => {
+                const dragging = self.drag == .selecting or self.drag == .drawing;
+                if (k.pressed and dragging) self.space_held = true;
+                if (!k.pressed) self.space_held = false;
+            },
+            else => return,
+        }
+        // re-apply the constraint at the current pointer position
+        if (self.drag == .selecting or self.drag == .drawing) {
+            self.space_last = null;
+            try self.onMotion();
+        }
     }
 
     fn onScroll(self: *Editor, value: f64, value120: ?i32) !void {
@@ -698,9 +730,12 @@ pub const Editor = struct {
                 }
                 if (ui.loupeVisible(self)) self.needs_render = true;
             },
-            .selecting => |anchor| {
+            .selecting => {
                 self.selDirty();
-                self.doc.sel = Rect.fromCorners(anchor, self.clampImg(ip));
+                const q = self.clampImg(ip);
+                self.spaceMove(q);
+                const cs = shapes_mod.dragCorners(self.drag_anchor, q, self.mod_shift, self.mod_alt);
+                self.doc.sel = Rect.intersect(Rect.fromCorners(cs[0], cs[1]), self.doc.imageRect()) orelse Rect.fromCorners(q, q);
                 self.selDirty();
             },
             .moving_sel => |mv| {
@@ -879,6 +914,8 @@ pub const Editor = struct {
             const a = self.clampImg(ip);
             self.doc.sel = .{ .x = a.x, .y = a.y, .w = 0, .h = 0 };
             self.drag = .{ .selecting = a };
+            self.drag_anchor = a;
+            self.space_last = null;
             self.selDirty();
             return;
         }
@@ -931,6 +968,8 @@ pub const Editor = struct {
                 }
                 self.cur = s;
                 self.drag = .drawing;
+                self.drag_anchor = ip;
+                self.space_last = null;
                 self.needs_render = true;
             },
         }
@@ -949,9 +988,34 @@ pub const Editor = struct {
                     self.liveSegment(s, last, ip);
                 }
             },
-            else => s.p1 = ip,
+            .line, .arrow => {
+                self.spaceMove(ip);
+                const q = if (self.mod_shift) shapes_mod.snapAngle(self.drag_anchor, ip) else ip;
+                const a = self.drag_anchor;
+                s.p0 = if (self.mod_alt) .{ .x = 2 * a.x - q.x, .y = 2 * a.y - q.y } else a;
+                s.p1 = q;
+            },
+            else => {
+                self.spaceMove(ip);
+                const cs = shapes_mod.dragCorners(self.drag_anchor, ip, self.mod_shift, self.mod_alt);
+                s.p0 = cs[0];
+                s.p1 = cs[1];
+            },
         }
         self.needs_render = true;
+    }
+
+    /// With Space held, the pointer moves the whole box being dragged.
+    fn spaceMove(self: *Editor, ip: Point) void {
+        if (!self.space_held) {
+            self.space_last = null;
+            return;
+        }
+        if (self.space_last) |last| {
+            self.drag_anchor.x += ip.x - last.x;
+            self.drag_anchor.y += ip.y - last.y;
+        }
+        self.space_last = ip;
     }
 
     /// Rasterize one new freehand segment into the live coverage mask: the
@@ -1376,6 +1440,8 @@ pub const Editor = struct {
     }
 
     fn onKey(self: *Editor, k: window.Key) !void {
+        // Space during a drag moves the box (see trackModifiers)
+        if (k.code == window.KEY_SPACE and self.drag != .none) return;
         if (k.repeat) {
             // held keys repeat for movement, deletion and typing only
             const ok = switch (k.code) {
@@ -1414,7 +1480,6 @@ pub const Editor = struct {
         }
 
         // fixed chords that must win over configurable binds
-        if (k.ctrl and k.shift and k.code == KEY_S) return self.finish(.save_as);
         if (k.ctrl and !k.shift and k.code == KEY_Y) return self.redo();
         if (k.ctrl and k.code == KEY_D) return self.duplicateSelected();
         if (k.ctrl and k.code == KEY_RIGHTBRACE) return self.bringSelectedToFront();
@@ -1442,6 +1507,9 @@ pub const Editor = struct {
                     .save => self.finish(.save),
                     .undo => try self.undo(),
                     .redo => try self.redo(),
+                    .save_as => self.finish(.save_as),
+                    .beautify => try self.onButton(.beautify),
+                    .style => try self.cycleStyle(),
                 }
                 return;
             }
@@ -1465,8 +1533,6 @@ pub const Editor = struct {
             KEY_MINUS, KEY_KPMINUS => try self.setThickness(self.thickness - 1),
             KEY_EQUAL, KEY_KPPLUS => try self.setThickness(self.thickness + 1),
             KEY_F1 => self.help_open = true,
-            KEY_B => if (!k.ctrl) try self.onButton(.beautify),
-            KEY_F => if (!k.ctrl) try self.cycleStyle(),
             KEY_1...KEY_1 + 7 => if (!k.ctrl and !k.alt) {
                 self.color_idx = @intCast(k.code - KEY_1);
                 self.custom_active = false;
@@ -1567,7 +1633,9 @@ pub const Editor = struct {
             self.showCopyNotice(.failed, 2400);
             return;
         };
+        // like Flameshot, GNOME and CleanShot's overlay: copying finishes
         self.showCopyNotice(.copied, 2400);
+        self.finish(.copied);
     }
 
     fn showCopyNotice(self: *Editor, copy_notice: CopyNotice, duration_ms: i64) void {
@@ -1930,6 +1998,11 @@ pub const Editor = struct {
                 self.panes[idx].due = false;
             }
             self.dumpFrame(arg);
+        } else if (eql(u8, op, "hold") or eql(u8, op, "release")) {
+            // hold shift|alt|space ... release shift|alt|space
+            const code: u32 = if (eql(u8, arg, "shift")) KEY_LEFTSHIFT else if (eql(u8, arg, "alt")) KEY_LEFTALT else if (eql(u8, arg, "space")) window.KEY_SPACE else return error.BadKey;
+            const down = eql(u8, op, "hold");
+            try self.handle(.{ .key = .{ .code = code, .pressed = down, .ctrl = false, .shift = down and code == KEY_LEFTSHIFT, .alt = down and code == KEY_LEFTALT } });
         } else if (eql(u8, op, "unplug")) {
             // editor side of an output going away
             try self.handle(.{ .resize = .{ .w = 0, .h = 0, .surface = try std.fmt.parseInt(u8, arg, 10) } });

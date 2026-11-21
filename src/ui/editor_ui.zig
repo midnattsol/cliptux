@@ -83,22 +83,22 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, buf: []u8) []const u8 {
             .ellipse => .{ "Ellipse", .ellipse, "" },
             .highlight => .{ "Highlighter", .highlight, "" },
             .blur => .{ "Blur", .pixelate, "" },
-            .pixelate => .{ "Pixelate", null, "" },
-            .redact => .{ "Redact (solid box)", null, "" },
+            .pixelate => .{ "Pixelate", .pixelate, "" },
+            .redact => .{ "Redact (solid box)", .pixelate, "" },
             .counter => .{ "Counter badge", .counter, "" },
             .text => .{ "Text", .text, "" },
         },
         .color => .{ "Colour", null, "1-8" },
         .custom_color => .{ "Custom colour", null, "9" },
-        .style => .{ "Fill / rounded / background", null, "F" },
+        .style => .{ "Fill / rounded / text background", .style, "" },
         .thickness => .{ "Size (scroll, - and =)", null, "" },
-        .beautify => .{ "Beautify frame", null, "B" },
+        .beautify => .{ "Beautify frame", .beautify, "" },
         .background => .{ "Frame background", null, "" },
         .undo => .{ "Undo", .undo, "" },
         .redo => .{ "Redo", .redo, "" },
-        .copy => .{ "Copy", .copy, "" },
+        .copy => .{ "Copy and close", .copy, "" },
         .save => .{ "Save", .save, "" },
-        .save_as => .{ "Save as...", null, "Ctrl+Shift+S" },
+        .save_as => .{ "Save as...", .save_as, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
     };
@@ -787,31 +787,33 @@ fn drawLoupe(self: *Editor, canvas: *Canvas) void {
 
 const help_lines = [_][2][]const u8{
     .{ "Drag", "Select a region; drag inside to move it" },
+    .{ "Shift / Alt + drag", "Square, circle, 45\u{00B0} lines; from the centre" },
+    .{ "Space + drag", "Move the region or shape while drawing it" },
     .{ "Arrows / Shift", "Move selection or shape by 1 / 10 px" },
     .{ "Alt+Arrows", "Resize the selection" },
-    .{ "V P L A R E H", "Select, pen, line, arrow, rect, ellipse, marker" },
+    .{ "V P L A R E M", "Select, pen, line, arrow, rect, ellipse, marker" },
     .{ "X (again)", "Blur, then pixelate, then solid redaction" },
     .{ "N  T", "Counter badge, text" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },
-    .{ "Click a shape", "Select it (select tool): drag, resize, recolour" },
+    .{ "Click / double-click", "Select a shape (select tool) / edit text" },
     .{ "Delete", "Delete selected shape" },
     .{ "Ctrl+D  Ctrl+]", "Duplicate, bring to front" },
-    .{ "Ctrl+Z / Ctrl+Shift+Z", "Undo / redo" },
-    .{ "Text: Enter", "New line; Ctrl+Enter or click outside ends" },
-    .{ "Text: Ctrl+V", "Paste plain text" },
-    .{ "B", "Beautify frame for the export" },
+    .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
+    .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
+    .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },
+    .{ "B", "Beautify frame (padding, background, shadow)" },
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
-    .{ "Enter  Ctrl+C", "Copy to clipboard" },
+    .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
     .{ "Ctrl+S  Ctrl+Shift+S", "Save, save as" },
-    .{ "Esc", "Cancel current action, then close" },
+    .{ "Right click / Esc", "Cancel current action; Esc again closes" },
 };
 
 fn helpRect(self: *const Editor) Rect {
     const fs = 13.5 * self.uf();
     const lh = text_mod.height(fs) + self.sc(6);
-    const pw = self.sc(560);
+    const pw = self.sc(600);
     const ph = lh * @as(i32, help_lines.len) + self.sc(64);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
@@ -828,7 +830,7 @@ fn drawHelp(self: *Editor, canvas: *Canvas) void {
     var y = r.y + self.sc(48);
     for (help_lines) |l| {
         text_mod.draw(canvas, r.x + self.sc(24), y, fs, ui_accent, l[0]);
-        text_mod.draw(canvas, r.x + self.sc(210), y, fs, ui_fg, l[1]);
+        text_mod.draw(canvas, r.x + self.sc(240), y, fs, ui_fg, l[1]);
         y += lh;
     }
 }

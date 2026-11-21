@@ -90,7 +90,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     defer if (result.png_data) |d| gpa.free(d);
 
     switch (result.action) {
-        .cancel => {
+        .cancel, .copied => {
             win.closeWindow();
             ed.releaseCaches(); // serving may outlive the session; drop ~140MB
             if (win.hasClipboard()) try win.serveClipboard();
