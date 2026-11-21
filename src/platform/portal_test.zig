@@ -9,7 +9,7 @@ const portal = @import("portal.zig");
 const sys = @import("sys.zig");
 const linux = std.os.linux;
 
-const Mode = enum(u8) { normal, cancel, silent, vanish };
+const Mode = enum(u8) { normal, cancel, silent, vanish, mute };
 
 const Mock = struct {
     conn: dbus.Connection,
@@ -84,6 +84,8 @@ const Mock = struct {
             n += 1;
         }
         const path = try std.fmt.bufPrint(&path_buf, "/org/freedesktop/portal/desktop/request/{s}/{s}", .{ sender_buf[0..n], token });
+        // a hung portal: not even the method reply
+        if (self.mode.load(.acquire) == @backingInt(Mode.mute)) return;
         {
             var m = dbus.Marshal.init(a);
             defer m.deinit();
@@ -93,7 +95,7 @@ const Mock = struct {
 
         const mode: Mode = @fromBackingInt(@intCast(self.mode.load(.acquire)));
         switch (mode) {
-            .silent => return,
+            .silent, .mute => return,
             .vanish => {
                 var m = dbus.Marshal.init(a);
                 defer m.deinit();
@@ -294,7 +296,7 @@ test "portal round trips against a private bus and a mock portal" {
 
     // the person cancels the dialog
     mock.mode.store(@backingInt(Mode.cancel), .release);
-    switch (try portal.screenshot(alloc, &conn, false)) {
+    switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
         .cancelled => {},
         else => return error.TestUnexpectedResult,
     }
@@ -323,12 +325,29 @@ test "portal round trips against a private bus and a mock portal" {
         try std.testing.expectEqual(@as(u32, 1), mock.closed_requests.load(.acquire));
     }
 
+    // the portal never even accepts the call: no dialog can be up, so it
+    // counts as unavailable (the caller can fall back) and fails fast
+    mock.mode.store(@backingInt(Mode.mute), .release);
+    {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putString("");
+        const arr = try m.beginArray(8);
+        try m.beginStruct();
+        try m.putString("handle_token");
+        try m.putVariantString("mute1");
+        m.endArray(arr);
+        var req = try portal.call(alloc, &conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "mute1", 300);
+        defer req.deinit(alloc);
+        try std.testing.expectEqual(portal.Outcome.unavailable, req.outcome.?);
+    }
+
     // the portal goes away mid-request: unavailable at once, not at the
-    // 60 s deadline
+    // dialog deadline
     mock.mode.store(@backingInt(Mode.vanish), .release);
     {
         const t0 = sys.monoMs();
-        switch (try portal.screenshot(alloc, &conn, false)) {
+        switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
             .unavailable => {},
             else => |o| {
                 std.debug.print("vanish: {t}\n", .{o});

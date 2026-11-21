@@ -44,8 +44,15 @@ fn notGranted(comptime T: type, o: Outcome) Result(T) {
     };
 }
 
-/// A dialog may be on screen: give the person time to read and click.
-pub const timeout_dialog_ms: i64 = 60_000;
+/// A consent dialog may be on screen: a person may take a long time to
+/// decide (or step away), so only give up after this long. A portal that
+/// never accepts the call, or exits, still fails fast (see Request.wait).
+pub const timeout_dialog_ms: i64 = 10 * 60_000;
+/// A windowless Screenshot request: GNOME only shows its consent dialog to
+/// the focused app, so with permission the answer is quick and without it
+/// no dialog can come (GNOME 48 then never answers at all when no app has
+/// focus, leaving the call to dbus' 25 s timeout).
+pub const timeout_unfocused_screenshot_ms: i64 = 5_000;
 /// Calls that never show UI. Long enough to cover the portal being
 /// started by bus activation, which dbus itself bounds at 25 s.
 pub const timeout_quick_ms: i64 = 30_000;
@@ -174,16 +181,27 @@ pub const Request = struct {
     }
 
     /// Pump the connection until the request finishes or `timeout_ms`
-    /// passes. Unrelated messages are dropped.
+    /// passes. The portal must accept the call (reply with the Request
+    /// handle) within timeout_quick_ms, else it is treated as unavailable:
+    /// only then can a dialog be on screen, and only then is the long wait
+    /// worth it. Unrelated messages are dropped.
     pub fn wait(self: *Request, alloc: std.mem.Allocator, conn: *dbus.Connection, timeout_ms: i64) !void {
-        const deadline = sys.monoMs() + timeout_ms;
+        const start_ms = sys.monoMs();
+        const deadline = start_ms + timeout_ms;
+        const reply_deadline = start_ms + @min(timeout_ms, timeout_quick_ms);
         while (self.outcome == null) {
-            var msg = (conn.nextMessageDeadline(deadline) catch |err| {
+            const until = if (self.got_reply) deadline else reply_deadline;
+            var msg = (conn.nextMessageDeadline(until) catch |err| {
                 if (dbus.isFatal(err)) return err;
                 std.log.warn("dropped malformed bus message: {t}", .{err});
                 continue;
             }) orelse {
-                std.log.warn("portal {s}: no answer after {d} s; giving up", .{ self.what, @divTrunc(timeout_ms, 1000) });
+                if (!self.got_reply) {
+                    std.log.warn("portal {s}: no reply from the portal; giving up", .{self.what});
+                    self.outcome = .unavailable;
+                    break;
+                }
+                std.log.warn("portal {s}: no answer after {d} min; giving up", .{ self.what, @divTrunc(timeout_ms, 60_000) });
                 self.close(conn);
                 self.outcome = .timeout;
                 break;
@@ -228,12 +246,12 @@ pub fn call(
 
 /// Take a full-screen screenshot via org.freedesktop.portal.Screenshot.
 /// When granted, returns the PNG file contents and removes the temporary
-/// file from disk.
-pub fn screenshot(alloc: std.mem.Allocator, conn: *dbus.Connection, interactive: bool) !Result([]u8) {
+/// file from disk. `timeout_ms`: timeout_dialog_ms when a consent dialog
+/// may show, shorter when none can.
+pub fn screenshot(alloc: std.mem.Allocator, conn: *dbus.Connection, interactive: bool, timeout_ms: i64) !Result([]u8) {
     var req = try beginScreenshot(alloc, conn, interactive);
     defer req.deinit(alloc);
-    // non-interactive still may show GNOME's one-time permission dialog
-    try req.wait(alloc, conn, timeout_dialog_ms);
+    try req.wait(alloc, conn, timeout_ms);
     if (req.outcome.? != .granted) return notGranted([]u8, req.outcome.?);
     const uri = try screenshotUri(&req);
     return .{ .granted = try readAndUnlink(alloc, uri) };

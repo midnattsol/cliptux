@@ -98,6 +98,7 @@ if [ "${1:-}" = "--inner" ]; then
             [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
     }
     not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
+    no_find_exact() { ! drv find "$@" 2>/dev/null; }
     no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }
     gdbus_owner() {
         gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
@@ -246,6 +247,9 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 0.3
         shot 0 sel0
         shot 1 sel1
+        # the "400 × 200" pill (ui_fg text) only next to the toolbar
+        check "size label shown on the toolbar's monitor" drv find 0 e9ecef 3
+        check "  ... and not repeated on the other" no_find_exact 1 e9ecef 3
         drv key enter
         sleep 1
         check "selection across both monitors is copied whole" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
@@ -329,6 +333,11 @@ if [ "${1:-}" = "--inner" ]; then
         # key repeat: hold a key past the repeat delay
         keys end
         drv hold l 1500
+        sleep 0.3
+        shot 0 held
+        # text past the selection (x >= 702) is dimmed, as it will be cut
+        check "live text inside the selection is bright" drv find 0 e03131 30 1 400 230 700 290
+        check "  ... and dimmed past its edge (not exported)" no_find_exact 0 e03131 30 1 703 230 1600 290
         keys ctrl+a ctrl+c
         sleep 0.3
         n=$(timeout 5 wl-paste -n | grep -o l | wc -l)
@@ -530,30 +539,57 @@ if [ "${1:-}" = "--inner" ]; then
         ;;
     fallback)
         # no ScreenCast portal backend: shotlet falls back to the Screenshot
-        # portal. GNOME asks consent only from the focused app ("Only the
-        # focused app is allowed to show a system access dialog"); the
-        # first, unfocused request is refused, then shotlet shows its own
-        # small window to ask again from there.
+        # portal. GNOME asks consent only from the focused app (its app id,
+        # from the portal, must match the focused window's .desktop app):
+        # the windowless first request is refused or unanswered, then
+        # shotlet asks again from its own small window. The session gives
+        # the portal the app id "shotlet" (a real session gets it from
+        # shotlet's systemd scope) and installs shotlet.desktop.
         mkdir -p "$HOME/.config/xdg-desktop-portal"
         printf '[preferred]\ndefault=gnome;gtk;\norg.freedesktop.impl.portal.ScreenCast=none\n' \
             >"$HOME/.config/xdg-desktop-portal/portals.conf"
         drv_start Meta-0 || { fail "driver"; exit 1; }
         drv key esc
         drv move 0 800 450
-        run_shotlet fallback
+        # wait_permission_window: shotlet's own window (dark, 640 px wide)
+        wait_permission_window() {
+            local i
+            for i in $(seq 1 15); do
+                drv find 0 1d2125 0 300 2>/dev/null && return 0
+                alive || return 1
+                sleep 1
+            done
+            return 1
+        }
+        run_shotlet fallback-esc
         check "ScreenCast unavailable: Screenshot portal tried" wait_log 10 "trying the screenshot portal"
-        # GNOME's access dialog call times out (~25 s) before the refusal
-        found=
-        for i in $(seq 1 45); do
-            drv find 0 1d2125 0 300 2>/dev/null && { found=1; break; }
-            alive || break
-            sleep 1
-        done
-        shot 0 permission
-        check "refused consent: shotlet asks from its own window" test -n "$found"
+        check "no consent yet: shotlet asks from its own window (within 15 s)" wait_permission_window
         keys esc
         check "  ... where Esc ends quietly" wait_exit 5
         check "  ... with status 0" eq "$RC" 0
+
+        run_shotlet fallback
+        wait_permission_window
+        sleep 0.5
+        keys enter
+        # GNOME's access dialog: Deny has the focus; Tab to Allow
+        sleep 1.5
+        shot 0 access-dialog
+        keys tab enter
+        check "granting GNOME's consent dialog opens the editor" wait_log 15 "startup: capture="
+        sleep 0.8
+        shot 0 editor
+        # the retaken capture must not show our permission window
+        drv pixel "$OUT/editor.png" 800 400
+        check "  ... without our own window in the capture" test "$VAL" != ff1d2125
+        keys esc
+        check "  ... and Esc quits" wait_exit 5
+        run_shotlet granted
+        check "with consent stored, capture is direct" wait_log 10 "startup: capture="
+        ms=$(grep -o "startup: capture=[0-9]*" "$SHOT_LOG" | grep -o "[0-9]*$")
+        check "  ... and quick (${ms:-?} ms, no permission window)" test "${ms:-99999}" -lt 4000
+        keys esc
+        wait_exit 5
         ;;
     ime)
         # IBus Hangul behind gnome-shell's text-input-v3: composition shows
@@ -637,9 +673,14 @@ for s in $want; do
         mixed | fractional | integer) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
-    ibus=
+    ibus= apps= app_id=
     [ "$s" = ime ] && ibus=hangul
-    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus timeout 300 \
+    if [ "$s" = fallback ]; then
+        # GNOME maps windows to apps through .desktop files whose Exec exists
+        sed "s|^Exec=.*|Exec=$BIN --daemon|" "$ROOT/shotlet.desktop" >"$E2E_OUT/shotlet.desktop"
+        apps=$E2E_OUT/shotlet.desktop app_id=shotlet
+    fi
+    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_PORTAL_APP_ID=$app_id timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
         while IFS= read -r line; do

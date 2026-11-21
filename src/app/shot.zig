@@ -157,25 +157,32 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         switch (screencast(gpa, env, conn, cfg)) {
             .granted => |cap| return cap,
             .cancelled => return null,
-            .timeout => return error.PortalTimeout,
+            .timeout => return dialogTimedOut(),
             .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
             .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
     }
 
-    const png_data = switch (try portal.screenshot(gpa, conn, false)) {
+    const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
         .granted => |d| d,
         .cancelled => return null,
         // GNOME only shows its consent dialog to the focused app, so a
-        // headless first run is denied; ask again from a focused window
-        .denied => (try firstRunPermissionFlow(gpa, env, conn)) orelse return null,
+        // windowless first run is denied (or, with no app focused, never
+        // answered); ask again from a focused window
+        .denied, .timeout => (try firstRunPermissionFlow(gpa, env, conn)) orelse return null,
         .unavailable => return error.NoScreenshotPortal,
-        .timeout => return error.PortalTimeout,
     };
     defer gpa.free(png_data);
     var img = try png.decode(gpa, png_data);
     errdefer img.deinit(gpa);
     return try capture.Capture.single(gpa, img);
+}
+
+/// Nobody answered a consent dialog for timeout_dialog_ms: it was closed;
+/// end quietly, like a cancel.
+fn dialogTimedOut() ?capture.Capture {
+    std.log.info("the permission dialog got no answer; closed it and stopped", .{});
+    return null;
 }
 
 /// ScreenCast + PipeWire: one frame from every monitor, stitched. Errors
@@ -358,7 +365,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
     // give the compositor a moment to unmap our window
     var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 400 * std.time.ns_per_ms };
     _ = std.os.linux.nanosleep(&ts, null);
-    return switch (try portal.screenshot(gpa, conn, false)) {
+    return switch (try portal.screenshot(gpa, conn, false, portal.timeout_dialog_ms)) {
         .granted => |d| d,
         .cancelled => null,
         else => error.NoScreenshotPortal,

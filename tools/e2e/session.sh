@@ -9,6 +9,8 @@
 # Env: HL_MONITORS="1600x900 1280x720"  virtual monitors
 #      HL_LAYOUT=es                     XKB layout (gsettings input-sources)
 #      HL_IBUS=hangul                   IBus engine as the input source
+#      HL_PORTAL_APP_ID=shotlet         app id the portal gives every client
+#      HL_APPS="x.desktop"              desktop files to install
 #      HL_KEEP=1                        keep the temp HOME (prints it)
 # Inside CMD: WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HOME,
 # XDG_RUNTIME_DIR point at the private session; HL_SHELL_LOG is the
@@ -56,6 +58,18 @@ trap cleanup EXIT
 pipewire >"$HOME/pipewire.log" 2>&1 & pids+=($!)
 for i in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
 wireplumber >"$HOME/wireplumber.log" 2>&1 & pids+=($!)
+# HL_APPS="a.desktop ...": installed before gnome-shell starts, so the
+# shell maps windows to those apps from the beginning
+if [ -n "${HL_APPS:-}" ]; then
+    mkdir -p "$XDG_DATA_HOME/applications"
+    cp $HL_APPS "$XDG_DATA_HOME/applications/"
+fi
+# HL_PORTAL_APP_ID=id: xdg-desktop-portal's test hook naming every client's
+# app; stands in for the systemd app scope a real session gives shotlet
+if [ -n "${HL_PORTAL_APP_ID:-}" ]; then
+    export XDG_DESKTOP_PORTAL_TEST_APP_ID=$HL_PORTAL_APP_ID
+    dbus-update-activation-environment XDG_DESKTOP_PORTAL_TEST_APP_ID
+fi
 dbus-update-activation-environment HOME XDG_RUNTIME_DIR XDG_CONFIG_HOME \
     XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_CURRENT_DESKTOP \
     XDG_SESSION_TYPE WAYLAND_DISPLAY GSETTINGS_BACKEND GTK_A11Y NO_AT_BRIDGE \

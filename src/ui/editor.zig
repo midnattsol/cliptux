@@ -2035,7 +2035,38 @@ pub const Editor = struct {
     }
 
     /// Shapes not in the layer: the one being drawn and the lifted one.
+    /// The export is cut to the selection, so whatever of them lies outside
+    /// it is shown dimmed, like committed shapes there: what is bright is
+    /// exactly what will be copied or saved.
     fn drawLiveShapes(self: *Editor, canvas: *Canvas) void {
+        const sel = self.selBuf() orelse return self.drawLiveShapesRaw(canvas);
+        const lb = Rect.intersect(self.liveBounds(), self.screenRect()) orelse return;
+        if (Rect.intersect(lb, sel)) |in| if (in.x == lb.x and in.y == lb.y and in.w == lb.w and in.h == lb.h)
+            return self.drawLiveShapesRaw(canvas);
+        // remember the pixels outside the selection, draw, then darken the
+        // ones the shapes changed
+        const w: usize = @intCast(lb.w);
+        const before = self.alloc.alloc(u32, w * @as(usize, @intCast(lb.h))) catch return self.drawLiveShapesRaw(canvas);
+        defer self.alloc.free(before);
+        const cw: usize = @intCast(canvas.w);
+        for (0..@intCast(lb.h)) |row| {
+            const off = (@as(usize, @intCast(lb.y)) + row) * cw + @as(usize, @intCast(lb.x));
+            @memcpy(before[row * w ..][0..w], canvas.px[off..][0..w]);
+        }
+        self.drawLiveShapesRaw(canvas);
+        const keep: u32 = 255 - (dim_color >> 24);
+        for (0..@intCast(lb.h)) |row| {
+            const y = lb.y + @as(i32, @intCast(row));
+            const off = @as(usize, @intCast(y)) * cw + @as(usize, @intCast(lb.x));
+            for (canvas.px[off..][0..w], before[row * w ..][0..w], 0..) |*px, old, col| {
+                if (px.* == old) continue;
+                if (sel.contains(lb.x + @as(i32, @intCast(col)), y)) continue;
+                dimRow(&.{px.*}, px[0..1], keep);
+            }
+        }
+    }
+
+    fn drawLiveShapesRaw(self: *Editor, canvas: *Canvas) void {
         const xf = self.pn().view.xform();
         if (self.cur) |*s| {
             if (s.tool != .pen and s.tool != .highlight) shapes_mod.drawShape(canvas, self.alloc, s, xf, null);
