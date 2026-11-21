@@ -72,6 +72,13 @@ pub fn realtimeSec() i64 {
     return ts.sec;
 }
 
+/// Milliseconds since the epoch (UTC).
+pub fn realtimeMs() i64 {
+    var ts: linux.timespec = undefined;
+    _ = linux.clock_gettime(.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+}
+
 /// Fill `buf` from the kernel CSPRNG.
 pub fn getRandom(buf: []u8) void {
     var off: usize = 0;

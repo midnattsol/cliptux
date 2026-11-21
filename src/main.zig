@@ -87,6 +87,8 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
+    } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
+        try shot.runEdit(gpa, env, args[2], args[3]);
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
@@ -137,6 +139,7 @@ test {
     _ = @import("app/config.zig");
     _ = @import("app/history.zig");
     _ = @import("app/annot.zig");
+    _ = @import("app/keep.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
     _ = @import("ui/textbox.zig");
