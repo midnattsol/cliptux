@@ -75,6 +75,7 @@ pub const wl_seat = struct {
 
 pub const wl_pointer = struct {
     pub const set_cursor = 0;
+    pub const release = 1; // since v3
     pub const ev_enter = 0;
     pub const ev_leave = 1;
     pub const ev_motion = 2;
@@ -84,6 +85,7 @@ pub const wl_pointer = struct {
 };
 
 pub const wl_keyboard = struct {
+    pub const release = 0; // since v3
     pub const ev_keymap = 0;
     pub const ev_enter = 1;
     pub const ev_leave = 2;

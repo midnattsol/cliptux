@@ -98,6 +98,9 @@ pub const Window = struct {
     shm: u32 = 0,
     wm_base: u32 = 0,
     seat: u32 = 0,
+    seat_version: u32 = 0,
+    /// wl_seat capabilities last announced (pointer/keyboard bits)
+    seat_caps: u32 = 0,
     ddm: u32 = 0, // wl_data_device_manager
     viewporter: u32 = 0,
     fs_manager: u32 = 0, // wp_fractional_scale_manager_v1
@@ -178,6 +181,9 @@ pub const Window = struct {
                 const iface = r.string();
                 const version = r.uint();
                 try self.handleGlobal(name, iface, version);
+            } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
+                var r = wl.ArgReader{ .data = ev.body };
+                self.seat_caps = r.uint();
             }
         }
         if (self.compositor == 0 or self.shm == 0 or self.wm_base == 0)
@@ -194,7 +200,8 @@ pub const Window = struct {
         } else if (eql(u8, iface, "xdg_wm_base")) {
             self.wm_base = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wl_seat") and self.seat == 0) {
-            self.seat = try self.conn.bind(self.registry, name, iface, @min(version, 5));
+            self.seat_version = @min(version, 5);
+            self.seat = try self.conn.bind(self.registry, name, iface, self.seat_version);
         } else if (eql(u8, iface, "wl_data_device_manager")) {
             self.ddm = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wp_viewporter")) {
@@ -244,12 +251,7 @@ pub const Window = struct {
         }
         try c.request(self.surface, wl.wl_surface.commit, &.{});
 
-        if (self.seat != 0) {
-            self.pointer = c.newId();
-            try c.request(self.seat, wl.wl_seat.get_pointer, &.{.{ .new_id = self.pointer }});
-            self.keyboard = c.newId();
-            try c.request(self.seat, wl.wl_seat.get_keyboard, &.{.{ .new_id = self.keyboard }});
-        }
+        try self.updateSeatDevices();
         if (self.ddm != 0 and self.seat != 0) {
             self.data_device = c.newId();
             try c.request(self.ddm, wl.wl_data_device_manager.get_data_device, &.{ .{ .new_id = self.data_device }, .{ .object = self.seat } });
@@ -480,9 +482,13 @@ pub const Window = struct {
             try self.queue.append(self.alloc, .frame_done);
         } else if (ev.object != 0 and ev.object == self.clipboard_source) {
             try self.handleClipboardSource(ev.opcode, &r);
-        } else if (ev.object == self.pointer) {
+        } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
+            self.seat_caps = r.uint();
+            try self.updateSeatDevices();
+            try c.flush();
+        } else if (ev.object != 0 and ev.object == self.pointer) {
             try self.handlePointer(ev.opcode, &r);
-        } else if (ev.object == self.keyboard) {
+        } else if (ev.object != 0 and ev.object == self.keyboard) {
             try self.handleKeyboard(ev.opcode, &r);
         } else if (ev.object != 0 and ev.object == self.buffers[0].id and ev.opcode == wl.wl_buffer.ev_release) {
             self.buffers[0].busy = false;
@@ -490,6 +496,30 @@ pub const Window = struct {
             self.buffers[1].busy = false;
         }
         // unknown objects/opcodes are skipped (header carries the size)
+    }
+
+    /// Take the pointer and keyboard the seat actually has, and let go of
+    /// ones it lost. Asking for a device the seat does not announce is
+    /// legal but has crashed compositors (mutter's headless backend).
+    fn updateSeatDevices(self: *Window) !void {
+        if (self.seat == 0 or self.surface == 0) return;
+        const c = &self.conn;
+        const has_pointer = self.seat_caps & wl.wl_seat.cap_pointer != 0;
+        const has_keyboard = self.seat_caps & wl.wl_seat.cap_keyboard != 0;
+        if (has_pointer and self.pointer == 0) {
+            self.pointer = c.newId();
+            try c.request(self.seat, wl.wl_seat.get_pointer, &.{.{ .new_id = self.pointer }});
+        } else if (!has_pointer and self.pointer != 0) {
+            if (self.seat_version >= 3) try c.request(self.pointer, wl.wl_pointer.release, &.{});
+            self.pointer = 0;
+        }
+        if (has_keyboard and self.keyboard == 0) {
+            self.keyboard = c.newId();
+            try c.request(self.seat, wl.wl_seat.get_keyboard, &.{.{ .new_id = self.keyboard }});
+        } else if (!has_keyboard and self.keyboard != 0) {
+            if (self.seat_version >= 3) try c.request(self.keyboard, wl.wl_keyboard.release, &.{});
+            self.keyboard = 0;
+        }
     }
 
     fn handlePointer(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
