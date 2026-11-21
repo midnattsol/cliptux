@@ -296,7 +296,7 @@ test "portal round trips against a private bus and a mock portal" {
 
     // the person cancels the dialog
     mock.mode.store(@backingInt(Mode.cancel), .release);
-    switch (try portal.screenshot(alloc, &conn, false)) {
+    switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
         .cancelled => {},
         else => return error.TestUnexpectedResult,
     }
@@ -347,7 +347,7 @@ test "portal round trips against a private bus and a mock portal" {
     mock.mode.store(@backingInt(Mode.vanish), .release);
     {
         const t0 = sys.monoMs();
-        switch (try portal.screenshot(alloc, &conn, false)) {
+        switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
             .unavailable => {},
             else => |o| {
                 std.debug.print("vanish: {t}\n", .{o});
