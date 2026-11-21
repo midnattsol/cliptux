@@ -144,6 +144,15 @@ pub const Config = struct {
     /// ScreenCast restore token (silent re-capture after first consent)
     sc_token: [512]u8 = @splat(0),
     sc_token_len: usize = 0,
+    /// editor "beautify" frame, remembered across runs
+    beautify: bool = false,
+    beautify_background: u8 = 0,
+    /// 0 none, 1 small, 2 medium, 3 large
+    beautify_padding: u2 = 2,
+    beautify_corners: bool = true,
+    beautify_shadow: bool = true,
+    /// the editor's first-run hint was shown
+    hint_shown: bool = false,
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from
     /// disk) means every key is written.
@@ -168,7 +177,7 @@ pub const Config = struct {
 
 // --- keys ---
 
-const n_fixed_keys = 6;
+const n_fixed_keys = 12;
 pub const n_keys = n_fixed_keys + n_actions;
 
 const fixed_key_names = [n_fixed_keys][]const u8{
@@ -180,7 +189,15 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     // tokens from before multi-monitor capture ("screencast_token") restore
     // a single-monitor selection forever, so they are not read any more
     "screencast_restore_token",
+    "beautify",
+    "beautify_background",
+    "beautify_padding",
+    "beautify_corners",
+    "beautify_shadow",
+    "hint_shown",
 };
+
+pub const padding_names = [4][]const u8{ "none", "small", "medium", "large" };
 
 /// Keys that are no longer used and are dropped when the file is written.
 const legacy_keys = [_][]const u8{"screencast_token"};
@@ -213,6 +230,12 @@ fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         3 => std.fmt.bufPrint(buf, "{d}", .{cfg.default_color}) catch unreachable,
         4 => cfg.saveDir() orelse "",
         5 => cfg.scToken() orelse "",
+        6 => if (cfg.beautify) "true" else "false",
+        7 => std.fmt.bufPrint(buf, "{d}", .{cfg.beautify_background}) catch unreachable,
+        8 => padding_names[cfg.beautify_padding],
+        9 => if (cfg.beautify_corners) "true" else "false",
+        10 => if (cfg.beautify_shadow) "true" else "false",
+        11 => if (cfg.hint_shown) "true" else "false",
         else => blk: {
             const b = cfg.binds[k - n_fixed_keys];
             break :blk std.fmt.bufPrint(buf, "{s}{s}{d}", .{
@@ -242,6 +265,20 @@ fn applyValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.save_dir_len = n;
     } else if (std.mem.eql(u8, key, "screencast_restore_token")) {
         cfg.setScToken(value);
+    } else if (std.mem.eql(u8, key, "beautify")) {
+        cfg.beautify = std.mem.eql(u8, value, "true");
+    } else if (std.mem.eql(u8, key, "beautify_background")) {
+        cfg.beautify_background = std.fmt.parseInt(u8, value, 10) catch 0;
+    } else if (std.mem.eql(u8, key, "beautify_padding")) {
+        for (padding_names, 0..) |n, i| {
+            if (std.mem.eql(u8, value, n)) cfg.beautify_padding = @intCast(i);
+        }
+    } else if (std.mem.eql(u8, key, "beautify_corners")) {
+        cfg.beautify_corners = !std.mem.eql(u8, value, "false");
+    } else if (std.mem.eql(u8, key, "beautify_shadow")) {
+        cfg.beautify_shadow = !std.mem.eql(u8, value, "false");
+    } else if (std.mem.eql(u8, key, "hint_shown")) {
+        cfg.hint_shown = std.mem.eql(u8, value, "true");
     } else if (std.mem.startsWith(u8, key, "bind_")) {
         const name = key["bind_".len..];
         inline for (@typeInfo(Action).@"enum".field_names, 0..) |fld_name, i| {

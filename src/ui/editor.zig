@@ -251,6 +251,10 @@ pub const Editor = struct {
     copy_notice: CopyNotice = .none,
     copy_notice_hide_at_ms: i64 = 0,
     preset_sel: ?[4]i32 = null,
+    /// first run: show the "drag / Enter / ?" hint until the first action
+    show_hint: bool = false,
+    /// the hint was on screen this session (the caller remembers it)
+    hint_seen: bool = false,
     script: ?[]const u8 = null,
     script_pos: usize = 0,
     script_surface: u8 = 0,
@@ -836,7 +840,14 @@ pub const Editor = struct {
         }
     }
 
+    fn dismissHint(self: *Editor) void {
+        if (!self.show_hint) return;
+        self.show_hint = false;
+        self.needs_render = true;
+    }
+
     fn onPress(self: *Editor) !void {
+        self.dismissHint();
         const m = self.mouse;
         self.breakCoalescing();
         if (self.help_open) {
@@ -1414,6 +1425,19 @@ pub const Editor = struct {
                 self.beautify.bg = @intCast((self.beautify.bg + 1) % doc_mod.backgrounds.len);
                 self.selDirty();
             },
+            .padding => {
+                self.beautify.padding +%= 1;
+                self.selDirty();
+                self.dirtyAll(true);
+            },
+            .corners => {
+                self.beautify.rounded = !self.beautify.rounded;
+                self.selDirty();
+            },
+            .shadow => {
+                self.beautify.shadow = !self.beautify.shadow;
+                self.selDirty();
+            },
             .undo => try self.undo(),
             .redo => try self.redo(),
             .copy => try self.copyToClipboard(),
@@ -1471,6 +1495,7 @@ pub const Editor = struct {
     }
 
     fn onKey(self: *Editor, k: window.Key) !void {
+        self.dismissHint();
         // Space during a drag moves the box (see trackModifiers)
         if (k.code == window.KEY_SPACE and self.drag != .none) return;
         if (k.repeat) {

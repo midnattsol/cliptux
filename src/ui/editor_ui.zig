@@ -34,6 +34,9 @@ pub const ButtonKind = union(enum) {
     thickness,
     beautify,
     background,
+    padding,
+    corners,
+    shadow,
     undo,
     redo,
     copy,
@@ -93,7 +96,10 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, buf: []u8) []const u8 {
         .style => .{ "Fill / rounded / text background", .style, "" },
         .thickness => .{ "Size (scroll, - and =)", null, "" },
         .beautify => .{ "Beautify frame", .beautify, "" },
-        .background => .{ "Frame background", null, "" },
+        .background => return std.fmt.bufPrint(buf, "Background: {s}", .{self.beautify.background().name}) catch "Background",
+        .padding => return std.fmt.bufPrint(buf, "Padding: {s}", .{config.padding_names[self.beautify.padding]}) catch "Padding",
+        .corners => .{ "Rounded corners", null, "" },
+        .shadow => .{ "Shadow", null, "" },
         .undo => .{ "Undo", .undo, "" },
         .redo => .{ "Redo", .redo, "" },
         .copy => .{ "Copy and close", .copy, "" },
@@ -160,8 +166,10 @@ pub fn layoutToolbar(self: *Editor) !void {
     items[n] = .{ .kind = .beautify, .w = btn, .group = 3 };
     n += 1;
     if (self.beautify.enabled) {
-        items[n] = .{ .kind = .background, .w = btn, .group = 3 };
-        n += 1;
+        for ([_]ButtonKind{ .background, .padding, .corners, .shadow }) |k| {
+            items[n] = .{ .kind = k, .w = btn, .group = 3 };
+            n += 1;
+        }
     }
     for ([_]ButtonKind{ .undo, .redo, .copy, .save, .save_as, .help, .cancel }) |k| {
         items[n] = .{ .kind = k, .w = btn, .group = 4 };
@@ -264,9 +272,8 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.selBuf()) |s| {
         addOutline(list, s, chromePad(self));
         list.add(dimsPillRect(self, s).expand(1));
-    } else {
-        list.add(hintRect(self).expand(1));
     }
+    if (self.show_hint) list.add(hintRect(self).expand(1));
     if (self.isMousePane()) {
         if (loupeRect(self)) |r| list.add(r.expand(2));
     }
@@ -393,14 +400,20 @@ fn dimsPillRect(self: *const Editor, s: Rect) Rect {
     return .{ .x = lx, .y = ly, .w = tw + self.sc(16), .h = ph };
 }
 
-const hint_text = "Drag to select a region    Enter: copy all    ?: shortcuts    Esc: close";
+fn hintText() []const u8 {
+    return if (text_mod.available())
+        "Drag to select  \u{00B7}  Enter to copy  \u{00B7}  ? for shortcuts"
+    else
+        "Drag to select  -  Enter to copy  -  ? for shortcuts";
+}
 
 fn hintRect(self: *const Editor) Rect {
     const fs = 14.0 * self.uf();
-    const tw = text_mod.width(fs, hint_text);
+    const tw = text_mod.width(fs, hintText());
     const ph = text_mod.height(fs) + self.sc(14);
     const w: i32 = @intCast(self.pn().width);
-    return .{ .x = @divTrunc(w - tw, 2) - self.sc(18), .y = self.sc(28), .w = tw + self.sc(36), .h = ph };
+    const h: i32 = @intCast(self.pn().height);
+    return .{ .x = @divTrunc(w - tw, 2) - self.sc(18), .y = h - ph - self.sc(48), .w = tw + self.sc(36), .h = ph };
 }
 
 pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
@@ -423,10 +436,13 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
         const r = dimsPillRect(self, s);
         canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xE6191D21);
         text_mod.draw(canvas, r.x + self.sc(8), r.y + self.sc(4), 13.0 * f, ui_fg, label);
-    } else {
+    }
+    if (self.show_hint) {
+        // first run only: a quiet pill, gone at the first click or key
+        self.hint_seen = true;
         const r = hintRect(self);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xF21D2126);
-        text_mod.draw(canvas, r.x + self.sc(18), r.y + self.sc(7), 14.0 * f, ui_fg, hint_text);
+        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xD91D2126);
+        text_mod.draw(canvas, r.x + self.sc(18), r.y + self.sc(7), 14.0 * f, ui_fg, hintText());
     }
 }
 
@@ -452,6 +468,8 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
             .color => |c| c == self.color_idx and !self.custom_active,
             .custom_color => self.custom_active or self.picker.open,
             .beautify => self.beautify.enabled,
+            .corners => self.beautify.rounded,
+            .shadow => self.beautify.shadow,
             .help => self.help_open,
             else => false,
         };
@@ -1076,6 +1094,19 @@ fn drawButtonIcon(self: *Editor, canvas: *Canvas, b: Button, fg: u32, active: bo
                 while (xx < s) : (xx += 1) canvas.set(x + @as(i32, @intCast(xx)), y + @as(i32, @intCast(yy)), px[yy * s + xx]);
             }
             canvas.rectOutline(x, y, @intCast(s), @intCast(s), 1, 0x66FFFFFF);
+        },
+        .padding => {
+            // a picture inside a frame, the gap growing with the padding
+            canvas.rectOutline(x, y, si, si, @max(1, self.sc(1.5)), fg);
+            const gap: i32 = @divTrunc(si * @as(i32, self.beautify.padding), 9);
+            const inner = si - 2 * gap - 2 * @max(1, self.sc(1.5));
+            if (inner > 0) canvas.fillRect(x + @max(1, self.sc(1.5)) + gap, y + @max(1, self.sc(1.5)) + gap, inner, inner, (fg & 0x00FFFFFF) | 0xB0000000);
+        },
+        .corners => shapes_mod.roundRectRing(canvas, .{ .x = x, .y = y, .w = si, .h = si }, sf * 0.35, 2.0 * f, fg),
+        .shadow => {
+            const o = @divTrunc(si, 5);
+            canvas.fillRoundRectAA(x + o, y + o, si - o, si - o, 3.0 * f, (fg & 0x00FFFFFF) | 0x59000000);
+            canvas.fillRoundRectAA(x, y, si - o, si - o, 3.0 * f, fg);
         },
         .undo => drawArcArrow(canvas, cxf, cyf, sf * 0.42, 2.0 * f, fg, false),
         .redo => drawArcArrow(canvas, cxf, cyf, sf * 0.42, 2.0 * f, fg, true),
