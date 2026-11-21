@@ -115,12 +115,13 @@ if [ "${1:-}" = "--inner" ]; then
     # wait_button MON [SECONDS]: wait for an accent-coloured button (at
     # least 40 px wide) on MON; its centre lands in BX, BY
     wait_button() {
-        local i
+        local i w h
         BX=
         for i in $(seq 1 $((${2:-10} * 5))); do
+            # a button, not a selected monitor tile's frame (tall)
             if drv find "$1" "$accent" 24 40 2>/dev/null; then
-                read -r BX BY _ <<<"$VAL"
-                return 0
+                read -r BX BY w h <<<"$VAL"
+                [ "$h" -le 100 ] && return 0
             fi
             sleep 0.2
         done
@@ -134,7 +135,9 @@ if [ "${1:-}" = "--inner" ]; then
             click "$1" "$BX" "$BY"
             sleep 1
             drv find "$1" "$accent" 24 40 2>/dev/null || return 0
-            read -r BX BY _ <<<"$VAL"
+            local h
+            read -r BX BY _ h <<<"$VAL"
+            [ "$h" -le 100 ] || return 0
         done
         return 1
     }
@@ -552,6 +555,37 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... where Esc ends quietly" wait_exit 5
         check "  ... with status 0" eq "$RC" 0
         ;;
+    ime)
+        # IBus Hangul behind gnome-shell's text-input-v3: composition shows
+        # as preedit, committed syllables become text
+        if ! ibus engine 2>/dev/null | grep -q hangul; then
+            skip "no IBus Hangul engine (install ibus-hangul)"
+            exit 0
+        fi
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet ime
+        share_dialog 0 && wait_editor 10 || { fail "editor"; exit 1; }
+        drag 0 200 200 0 700 500
+        keys t
+        click 0 260 260
+        drv sleep 300
+        keys "#122" # Hangul key: Latin -> Hangul mode
+        keys g k s
+        sleep 0.3
+        shot 0 preedit
+        # (preedit.png: the composing syllable drawn white on dark)
+        keys space g k s r m f space
+        sleep 0.3
+        shot 0 committed
+        keys ctrl+a ctrl+c
+        sleep 0.3
+        check "IME composition commits Hangul text" eq "$(timeout 5 wl-paste -n)" "한 한글 "
+        keys esc enter
+        sleep 1
+        check "  ... and the annotated image is copied" clip_png "$OUT/ime.png"
+        ;;
     *)
         skip "unknown scenario"
         ;;
@@ -603,7 +637,9 @@ for s in $want; do
         mixed | fractional | integer) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
-    HL_MONITORS=$mons HL_LAYOUT=$layout timeout 300 \
+    ibus=
+    [ "$s" = ime ] && ibus=hangul
+    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
         while IFS= read -r line; do

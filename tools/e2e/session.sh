@@ -8,6 +8,7 @@
 # the session bus address are replaced before anything starts.
 # Env: HL_MONITORS="1600x900 1280x720"  virtual monitors
 #      HL_LAYOUT=es                     XKB layout (gsettings input-sources)
+#      HL_IBUS=hangul                   IBus engine as the input source
 #      HL_KEEP=1                        keep the temp HOME (prints it)
 # Inside CMD: WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HOME,
 # XDG_RUNTIME_DIR point at the private session; HL_SHELL_LOG is the
@@ -65,6 +66,17 @@ gsettings set org.gnome.shell welcome-dialog-last-shown-version '999'
 gsettings set org.gnome.desktop.interface enable-animations false
 if [ -n "${HL_LAYOUT:-}" ]; then
     gsettings set org.gnome.desktop.input-sources sources "[('xkb','$HL_LAYOUT')]"
+fi
+# HL_IBUS=engine: an IBus input method as the only input source (gnome-shell
+# then offers text-input-v3 backed by it)
+if [ -n "${HL_IBUS:-}" ] && command -v ibus-daemon >/dev/null; then
+    # a fixed address: ibus derives its address file from DISPLAY and
+    # crashes without one (ibus_write_address); DISPLAY points nowhere
+    export IBUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/ibus"
+    DISPLAY=:4242 ibus-daemon --panel disable --address="$IBUS_ADDRESS" \
+        >"$HOME/ibus.log" 2>&1 & pids+=($!)
+    for i in $(seq 1 50); do ibus engine >/dev/null 2>&1 && break; sleep 0.1; done
+    gsettings set org.gnome.desktop.input-sources sources "[('ibus','$HL_IBUS')]"
 fi
 MONS=()
 for m in ${HL_MONITORS:-1600x900}; do MONS+=(--virtual-monitor "$m"); done
