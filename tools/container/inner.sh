@@ -91,7 +91,7 @@ MONITORS=${MONITORS:-1600x900}
 case $SCEN in
     multimon) MONITORS="1600x900 1280x720@2" ;;
     rotated) MONITORS=${CTR_ROTATED:-"1600x900/90 1280x720/flipped-180"} ;;
-    portal) [ "$COMP" = kwin ] || export SHOTLET_NO_DIRECT=1 ;;
+    portal | record) [ "$COMP" = kwin ] || export SHOTLET_NO_DIRECT=1 ;;
 esac
 set -- $MONITORS
 NMON=$#
