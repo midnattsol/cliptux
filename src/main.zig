@@ -191,6 +191,10 @@ test {
     _ = @import("app/gnome.zig");
     _ = @import("app/shellcap.zig");
     _ = @import("app/scroll/stitch.zig");
+    _ = @import("app/modes/mode.zig");
+    _ = @import("app/modes/settings.zig");
+    _ = @import("app/modes/geom.zig");
+    _ = @import("app/modes/last_area.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/history_ui.zig");
