@@ -201,6 +201,7 @@ test {
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
+    _ = @import("app/accel.zig");
     _ = @import("app/shellcap.zig");
     _ = @import("app/scroll/stitch.zig");
     _ = @import("app/modes/mode.zig");
@@ -223,11 +224,14 @@ test {
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");
     _ = @import("ui/tall_view.zig");
+    _ = @import("ui/script_input.zig");
+    _ = @import("ui/hsv.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");
+    _ = @import("app/direct_kwin.zig");
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");

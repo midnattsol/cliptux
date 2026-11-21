@@ -53,8 +53,8 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 import {MODES, ModeShortcuts, countdown, modeArgs} from './modes.js';
 import {captureWindow, pickWindow} from './windowpick.js';
 import {ScrollSessions} from './scroll.js';
+import {APP_ID, CaptureError, fileId, monotonicMs, normalizeAccel, roleOf} from './util.js';
 
-const APP_ID = 'io.github.midnattsol.Shotlet';
 const BUS_NAME = 'dev.shotlet.Shell1';
 const OBJECT_PATH = '/dev/shotlet/Shell1';
 const IFACE = `<node>
@@ -113,49 +113,6 @@ const DESKTOP_ID = `${APP_ID}.desktop`;
 // strips of a monitor: about this many pixels each, at most MAX_STRIPS
 const PIXELS_PER_PIECE = 500 * 1000;
 const MAX_STRIPS = 6;
-
-// "<Ctrl><Shift>s", "<Shift><Control>S": the same key
-function normalizeAccel(accel) {
-    const mods = [];
-    const key = accel.replace(/<([^>]+)>/g, (_m, mod) => {
-        mod = mod.toLowerCase();
-        mods.push({ctrl: 'control', primary: 'control', ctl: 'control'}[mod] ?? mod);
-        return '';
-    }).toLowerCase();
-    return [...mods.sort(), key].join('+');
-}
-
-// errors Capture() answers with: dev.shotlet.Shell1.Error.<name>
-class CaptureError extends Error {
-    constructor(name, message) {
-        super(message);
-        this.dbusName = `dev.shotlet.Shell1.Error.${name}`;
-    }
-}
-
-function monotonicMs() {
-    return Math.floor(GLib.get_monotonic_time() / 1000);
-}
-
-// device and inode of what a path finally names (symlinks followed)
-function fileId(path) {
-    try {
-        const info = Gio.File.new_for_path(path).query_info(
-            'unix::device,unix::inode', Gio.FileQueryInfoFlags.NONE, null);
-        return `${info.get_attribute_uint32('unix::device')}:${info.get_attribute_uint64('unix::inode')}`;
-    } catch {
-        return null;
-    }
-}
-
-function roleOf(win) {
-    if (!win || win.get_wm_class() !== APP_ID)
-        return null;
-    const title = win.get_title() ?? '';
-    if (!title.startsWith('shotlet:'))
-        return null;
-    return title.split(':')[1] || null;
-}
 
 export default class ShotletExtension extends Extension {
     enable() {

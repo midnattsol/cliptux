@@ -20,6 +20,7 @@ const dbus = @import("../platform/dbus.zig");
 const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
 const env_mod = @import("env.zig");
+const kwin = @import("direct_kwin.zig");
 
 pub const Method = enum {
     ext_image_copy_capture,
@@ -372,14 +373,14 @@ const Client = struct {
 pub const Frame = struct { pixels: []u32, width: u32, height: u32 };
 
 // wl_shm formats (DRM fourcc, except the first two)
-const fmt_argb8888: u32 = 0;
-const fmt_xrgb8888: u32 = 1;
-const fmt_abgr8888: u32 = 0x34324241; // AB24
-const fmt_xbgr8888: u32 = 0x34324258; // XB24
-const fmt_argb2101010: u32 = 0x30335241; // AR30
-const fmt_xrgb2101010: u32 = 0x30335258; // XR30
-const fmt_abgr2101010: u32 = 0x30334241; // AB30
-const fmt_xbgr2101010: u32 = 0x30334258; // XB30
+pub const fmt_argb8888: u32 = 0;
+pub const fmt_xrgb8888: u32 = 1;
+pub const fmt_abgr8888: u32 = 0x34324241; // AB24
+pub const fmt_xbgr8888: u32 = 0x34324258; // XB24
+pub const fmt_argb2101010: u32 = 0x30335241; // AR30
+pub const fmt_xrgb2101010: u32 = 0x30335258; // XR30
+pub const fmt_abgr2101010: u32 = 0x30334241; // AB30
+pub const fmt_xbgr2101010: u32 = 0x30334258; // XB30
 
 /// How good a format is for us: 0 = not understood.
 fn formatRank(f: u32) u8 {
@@ -397,7 +398,7 @@ fn preferFormat(have: ?u32, offered: u32) ?u32 {
 }
 
 /// One 32-bit pixel of `format` as opaque 0xFFRRGGBB.
-fn convert(format: u32, p: u32) u32 {
+pub fn convert(format: u32, p: u32) u32 {
     return 0xFF000000 | switch (format) {
         fmt_xrgb8888, fmt_argb8888 => p & 0xFFFFFF,
         fmt_xbgr8888, fmt_abgr8888 => (p & 0x00FF00) | ((p >> 16) & 0xFF) | ((p & 0xFF) << 16),
@@ -537,7 +538,7 @@ pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []co
                 break :blk try cl.grabScreencopy(o);
             },
             .wlr_screencopy => try cl.grabScreencopy(o),
-            .kwin_screenshot => (try kwinScreen(gpa, bus, o.name())) orelse return .{ .unavailable = kwin_refused },
+            .kwin_screenshot => (try kwin.screen(gpa, bus, o.name())) orelse return .{ .unavailable = kwin.refused },
         };
         parts[n] = .{ .pixels = frames[n].pixels, .width = frames[n].width, .height = frames[n].height, .logical = o.logical() };
         std.log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, o.logical() });
@@ -545,132 +546,6 @@ pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []co
     }
     std.log.info("direct capture: {d} outputs with {s}", .{ n, method.label() });
     return .{ .captured = .{ .cap = try capture.stitch(gpa, parts[0..n]), .method = method } };
-}
-
-var kwin_refused: []const u8 = "no direct capture interface";
-
-/// One KWin output via org.kde.KWin.ScreenShot2, at its native
-/// resolution, without the pointer. Null when KWin is not running here or
-/// refuses this binary (kwin_refused says why).
-fn kwinScreen(gpa: std.mem.Allocator, bus: *dbus.Connection, output_name: []const u8) !?Frame {
-    if (output_name.len == 0) {
-        kwin_refused = "outputs without names";
-        return null;
-    }
-    const p = try sys.pipe();
-    defer sys.close(p[0]);
-    var m = dbus.Marshal.init(gpa);
-    defer m.deinit();
-    try m.putString(output_name);
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("native-resolution");
-    try m.putVariantBool(true);
-    try m.beginStruct();
-    try m.putString("include-cursor");
-    try m.putVariantBool(false);
-    m.endArray(arr);
-    try m.putU32(0); // fd index
-    const serial = bus.callMethodFds("org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureScreen", "sa{sv}h", m.buf.items, &.{p[1]}) catch |err| {
-        sys.close(p[1]);
-        if (err == error.NoFdPassing) {
-            kwin_refused = "the session bus passes no file descriptors";
-            return null;
-        }
-        return err;
-    };
-    sys.close(p[1]);
-    return kwinReply(gpa, bus, serial, p[0], false, 10_000);
-}
-
-/// The image KWin writes to `read_fd` after answering call `serial`; null
-/// when KWin refused (kwin_refused says why). `alpha`: keep see-through
-/// pixels (a window's rounded corners), else opaque.
-pub fn kwinReply(gpa: std.mem.Allocator, bus: *dbus.Connection, serial: u32, read_fd: sys.fd_t, alpha: bool, timeout_ms: i64) !?Frame {
-    var msg = try bus.waitReplyOrError(serial, timeout_ms);
-    defer msg.deinit(gpa);
-    if (msg.type == .@"error") {
-        const e = msg.error_name orelse "";
-        kwin_refused = if (std.mem.indexOf(u8, e, "NoAuthorized") != null)
-            "KWin refused: the installed .desktop file does not list org.kde.KWin.ScreenShot2 for this executable"
-        else if (std.mem.eql(u8, e, "org.freedesktop.DBus.Error.ServiceUnknown") or std.mem.eql(u8, e, "org.freedesktop.DBus.Error.UnknownObject") or std.mem.eql(u8, e, "org.freedesktop.DBus.Error.UnknownMethod"))
-            "no direct capture interface"
-        else
-            "KWin ScreenShot2 failed";
-        std.log.info("direct capture: {s} ({s})", .{ kwin_refused, e });
-        return null;
-    }
-    var w: u32 = 0;
-    var h: u32 = 0;
-    var stride: u32 = 0;
-    var format: u32 = 0;
-    var r = msg.reader();
-    var dict = try r.readDictSV();
-    while (try dict.next()) |e| {
-        const v: u32 = switch (e.value) {
-            .u32_ => |x| x,
-            else => continue,
-        };
-        const eql = std.mem.eql;
-        if (eql(u8, e.key, "width")) w = v else if (eql(u8, e.key, "height")) h = v else if (eql(u8, e.key, "stride")) stride = v else if (eql(u8, e.key, "format")) format = v;
-    }
-    if (w == 0 or h == 0 or stride < w * 4 or qimageConvert(format, 0) == null) return error.UnknownImageFormat;
-    const size = @as(usize, stride) * h;
-    const raw = try gpa.alloc(u8, size);
-    defer gpa.free(raw);
-    var got: usize = 0;
-    const deadline = sys.monoMs() + 10_000;
-    while (got < size) {
-        if (!try sys.waitReadable(read_fd, deadline)) return error.ShortImage;
-        const k = try sys.read(read_fd, raw[got..]);
-        if (k == 0) return error.ShortImage;
-        got += k;
-    }
-    const px = try gpa.alloc(u32, @as(usize, w) * h);
-    for (0..h) |y| for (0..w) |x| {
-        const v = std.mem.readInt(u32, raw[y * stride + x * 4 ..][0..4], .little);
-        px[y * w + x] = if (alpha) qimageAlpha(format, v) orelse qimageConvert(format, v).? else qimageConvert(format, v).?;
-    };
-    return .{ .pixels = px, .width = w, .height = h };
-}
-
-/// A 32-bit QImage pixel (little-endian word) as 0xFFRRGGBB; null for
-/// formats not handled.
-fn qimageConvert(format: u32, p: u32) ?u32 {
-    return switch (format) {
-        // RGB32, ARGB32, ARGB32_Premultiplied: 0xAARRGGBB words
-        4, 5, 6 => 0xFF000000 | (p & 0xFFFFFF),
-        // RGBX8888, RGBA8888(_Premultiplied): bytes R G B A
-        16, 17, 18 => convert(fmt_xbgr8888, p),
-        // BGR30, A2BGR30_Premultiplied: 2-10-10-10, blue high
-        19, 20 => convert(fmt_xbgr2101010, p),
-        // RGB30, A2RGB30_Premultiplied
-        21, 22 => convert(fmt_xrgb2101010, p),
-        else => null,
-    };
-}
-
-/// ARGB32 (5) as is, ARGB32_Premultiplied (6) unpremultiplied; null for
-/// formats without alpha.
-fn qimageAlpha(format: u32, p: u32) ?u32 {
-    const a = p >> 24;
-    return switch (format) {
-        5 => p,
-        6 => if (a == 0) 0 else blk: {
-            var out: u32 = a << 24;
-            inline for (.{ 0, 8, 16 }) |sh| out |= @as(u32, @min(255, ((p >> sh) & 0xFF) * 255 / a)) << sh;
-            break :blk out;
-        },
-        else => null,
-    };
-}
-
-test "QImage formats" {
-    try std.testing.expectEqual(@as(?u32, 0x80FF0000), qimageAlpha(6, 0x80800000));
-    try std.testing.expectEqual(@as(?u32, 0), qimageAlpha(6, 0x00123456));
-    try std.testing.expectEqual(@as(?u32, 0xFF112233), qimageConvert(4, 0x00112233));
-    try std.testing.expectEqual(@as(?u32, 0xFF112233), qimageConvert(17, 0xFF332211));
-    try std.testing.expectEqual(@as(?u32, null), qimageConvert(3, 0));
 }
 
 /// How the last capture got its pixels, for Settings

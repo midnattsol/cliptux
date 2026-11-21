@@ -1222,10 +1222,7 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 1
         check "  ... and the annotated image is copied" clip_png "$OUT/ime.png"
         ;;
-    modes-*)
-        # the capture modes (tools/e2e/modes.sh)
-        . "$ROOT/tools/e2e/modes.sh"
-        ;;
+    modes-*) . "$ROOT/tools/e2e/modes.sh" ;; # the capture modes
     *)
         skip "unknown scenario"
         ;;
@@ -1306,9 +1303,7 @@ for s in $want; do
     sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
-    case $s in
-        quick | annotate | history | shell* | modes-*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
-    esac
+    case $s in quick | annotate | history | shell* | modes-*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
     HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |

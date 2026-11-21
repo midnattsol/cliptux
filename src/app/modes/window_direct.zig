@@ -50,7 +50,7 @@ fn kwinPick(gpa: std.mem.Allocator, bus: *dbus.Connection) !?direct.Frame {
     };
     sys.close(p[1]);
     // the person is picking: give them time
-    return direct.kwinReply(gpa, bus, serial, p[0], true, 120_000) catch |err| switch (err) {
+    return @import("../direct_kwin.zig").reply(gpa, bus, serial, p[0], true, 120_000) catch |err| switch (err) {
         error.UnknownImageFormat, error.ShortImage => return err,
         else => null,
     };
