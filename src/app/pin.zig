@@ -105,6 +105,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     // has moved the pin to, unrounded
     var drag_from: ?[2]f64 = null;
     var drag_at: [2]f64 = .{ 0, 0 };
+    var drag_rel = false;
     const born = sys.monoMs();
     var last_f: f64 = 0;
 
@@ -232,9 +233,15 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
                 // to (sway: where the press happened). Relative pointer
                 // motion is the pointer's own.
                 if (drag_from) |from| {
-                    if (win.takeRelative()) |d| {
-                        drag_at[0] += d[1];
-                        drag_at[1] += d[0];
+                    const rel = win.takeRelative() orelse .{ 0, 0 };
+                    // absolute devices (tablets; KWin's fake input) may
+                    // move the pointer without relative motion: then go by
+                    // positions, which KWin gives relative to where the
+                    // pin is now
+                    if (rel[0] != 0 or rel[1] != 0) drag_rel = true;
+                    if (drag_rel) {
+                        drag_at[0] += rel[1];
+                        drag_at[1] += rel[0];
                     } else if (inside) {
                         drag_at[0] += (m.y - from[1]) / k;
                         drag_at[1] += (m.x - from[0]) / k;
@@ -254,6 +261,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
                     if (layer) {
                         drag_from = .{ b.x, b.y };
                         drag_at = .{ @floatFromInt(margin[0]), @floatFromInt(margin[3]) };
+                        drag_rel = false;
                         _ = win.takeRelative();
                     } else try win.startMoveOf(0);
                 } else if (b.button == window.BTN_LEFT) {
