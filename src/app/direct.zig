@@ -435,12 +435,15 @@ fn transformed(gpa: std.mem.Allocator, src: []const u32, w: u32, h: u32, transfo
     return .{ .pixels = out, .width = dw, .height = dh };
 }
 
-/// The buffer pixel shown at (x, y) of the transformed picture.
-/// wl_output transforms turn the content counter-clockwise; "flipped" ones
-/// mirror it around the vertical axis first.
-fn sourceOf(transform: u32, x: u32, y: u32, w: u32, h: u32) [2]u32 {
-    // undo the rotation, then the flip
-    const flip = transform & 4 != 0;
+/// The buffer pixel shown at (x, y) of the transformed picture: for
+/// WL_OUTPUT_TRANSFORM_90 the picture's top row is the buffer's left
+/// column read bottom to top (checked against sway's screencopy, which
+/// hands out the untransformed buffer); "flipped" ones mirror around the
+/// vertical axis.
+fn sourceOf(transform: u32, x_in: u32, y: u32, w: u32, h: u32) [2]u32 {
+    // the mirror applies to the picture, then the rotation is undone
+    const swap = transform & 1 != 0;
+    const x = if (transform & 4 != 0) (if (swap) h else w) - 1 - x_in else x_in;
     var sx: u32 = undefined;
     var sy: u32 = undefined;
     switch (transform & 3) {
@@ -448,23 +451,20 @@ fn sourceOf(transform: u32, x: u32, y: u32, w: u32, h: u32) [2]u32 {
             sx = x;
             sy = y;
         },
-        // 90 counter-clockwise: the picture's top row is the buffer's
-        // right column, read downwards from the top
         1 => {
-            sx = w - 1 - y;
-            sy = x;
+            sx = y;
+            sy = h - 1 - x;
         },
         2 => {
             sx = w - 1 - x;
             sy = h - 1 - y;
         },
         3 => {
-            sx = y;
-            sy = h - 1 - x;
+            sx = w - 1 - y;
+            sy = x;
         },
         else => unreachable,
     }
-    if (flip) sx = w - 1 - sx;
     return .{ sx, sy };
 }
 
@@ -487,9 +487,9 @@ test "transforms turn the buffer upright" {
     const src = [_]u32{ 'a', 'b', 'c', 'd', 'e', 'f' };
     const cases = [_]struct { t: u32, w: u32, want: []const u8 }{
         .{ .t = 0, .w = 3, .want = "abcdef" },
-        .{ .t = 1, .w = 2, .want = "cfbead" },
+        .{ .t = 1, .w = 2, .want = "daebfc" },
         .{ .t = 2, .w = 3, .want = "fedcba" },
-        .{ .t = 3, .w = 2, .want = "daebfc" },
+        .{ .t = 3, .w = 2, .want = "cfbead" },
         .{ .t = 4, .w = 3, .want = "cbafed" },
     };
     for (cases) |cs| {
