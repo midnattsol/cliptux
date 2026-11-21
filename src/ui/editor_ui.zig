@@ -34,6 +34,9 @@ pub const ButtonKind = union(enum) {
     thickness,
     beautify,
     background,
+    padding,
+    corners,
+    shadow,
     undo,
     redo,
     copy,
@@ -83,22 +86,25 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, buf: []u8) []const u8 {
             .ellipse => .{ "Ellipse", .ellipse, "" },
             .highlight => .{ "Highlighter", .highlight, "" },
             .blur => .{ "Blur", .pixelate, "" },
-            .pixelate => .{ "Pixelate", null, "" },
-            .redact => .{ "Redact (solid box)", null, "" },
+            .pixelate => .{ "Pixelate", .pixelate, "" },
+            .redact => .{ "Redact (solid box)", .pixelate, "" },
             .counter => .{ "Counter badge", .counter, "" },
             .text => .{ "Text", .text, "" },
         },
-        .color => .{ "Colour", null, "1-8" },
+        .color => |c| return std.fmt.bufPrint(buf, "{s}  {d}", .{ ([_][]const u8{ "Red", "Orange", "Yellow", "Green", "Blue", "Magenta", "White", "Black" })[c], @as(u8, c) + 1 }) catch "Colour",
         .custom_color => .{ "Custom colour", null, "9" },
-        .style => .{ "Fill / rounded / background", null, "F" },
-        .thickness => .{ "Size (scroll, - and =)", null, "" },
-        .beautify => .{ "Beautify frame", null, "B" },
-        .background => .{ "Frame background", null, "" },
+        .style => .{ "Fill / rounded / text background", .style, "" },
+        .thickness => .{ "Size (wheel)", null, "- =" },
+        .beautify => .{ "Beautify frame", .beautify, "" },
+        .background => return std.fmt.bufPrint(buf, "Background: {s}", .{self.beautify.background().name}) catch "Background",
+        .padding => return std.fmt.bufPrint(buf, "Padding: {s}", .{config.padding_names[self.beautify.padding]}) catch "Padding",
+        .corners => .{ "Rounded corners", null, "" },
+        .shadow => .{ "Shadow", null, "" },
         .undo => .{ "Undo", .undo, "" },
         .redo => .{ "Redo", .redo, "" },
-        .copy => .{ "Copy", .copy, "" },
+        .copy => .{ "Copy and close", .copy, "" },
         .save => .{ "Save", .save, "" },
-        .save_as => .{ "Save as...", null, "Ctrl+Shift+S" },
+        .save_as => .{ "Save as...", .save_as, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
     };
@@ -160,8 +166,10 @@ pub fn layoutToolbar(self: *Editor) !void {
     items[n] = .{ .kind = .beautify, .w = btn, .group = 3 };
     n += 1;
     if (self.beautify.enabled) {
-        items[n] = .{ .kind = .background, .w = btn, .group = 3 };
-        n += 1;
+        for ([_]ButtonKind{ .background, .padding, .corners, .shadow }) |k| {
+            items[n] = .{ .kind = k, .w = btn, .group = 3 };
+            n += 1;
+        }
     }
     for ([_]ButtonKind{ .undo, .redo, .copy, .save, .save_as, .help, .cancel }) |k| {
         items[n] = .{ .kind = k, .w = btn, .group = 4 };
@@ -264,9 +272,8 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.selBuf()) |s| {
         addOutline(list, s, chromePad(self));
         list.add(dimsPillRect(self, s).expand(1));
-    } else {
-        list.add(hintRect(self).expand(1));
     }
+    if (self.show_hint) list.add(hintRect(self).expand(1));
     if (self.isMousePane()) {
         if (loupeRect(self)) |r| list.add(r.expand(2));
     }
@@ -393,14 +400,20 @@ fn dimsPillRect(self: *const Editor, s: Rect) Rect {
     return .{ .x = lx, .y = ly, .w = tw + self.sc(16), .h = ph };
 }
 
-const hint_text = "Drag to select a region    Enter: copy all    ?: shortcuts    Esc: close";
+fn hintText() []const u8 {
+    return if (text_mod.available())
+        "Drag to select  \u{00B7}  Enter to copy  \u{00B7}  ? for shortcuts"
+    else
+        "Drag to select  -  Enter to copy  -  ? for shortcuts";
+}
 
 fn hintRect(self: *const Editor) Rect {
     const fs = 14.0 * self.uf();
-    const tw = text_mod.width(fs, hint_text);
+    const tw = text_mod.width(fs, hintText());
     const ph = text_mod.height(fs) + self.sc(14);
     const w: i32 = @intCast(self.pn().width);
-    return .{ .x = @divTrunc(w - tw, 2) - self.sc(18), .y = self.sc(28), .w = tw + self.sc(36), .h = ph };
+    const h: i32 = @intCast(self.pn().height);
+    return .{ .x = @divTrunc(w - tw, 2) - self.sc(18), .y = h - ph - self.sc(48), .w = tw + self.sc(36), .h = ph };
 }
 
 pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
@@ -423,10 +436,13 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
         const r = dimsPillRect(self, s);
         canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xE6191D21);
         text_mod.draw(canvas, r.x + self.sc(8), r.y + self.sc(4), 13.0 * f, ui_fg, label);
-    } else {
+    }
+    if (self.show_hint) {
+        // first run only: a quiet pill, gone at the first click or key
+        self.hint_seen = true;
         const r = hintRect(self);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xF21D2126);
-        text_mod.draw(canvas, r.x + self.sc(18), r.y + self.sc(7), 14.0 * f, ui_fg, hint_text);
+        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, 0xD91D2126);
+        text_mod.draw(canvas, r.x + self.sc(18), r.y + self.sc(7), 14.0 * f, ui_fg, hintText());
     }
 }
 
@@ -452,6 +468,8 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
             .color => |c| c == self.color_idx and !self.custom_active,
             .custom_color => self.custom_active or self.picker.open,
             .beautify => self.beautify.enabled,
+            .corners => self.beautify.rounded,
+            .shadow => self.beautify.shadow,
             .help => self.help_open,
             else => false,
         };
@@ -787,31 +805,33 @@ fn drawLoupe(self: *Editor, canvas: *Canvas) void {
 
 const help_lines = [_][2][]const u8{
     .{ "Drag", "Select a region; drag inside to move it" },
+    .{ "Shift / Alt + drag", "Square, circle, 45\u{00B0} lines; from the centre" },
+    .{ "Space + drag", "Move the region or shape while drawing it" },
     .{ "Arrows / Shift", "Move selection or shape by 1 / 10 px" },
     .{ "Alt+Arrows", "Resize the selection" },
-    .{ "V P L A R E H", "Select, pen, line, arrow, rect, ellipse, marker" },
+    .{ "V P L A R E M", "Select, pen, line, arrow, rect, ellipse, marker" },
     .{ "X (again)", "Blur, then pixelate, then solid redaction" },
     .{ "N  T", "Counter badge, text" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },
-    .{ "Click a shape", "Select it (select tool): drag, resize, recolour" },
+    .{ "Click / double-click", "Select a shape (select tool) / edit text" },
     .{ "Delete", "Delete selected shape" },
     .{ "Ctrl+D  Ctrl+]", "Duplicate, bring to front" },
-    .{ "Ctrl+Z / Ctrl+Shift+Z", "Undo / redo" },
-    .{ "Text: Enter", "New line; Ctrl+Enter or click outside ends" },
-    .{ "Text: Ctrl+V", "Paste plain text" },
-    .{ "B", "Beautify frame for the export" },
+    .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
+    .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
+    .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },
+    .{ "B", "Beautify frame (padding, background, shadow)" },
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
-    .{ "Enter  Ctrl+C", "Copy to clipboard" },
+    .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
     .{ "Ctrl+S  Ctrl+Shift+S", "Save, save as" },
-    .{ "Esc", "Cancel current action, then close" },
+    .{ "Right click / Esc", "Cancel current action; Esc again closes" },
 };
 
 fn helpRect(self: *const Editor) Rect {
     const fs = 13.5 * self.uf();
     const lh = text_mod.height(fs) + self.sc(6);
-    const pw = self.sc(560);
+    const pw = self.sc(600);
     const ph = lh * @as(i32, help_lines.len) + self.sc(64);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
@@ -828,7 +848,7 @@ fn drawHelp(self: *Editor, canvas: *Canvas) void {
     var y = r.y + self.sc(48);
     for (help_lines) |l| {
         text_mod.draw(canvas, r.x + self.sc(24), y, fs, ui_accent, l[0]);
-        text_mod.draw(canvas, r.x + self.sc(210), y, fs, ui_fg, l[1]);
+        text_mod.draw(canvas, r.x + self.sc(240), y, fs, ui_fg, l[1]);
         y += lh;
     }
 }
@@ -1074,6 +1094,19 @@ fn drawButtonIcon(self: *Editor, canvas: *Canvas, b: Button, fg: u32, active: bo
                 while (xx < s) : (xx += 1) canvas.set(x + @as(i32, @intCast(xx)), y + @as(i32, @intCast(yy)), px[yy * s + xx]);
             }
             canvas.rectOutline(x, y, @intCast(s), @intCast(s), 1, 0x66FFFFFF);
+        },
+        .padding => {
+            // a picture inside a frame, the gap growing with the padding
+            canvas.rectOutline(x, y, si, si, @max(1, self.sc(1.5)), fg);
+            const gap: i32 = @divTrunc(si * @as(i32, self.beautify.padding), 9);
+            const inner = si - 2 * gap - 2 * @max(1, self.sc(1.5));
+            if (inner > 0) canvas.fillRect(x + @max(1, self.sc(1.5)) + gap, y + @max(1, self.sc(1.5)) + gap, inner, inner, (fg & 0x00FFFFFF) | 0xB0000000);
+        },
+        .corners => shapes_mod.roundRectRing(canvas, .{ .x = x, .y = y, .w = si, .h = si }, sf * 0.35, 2.0 * f, fg),
+        .shadow => {
+            const o = @divTrunc(si, 5);
+            canvas.fillRoundRectAA(x + o, y + o, si - o, si - o, 3.0 * f, (fg & 0x00FFFFFF) | 0x59000000);
+            canvas.fillRoundRectAA(x, y, si - o, si - o, 3.0 * f, fg);
         },
         .undo => drawArcArrow(canvas, cxf, cyf, sf * 0.42, 2.0 * f, fg, false),
         .redo => drawArcArrow(canvas, cxf, cyf, sf * 0.42, 2.0 * f, fg, true),

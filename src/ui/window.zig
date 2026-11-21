@@ -405,6 +405,8 @@ pub const Window = struct {
     selection_offer: u32 = 0,
     clipboard_source: u32 = 0,
     clipboard_png: []u8 = &.{},
+    /// text we offer on the clipboard (text/plain;charset=utf-8, UTF8_STRING)
+    clipboard_text: []u8 = &.{},
     clipboard_image: ?*ClipboardImage = null,
 
     // mirrors of surface 0, kept for the single-surface API
@@ -1704,7 +1706,7 @@ pub const Window = struct {
     /// source. Takes ownership of data on success. Call while the window still
     /// has focus (serial must be fresh).
     pub fn setClipboardPng(self: *Window, data: []u8) !void {
-        try self.claimClipboardSource();
+        try self.claimClipboardSource(&.{"image/png"});
         self.clipboard_png = data;
     }
 
@@ -1713,16 +1715,23 @@ pub const Window = struct {
     pub fn setClipboardImage(self: *Window, pixels: []u32, width: u32, height: u32) !void {
         const image = try ClipboardImage.create(self.alloc, pixels, width, height);
         errdefer image.deinit();
-        try self.claimClipboardSource();
+        try self.claimClipboardSource(&.{"image/png"});
         self.clipboard_image = image;
     }
 
-    fn claimClipboardSource(self: *Window) !void {
+    /// Put UTF-8 text on the clipboard. Takes ownership of `data` on
+    /// success.
+    pub fn setClipboardText(self: *Window, data: []u8) !void {
+        try self.claimClipboardSource(&.{ "text/plain;charset=utf-8", "UTF8_STRING", "text/plain" });
+        self.clipboard_text = data;
+    }
+
+    fn claimClipboardSource(self: *Window, mimes: []const []const u8) !void {
         if (self.ddm == 0 or self.data_device == 0) return error.NoDataDevice;
         const c = &self.conn;
         const source = c.newId();
         try c.request(self.ddm, wl.wl_data_device_manager.create_data_source, &.{.{ .new_id = source }});
-        try c.request(source, wl.wl_data_source.offer, &.{.{ .string = "image/png" }});
+        for (mimes) |m| try c.request(source, wl.wl_data_source.offer, &.{.{ .string = m }});
         try c.request(self.data_device, wl.wl_data_device.set_selection, &.{ .{ .object = source }, .{ .uint = self.input_serial } });
         try c.flush();
 
@@ -1786,6 +1795,9 @@ pub const Window = struct {
     /// most `max_bytes` and gives up after `timeout_ms` so a stuck source
     /// cannot freeze the UI. Caller owns the bytes.
     pub fn clipboardText(self: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?[]u8 {
+        // our own text: answering our own receive would need this very loop
+        if (self.clipboard_source != 0 and self.clipboard_text.len > 0)
+            return try alloc.dupe(u8, self.clipboard_text[0..@min(max_bytes, self.clipboard_text.len)]);
         const slot = self.offerSlot(self.selection_offer) orelse return null;
         const kinds = self.offers[slot].text;
         if (kinds == 0) return null;
@@ -1806,7 +1818,7 @@ pub const Window = struct {
                 _ = try r.string(); // mime
                 if (self.conn.takeFd()) |fd| {
                     defer sys.close(fd);
-                    const clipboard_data = if (self.clipboard_image) |image| image.waitPng() catch |err| {
+                    const clipboard_data = if (self.clipboard_text.len > 0) self.clipboard_text else if (self.clipboard_image) |image| image.waitPng() catch |err| {
                         std.log.warn("clipboard encode failed: {t}", .{err});
                         return;
                     } else self.clipboard_png;
@@ -1825,6 +1837,10 @@ pub const Window = struct {
         if (self.clipboard_source != 0) {
             self.conn.request(self.clipboard_source, wl.wl_data_source.destroy, &.{}) catch {};
             self.clipboard_source = 0;
+        }
+        if (self.clipboard_text.len > 0) {
+            self.alloc.free(self.clipboard_text);
+            self.clipboard_text = &.{};
         }
         if (self.clipboard_png.len > 0) {
             self.alloc.free(self.clipboard_png);

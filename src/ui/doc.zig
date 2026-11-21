@@ -308,11 +308,14 @@ pub const backgrounds = [_]Background{
     .{ .from = 0xFFF1F3F5, .to = 0xFFF1F3F5, .name = "Paper" },
 };
 
+/// Padding as a percentage of the shot's longer side, per level.
+pub const padding_pct = [4]u8{ 0, 4, 7, 12 };
+
 pub const Beautify = struct {
     enabled: bool = false,
     bg: u8 = 0,
-    /// padding as a percentage of the longer side of the shot
-    padding_pct: u8 = 7,
+    /// padding: 0 none, 1 small, 2 medium, 3 large (see padding_pct)
+    padding: u2 = 2,
     rounded: bool = true,
     shadow: bool = true,
 
@@ -329,9 +332,10 @@ pub const Beautify = struct {
     pub fn geometry(self: Beautify, w: u32, h: u32) Geometry {
         if (!self.enabled) return .{ .out_w = w, .out_h = h, .pad = 0, .radius = 0, .shadow_blur = 0, .shadow_dy = 0 };
         const long: f64 = @floatFromInt(@max(w, h));
-        const pad: u32 = @max(16, @as(u32, @intFromFloat(@round(long * @as(f64, @floatFromInt(self.padding_pct)) / 100.0))));
+        const pct = padding_pct[self.padding];
+        const pad: u32 = if (pct == 0) 0 else @max(16, @as(u32, @intFromFloat(@round(long * @as(f64, @floatFromInt(pct)) / 100.0))));
         const radius: u32 = if (self.rounded) @min(@min(w, h) / 2, @max(4, @as(u32, @intFromFloat(@round(long * 0.012))))) else 0;
-        const blur: u32 = if (self.shadow) @max(4, pad / 2) else 0;
+        const blur: u32 = if (self.shadow and pad > 0) @max(4, pad / 2) else 0;
         return .{
             .out_w = w + 2 * pad,
             .out_h = h + 2 * pad,
@@ -477,6 +481,12 @@ test "beautify sizes and framing" {
     // disabled: identity
     const off = (Beautify{}).geometry(40, 20);
     try testing.expectEqual(@as(u32, 40), off.out_w);
+    // padding levels; none keeps the size (rounded corners only)
+    try testing.expectEqual(@as(u32, 1000), (Beautify{ .enabled = true, .padding = 0 }).geometry(1000, 500).out_w);
+    try testing.expectEqual(@as(u32, 1080), (Beautify{ .enabled = true, .padding = 1 }).geometry(1000, 500).out_w);
+    try testing.expectEqual(@as(u32, 1240), (Beautify{ .enabled = true, .padding = 3 }).geometry(1000, 500).out_w);
+    try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .padding = 0 }).geometry(1000, 500).shadow_blur);
+    try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .rounded = false }).geometry(1000, 500).radius);
 
     const img = try testImage(alloc, 200, 100);
     defer alloc.free(img);

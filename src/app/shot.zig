@@ -84,13 +84,22 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
     ed.binds = cfg.binds;
+    ed.beautify = .{
+        .enabled = cfg.beautify,
+        .bg = cfg.beautify_background,
+        .padding = cfg.beautify_padding,
+        .rounded = cfg.beautify_corners,
+        .shadow = cfg.beautify_shadow,
+    };
+    ed.show_hint = !cfg.hint_shown;
     ed.presetSelection(preset_sel);
     defer ed.deinit();
     const result = try ed.run();
+    rememberEditorPrefs(gpa, env, &cfg, &ed);
     defer if (result.png_data) |d| gpa.free(d);
 
     switch (result.action) {
-        .cancel => {
+        .cancel, .copied => {
             win.closeWindow();
             ed.releaseCaches(); // serving may outlive the session; drop ~140MB
             if (win.hasClipboard()) try win.serveClipboard();
@@ -476,4 +485,45 @@ fn fromMonitorFiles(gpa: std.mem.Allocator, list: []const u8) !capture.Capture {
         n += 1;
     }
     return capture.stitch(gpa, parts[0..n]);
+}
+
+/// Store the editor's beautify settings and the first-run hint flag, only
+/// the keys that changed (other settings in the file are left alone).
+fn rememberEditorPrefs(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
+    const b = ed.beautify;
+    var bg_buf: [8]u8 = undefined;
+    var changes: [6]config.Change = undefined;
+    var n: usize = 0;
+    const tf = struct {
+        fn s(v: bool) []const u8 {
+            return if (v) "true" else "false";
+        }
+    }.s;
+    if (b.enabled != cfg.beautify) {
+        changes[n] = .{ .key = "beautify", .value = tf(b.enabled) };
+        n += 1;
+    }
+    if (b.bg != cfg.beautify_background) {
+        changes[n] = .{ .key = "beautify_background", .value = std.fmt.bufPrint(&bg_buf, "{d}", .{b.bg}) catch "0" };
+        n += 1;
+    }
+    if (b.padding != cfg.beautify_padding) {
+        changes[n] = .{ .key = "beautify_padding", .value = config.padding_names[b.padding] };
+        n += 1;
+    }
+    if (b.rounded != cfg.beautify_corners) {
+        changes[n] = .{ .key = "beautify_corners", .value = tf(b.rounded) };
+        n += 1;
+    }
+    if (b.shadow != cfg.beautify_shadow) {
+        changes[n] = .{ .key = "beautify_shadow", .value = tf(b.shadow) };
+        n += 1;
+    }
+    if (ed.hint_seen and !cfg.hint_shown) {
+        changes[n] = .{ .key = "hint_shown", .value = "true" };
+        n += 1;
+    }
+    if (n == 0) return;
+    config.update(gpa, env.home, changes[0..n]) catch |err|
+        std.log.warn("could not save editor settings: {t}", .{err});
 }
