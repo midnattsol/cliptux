@@ -84,6 +84,20 @@ pub const View = struct {
     }
 };
 
+/// The view showing monitor rect `mon` (image pixels) on a bw×bh buffer
+/// covering that monitor: the monitor's top-left lands at (0, 0).
+pub fn monitorView(mon: Rect, bw: u32, bh: u32) View {
+    const sx = @as(f64, @floatFromInt(bw)) / @as(f64, @floatFromInt(@max(1, mon.w)));
+    const sy = @as(f64, @floatFromInt(bh)) / @as(f64, @floatFromInt(@max(1, mon.h)));
+    // equal for a matching aspect; otherwise fit the monitor inside
+    const s = @min(sx, sy);
+    return .{
+        .scale = s,
+        .off_x = @as(i32, @intFromFloat(@round(-@as(f64, @floatFromInt(mon.x)) * s))) + @divTrunc(@as(i32, @intCast(bw)) - @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(mon.w)) * s))), 2),
+        .off_y = @as(i32, @intFromFloat(@round(-@as(f64, @floatFromInt(mon.y)) * s))) + @divTrunc(@as(i32, @intCast(bh)) - @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(mon.h)) * s))), 2),
+    };
+}
+
 /// Render the image `src` (sw×sh) into `dst` (dw×dh) through `view`,
 /// touching only `region` (buffer coordinates). Pixels outside the image
 /// get `letterbox`. Shrinking averages a small grid of samples; enlarging
@@ -202,4 +216,21 @@ test "resample: letterbox outside, nearest when enlarging, average when shrinkin
     try std.testing.expectEqual(@as(u32, 0x12345678), part[0]);
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), part[1]);
     try std.testing.expectEqual(@as(u32, 0x12345678), part[3]);
+}
+
+test "monitor views map each monitor onto its own buffer" {
+    // a 1600x900 monitor at 2x next to a 1280x720 one at 1x, stitched at 2x
+    const left = monitorView(.{ .x = 0, .y = 0, .w = 3200, .h = 1800 }, 3200, 1800);
+    try std.testing.expectEqual(@as(f64, 1.0), left.scale);
+    const right = monitorView(.{ .x = 3200, .y = 0, .w = 2560, .h = 1440 }, 1280, 720);
+    try std.testing.expectEqual(@as(f64, 0.5), right.scale);
+    try std.testing.expectEqual(@as(i32, -1600), right.off_x);
+    // the right monitor's first pixel is buffer (0, 0); a point dragged past
+    // its left edge lands on the left monitor
+    try std.testing.expectEqual(Point{ .x = 3200, .y = 0 }, right.toImgEdge(.{ .x = 0, .y = 0 }));
+    try std.testing.expectEqual(Point{ .x = 3180, .y = 20 }, right.toImgEdge(.{ .x = -10, .y = 10 }));
+    // a selection spanning both shows on each buffer at the right place
+    const sel = Rect{ .x = 3000, .y = 100, .w = 400, .h = 200 };
+    try std.testing.expect(left.rectToBuf(sel).eql(.{ .x = 3000, .y = 100, .w = 400, .h = 200 }));
+    try std.testing.expect(right.rectToBuf(sel).eql(.{ .x = -100, .y = 50, .w = 200, .h = 100 }));
 }

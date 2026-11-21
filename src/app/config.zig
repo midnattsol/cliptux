@@ -593,6 +593,26 @@ test "saving merges: a stale snapshot never reverts other keys" {
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, data, "notify="));
 }
 
+test "forgetting the restore token asks again and survives a settings save" {
+    const alloc = std.testing.allocator;
+    const root = try testDir();
+    defer alloc.free(root);
+    defer sys.removeTree(root);
+    var dir_buf: [512]u8 = undefined;
+    const dir = try std.fmt.bufPrint(&dir_buf, "{s}/shotlet", .{root});
+    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "tok" }});
+    var settings = loadDir(alloc, dir);
+    try std.testing.expectEqualStrings("tok", settings.scToken().?);
+    // "Choose monitors again"
+    settings.setScToken("");
+    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "" }});
+    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(alloc, dir).scToken());
+    // a later save of the same window keeps it forgotten
+    settings.notify = !settings.notify;
+    try saveDir(alloc, dir, &settings);
+    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(alloc, dir).scToken());
+}
+
 test "merge keeps comments, replaces in place, drops duplicates" {
     const alloc = std.testing.allocator;
     const out = try mergeContent(alloc, "# c\nnotify=true\nx=1\nnotify=false\n", &.{

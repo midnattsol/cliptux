@@ -69,8 +69,9 @@ const keyboard = @import("keyboard.zig");
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64, surface: u8 = 0 },
     pointer_button: struct { button: u32, pressed: bool, x: f64, y: f64, surface: u8 = 0 },
-    /// vertical scroll, positive = down
-    pointer_axis: struct { value: f64, surface: u8 = 0 },
+    /// vertical scroll, positive = down. `value120`: exact wheel notches
+    /// (120 per notch, wl_pointer v8) when the device reports them
+    pointer_axis: struct { value: f64, value120: ?i32 = null, surface: u8 = 0 },
     key: Key,
     /// buffer was (re)created at this pixel size; caller must redraw.
     /// w == h == 0: the surface is gone (output unplugged)
@@ -314,6 +315,58 @@ const ClipboardImage = struct {
     }
 };
 
+/// A wl_data_offer and which plain-text types it carries (best first).
+const Offer = struct {
+    id: u32 = 0,
+    /// bit 0: text/plain;charset=utf-8, 1: UTF8_STRING, 2: text/plain
+    text: u3 = 0,
+};
+
+const text_mimes = [_][]const u8{ "text/plain;charset=utf-8", "UTF8_STRING", "text/plain" };
+
+/// Read `fd` until EOF, `max_bytes` or the deadline, whichever comes
+/// first; a cut never splits a UTF-8 sequence. Caller owns the bytes.
+pub fn readBounded(alloc: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, deadline_ms: i64) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    var buf: [4096]u8 = undefined;
+    while (out.items.len < max_bytes) {
+        if (!try sys.waitReadable(fd, deadline_ms)) break; // timed out
+        const n = try sys.read(fd, buf[0..@min(buf.len, max_bytes - out.items.len)]);
+        if (n == 0) break;
+        try out.appendSlice(alloc, buf[0..n]);
+    }
+    if (out.items.len == max_bytes) {
+        // drop a trailing partial character
+        var i = out.items.len;
+        while (i > 0 and (out.items[i - 1] & 0xC0) == 0x80) i -= 1;
+        if (i > 0 and out.items[i - 1] >= 0xC0) {
+            const need = std.unicode.utf8ByteSequenceLength(out.items[i - 1]) catch 1;
+            if (out.items.len - (i - 1) < need) out.shrinkRetainingCapacity(i - 1);
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+test "bounded reads stop at EOF, the size limit and the deadline" {
+    const alloc = std.testing.allocator;
+    const fds = try sys.pipe();
+    defer sys.close(fds[0]);
+    try sys.writeAll(fds[1], "ab\xc3\xb1cd"); // "abñcd"
+    // limit cuts inside "ñ": the partial character is dropped
+    const cut = try readBounded(alloc, fds[0], 3, sys.monoMs() + 1000);
+    defer alloc.free(cut);
+    try std.testing.expectEqualStrings("ab", cut);
+    // nothing more arrives and the writer stays open: the deadline ends it
+    const rest = try readBounded(alloc, fds[0], 100, sys.monoMs() + 50);
+    defer alloc.free(rest);
+    try std.testing.expectEqualStrings("\xb1cd", rest);
+    sys.close(fds[1]);
+    const eof = try readBounded(alloc, fds[0], 100, sys.monoMs() + 1000);
+    defer alloc.free(eof);
+    try std.testing.expectEqual(@as(usize, 0), eof.len);
+}
+
 pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
 
 pub const Window = struct {
@@ -346,6 +399,10 @@ pub const Window = struct {
     pointer: u32 = 0,
     keyboard: u32 = 0,
     data_device: u32 = 0,
+    /// data offers the compositor announced (selection or drag), with the
+    /// text types each one has; the selection is the clipboard's
+    offers: [4]Offer = @splat(.{}),
+    selection_offer: u32 = 0,
     clipboard_source: u32 = 0,
     clipboard_png: []u8 = &.{},
     clipboard_image: ?*ClipboardImage = null,
@@ -367,6 +424,10 @@ pub const Window = struct {
     ptr_y: f64 = 0,
     /// surface index under the pointer / with keyboard focus
     ptr_surface: u8 = 0,
+    /// vertical scroll gathered until the pointer frame
+    axis_value: f64 = 0,
+    axis_v120: ?i32 = null,
+    axis_pending: bool = false,
     key_surface: u8 = 0,
     ctrl: bool = false,
     shift: bool = false,
@@ -452,7 +513,9 @@ pub const Window = struct {
         } else if (eql(u8, iface, "xdg_wm_base")) {
             self.wm_base = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wl_seat") and self.seat == 0) {
-            self.seat_version = @min(version, 5);
+            // v8 adds axis_value120 (exact wheel notches); keymaps are
+            // already mapped MAP_PRIVATE as v7 requires
+            self.seat_version = @min(version, 8);
             self.seat = try self.conn.bind(self.registry, name, iface, self.seat_version);
         } else if (eql(u8, iface, "wl_data_device_manager")) {
             self.ddm = try self.conn.bind(self.registry, name, iface, 1);
@@ -1000,6 +1063,15 @@ pub const Window = struct {
             try self.handleOutput(slot, ev.opcode, &r);
         } else if (self.xdgOutputSlotOf(ev.object)) |slot| {
             try self.handleXdgOutput(slot, ev.opcode, &r);
+        } else if (ev.object != 0 and ev.object == self.data_device) {
+            try self.handleDataDevice(ev.opcode, &r);
+        } else if (self.offerSlot(ev.object)) |slot| {
+            if (ev.opcode == wl.wl_data_offer.ev_offer) {
+                const mime = try r.string();
+                for (text_mimes, 0..) |m, i| {
+                    if (std.mem.eql(u8, mime, m)) self.offers[slot].text |= @as(u3, 1) << @intCast(i);
+                }
+            }
         } else if (ev.object != 0 and ev.object == self.clipboard_source) {
             try self.handleClipboardSource(ev.opcode, &r);
         } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
@@ -1229,11 +1301,33 @@ pub const Window = struct {
                 const axis = try r.uint();
                 const value = try r.fixed();
                 if (axis == 0) { // vertical
-                    try self.queue.append(self.alloc, .{ .pointer_axis = .{ .value = value, .surface = self.ptr_surface } });
+                    self.axis_value += value;
+                    self.axis_pending = true;
+                    // before v5 there is no frame event to wait for
+                    if (self.seat_version < 5) try self.flushAxis();
                 }
             },
+            wl.wl_pointer.ev_axis_value120 => {
+                const axis = try r.uint();
+                const v120 = try r.int();
+                if (axis == 0) {
+                    self.axis_v120 = (self.axis_v120 orelse 0) + v120;
+                    self.axis_pending = true;
+                }
+            },
+            wl.wl_pointer.ev_frame => try self.flushAxis(),
             else => {},
         }
+    }
+
+    /// One scroll event per pointer frame, carrying both the smooth value
+    /// and the wheel's exact notches when it sent them.
+    fn flushAxis(self: *Window) !void {
+        if (!self.axis_pending) return;
+        try self.queue.append(self.alloc, .{ .pointer_axis = .{ .value = self.axis_value, .value120 = self.axis_v120, .surface = self.ptr_surface } });
+        self.axis_value = 0;
+        self.axis_v120 = null;
+        self.axis_pending = false;
     }
 
     fn pointerScale(self: *const Window) f64 {
@@ -1644,6 +1738,66 @@ pub const Window = struct {
             try self.handleEvent(ev);
             self.queue.clearRetainingCapacity();
         }
+    }
+
+    fn offerSlot(self: *const Window, id: u32) ?usize {
+        if (id == 0) return null;
+        for (self.offers, 0..) |o, i| if (o.id == id) return i;
+        return null;
+    }
+
+    fn dropOffer(self: *Window, slot: usize) void {
+        const id = self.offers[slot].id;
+        if (id == 0) return;
+        self.conn.request(id, wl.wl_data_offer.destroy, &.{}) catch {};
+        if (self.selection_offer == id) self.selection_offer = 0;
+        self.offers[slot] = .{};
+    }
+
+    fn handleDataDevice(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
+        switch (opcode) {
+            wl.wl_data_device.ev_data_offer => {
+                const id = try r.uint();
+                // a free slot, else the oldest offer that is not the selection
+                var slot: usize = 0;
+                for (self.offers, 0..) |o, i| {
+                    if (o.id == 0) {
+                        slot = i;
+                        break;
+                    }
+                    if (o.id != self.selection_offer) slot = i;
+                }
+                self.dropOffer(slot);
+                self.offers[slot] = .{ .id = id };
+            },
+            wl.wl_data_device.ev_selection => {
+                const id = try r.uint();
+                // the previous selection offer is dead once replaced
+                for (self.offers, 0..) |o, i| {
+                    if (o.id != 0 and o.id != id and o.id == self.selection_offer) self.dropOffer(i);
+                }
+                self.selection_offer = id;
+            },
+            else => {},
+        }
+    }
+
+    /// Plain text on the clipboard, or null when it holds none. Reads at
+    /// most `max_bytes` and gives up after `timeout_ms` so a stuck source
+    /// cannot freeze the UI. Caller owns the bytes.
+    pub fn clipboardText(self: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?[]u8 {
+        const slot = self.offerSlot(self.selection_offer) orelse return null;
+        const kinds = self.offers[slot].text;
+        if (kinds == 0) return null;
+        const mime = text_mimes[@ctz(kinds)];
+        const fds = try sys.pipe();
+        defer sys.close(fds[0]);
+        {
+            defer sys.close(fds[1]);
+            try self.conn.request(self.selection_offer, wl.wl_data_offer.receive, &.{ .{ .string = mime }, .{ .fd = fds[1] } });
+            try self.conn.flush(); // the fd travels with the flushed bytes
+        }
+        return try readBounded(alloc, fds[0], max_bytes, sys.monoMs() + timeout_ms);
     }
 
     fn handleClipboardSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {

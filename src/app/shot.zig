@@ -21,7 +21,15 @@ pub fn nowMs() i64 {
     return sys.monoMs();
 }
 
-pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel: ?[4]i32, smoke_ms: i64) !void {
+/// Dev sources that skip the portal.
+pub const From = struct {
+    /// one PNG as the whole capture
+    file: ?[]const u8 = null,
+    /// comma-separated PNGs, one per monitor, laid out left to right
+    monitors: ?[]const u8 = null,
+};
+
+pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
     const editor_mod = @import("../ui/editor.zig");
     const window = @import("../ui/window.zig");
     const t0 = nowMs();
@@ -47,14 +55,18 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 
     if (pw_thread) |t| t.join();
     const t_pw = nowMs();
-    var cap = (try acquire(gpa, env, &conn, &cfg, from_file)) orelse {
+    var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
         std.log.info("capture cancelled", .{});
         return;
     };
     defer cap.deinit(gpa);
     const t_capture = nowMs();
 
-    try win.open("Shotlet", .{ .fullscreen = true });
+    // one fullscreen surface per monitor when the layout is known
+    const per_monitor = cap.monitors.len > 1 and for (cap.monitors) |m| {
+        if (m.logical == null) break false;
+    } else true;
+    if (per_monitor) try win.openOutputs("Shotlet") else try win.open("Shotlet", .{ .fullscreen = true });
     const t_open = nowMs();
     std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
     std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
@@ -111,10 +123,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
-fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from_file: ?[]const u8) !?capture.Capture {
+fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
     const pw = @import("../platform/pw.zig");
 
-    if (from_file) |path| {
+    if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
+    if (from.file) |path| {
         const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
         defer gpa.free(data);
         var img = try png.decode(gpa, data);
@@ -441,4 +454,26 @@ test "saved names never overwrite" {
     const d = try writeUnique(gpa, dir, "l", ".png", "x");
     defer gpa.free(d);
     try std.testing.expect(std.mem.endsWith(u8, d, "/l-2.png"));
+}
+
+/// Dev: stitch one PNG per monitor, placed left to right in a logical
+/// layout of their pixel sizes (as monitors at scale 1 would be).
+fn fromMonitorFiles(gpa: std.mem.Allocator, list: []const u8) !capture.Capture {
+    var imgs: [8]png.Image = undefined;
+    var parts: [8]capture.Part = undefined;
+    var n: usize = 0;
+    defer for (imgs[0..n]) |*im| im.deinit(gpa);
+    var x: i32 = 0;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |path| {
+        if (n == imgs.len) return error.TooManyMonitors;
+        const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
+        defer gpa.free(data);
+        imgs[n] = try png.decode(gpa, data);
+        const im = &imgs[n];
+        parts[n] = .{ .pixels = im.pixels, .width = im.width, .height = im.height, .logical = .{ .x = x, .y = 0, .w = im.width, .h = im.height } };
+        x += @intCast(im.width);
+        n += 1;
+    }
+    return capture.stitch(gpa, parts[0..n]);
 }

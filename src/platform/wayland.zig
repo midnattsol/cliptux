@@ -82,6 +82,7 @@ pub const wl_pointer = struct {
     pub const ev_button = 3;
     pub const ev_axis = 4;
     pub const ev_frame = 5;
+    pub const ev_axis_value120 = 9; // since v8
 };
 
 pub const wl_keyboard = struct {
@@ -207,6 +208,12 @@ pub const wl_data_device = struct {
     pub const set_selection = 1;
     pub const ev_data_offer = 0;
     pub const ev_selection = 5;
+};
+
+pub const wl_data_offer = struct {
+    pub const receive = 1;
+    pub const destroy = 2;
+    pub const ev_offer = 0;
 };
 
 // --- marshaling helper types ---
