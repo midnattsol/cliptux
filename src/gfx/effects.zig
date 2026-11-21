@@ -59,7 +59,7 @@ pub fn blur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, ra
     const c = clip(r, w, h) orelse return;
     if (radius == 0) return;
     try boxBlur(alloc, pixels, w, h, c, @min(radius, max_blur_radius));
-    if (radius >= 3) addNoise(pixels, w, c);
+    if (radius >= 3) addNoise(pixels, w, c, r);
 }
 
 fn boxBlur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, c: Rect, rad: usize) !void {
@@ -167,25 +167,26 @@ fn noiseKey() u32 {
     return noise_key;
 }
 
-fn addNoise(pixels: []u32, w: u32, c: Rect) void {
+fn addNoise(pixels: []u32, w: u32, c: Rect, r: Rect) void {
     const key = noiseKey();
     const V = @Vector(4, u8);
     var y: u32 = @intCast(c.y);
     while (y < @as(u32, @intCast(c.y + c.h))) : (y += 1) {
-        // xorshift stream per row, seeded from (key, y, x0) by murmur3's
-        // finalizer, so a given rectangle always gets the same noise
-        var st: u32 = y *% 0x9E3779B1 ^ @as(u32, @intCast(c.x)) *% 0x85EBCA77 ^ key;
-        st ^= st >> 16;
-        st *%= 0x85EBCA6B;
-        st ^= st >> 13;
-        st *%= 0xC2B2AE35;
-        st ^= st >> 16;
-        st |= 1;
         const row = pixels[@as(usize, y) * w + @as(usize, @intCast(c.x)) ..][0..@intCast(c.w)];
+        var x: u32 = @intCast(c.x);
         for (row) |*p| {
-            st ^= st << 13;
-            st ^= st >> 17;
-            st ^= st << 5;
+            // a hash of the position inside the (unclipped) blur rectangle,
+            // so repainting part of a blur, or the same blur on a buffer
+            // shifted by any offset, gives the same noise as painting it all
+            const ux: u32 = @bitCast(@as(i32, @intCast(x)) -% r.x);
+            const uy: u32 = @bitCast(@as(i32, @intCast(y)) -% r.y);
+            var st: u32 = uy *% 0x9E3779B1 ^ ux *% 0x85EBCA77 ^ key;
+            st ^= st >> 16;
+            st *%= 0x85EBCA6B;
+            st ^= st >> 13;
+            st *%= 0xC2B2AE35;
+            st ^= st >> 16;
+            x += 1;
             // per colour byte: (0..3) - (0..3), alpha untouched
             const plus: V = @bitCast(st & 0x00030303);
             const minus: V = @bitCast((st >> 2) & 0x00030303);
