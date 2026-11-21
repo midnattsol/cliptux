@@ -222,4 +222,5 @@ test {
     _ = @import("ui/motion.zig");
     _ = @import("ui/icons.zig");
     _ = @import("gfx/path.zig");
+    _ = @import("record/tests.zig");
 }
