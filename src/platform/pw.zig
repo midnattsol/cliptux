@@ -16,14 +16,14 @@ const SPA_TYPE_Fraction: u32 = 11;
 
 const SPA_TYPE_OBJECT_Format: u32 = 0x40003;
 const SPA_PARAM_EnumFormat: u32 = 3;
-const SPA_PARAM_Format: u32 = 4;
+pub const SPA_PARAM_Format: u32 = 4;
 const SPA_PARAM_Meta: u32 = 6;
 const SPA_TYPE_OBJECT_ParamMeta: u32 = 0x40005;
 const SPA_PARAM_META_type: u32 = 1;
 const SPA_PARAM_META_size: u32 = 2;
 const SPA_META_VideoCrop: u32 = 2;
 
-const SPA_CHUNK_FLAG_CORRUPTED: i32 = 1 << 0;
+pub const SPA_CHUNK_FLAG_CORRUPTED: i32 = 1 << 0;
 
 const SPA_FORMAT_mediaType: u32 = 1;
 const SPA_FORMAT_mediaSubtype: u32 = 2;
@@ -45,11 +45,11 @@ pub const VideoFormat = enum(u32) {
     _,
 };
 
-const PW_DIRECTION_INPUT: c_uint = 0;
-const PW_STREAM_FLAG_AUTOCONNECT: c_uint = 1 << 0;
-const PW_STREAM_FLAG_MAP_BUFFERS: c_uint = 1 << 2;
+pub const PW_DIRECTION_INPUT: c_uint = 0;
+pub const PW_STREAM_FLAG_AUTOCONNECT: c_uint = 1 << 0;
+pub const PW_STREAM_FLAG_MAP_BUFFERS: c_uint = 1 << 2;
 
-const PW_STREAM_STATE_ERROR: c_int = -1;
+pub const PW_STREAM_STATE_ERROR: c_int = -1;
 
 // --- C struct mirrors (stable ABI) ---
 const SpaChunk = extern struct {
@@ -76,21 +76,21 @@ const SpaMeta = extern struct {
 };
 
 /// spa_meta_region: a spa_region (position + size)
-const SpaMetaRegion = extern struct {
+pub const SpaMetaRegion = extern struct {
     x: i32,
     y: i32,
     width: u32,
     height: u32,
 };
 
-const SpaBuffer = extern struct {
+pub const SpaBuffer = extern struct {
     n_metas: u32,
     n_datas: u32,
     metas: ?[*]SpaMeta,
     datas: ?[*]SpaData,
 };
 
-const PwBuffer = extern struct {
+pub const PwBuffer = extern struct {
     buffer: ?*SpaBuffer,
     user_data: ?*anyopaque,
     size: u64,
@@ -98,7 +98,7 @@ const PwBuffer = extern struct {
     time: u64,
 };
 
-const SpaHook = extern struct {
+pub const SpaHook = extern struct {
     link_prev: ?*anyopaque = null,
     link_next: ?*anyopaque = null,
     funcs: ?*const anyopaque = null,
@@ -107,7 +107,7 @@ const SpaHook = extern struct {
     priv: ?*anyopaque = null,
 };
 
-const StreamEvents = extern struct {
+pub const StreamEvents = extern struct {
     version: u32 = 2,
     destroy: ?*const fn (?*anyopaque) callconv(.c) void = null,
     state_changed: ?*const fn (?*anyopaque, c_int, c_int, ?[*:0]const u8) callconv(.c) void = null,
@@ -123,7 +123,7 @@ const StreamEvents = extern struct {
 };
 
 // --- dynamic API surface ---
-const Api = struct {
+pub const Api = struct {
     init: *const fn (?*c_int, ?*anyopaque) callconv(.c) void,
     thread_loop_new: *const fn ([*:0]const u8, ?*const anyopaque) callconv(.c) ?*anyopaque,
     thread_loop_destroy: *const fn (?*anyopaque) callconv(.c) void,
@@ -146,14 +146,10 @@ const Api = struct {
     stream_dequeue_buffer: *const fn (?*anyopaque) callconv(.c) ?*PwBuffer,
     stream_queue_buffer: *const fn (?*anyopaque, *PwBuffer) callconv(.c) c_int,
     stream_update_params: *const fn (?*anyopaque, [*]const [*]const u8, u32) callconv(.c) c_int,
-    // continuous capture (pwstream.zig)
-    context_connect: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
-    properties_new_string: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
-    stream_set_active: *const fn (?*anyopaque, bool) callconv(.c) c_int,
 };
 
-var lib: ?std.DynLib = null;
-var api: Api = undefined;
+pub var lib: ?std.DynLib = null;
+pub var api: Api = undefined;
 var initialized = false;
 
 /// Try to load libpipewire. Returns false (and logs once) when unavailable.
@@ -189,7 +185,7 @@ fn loadApi(l: *std.DynLib) ?Api {
 // --- pods ---
 
 /// Little-endian u32 writer for hand-built SPA pods; refuses to overflow.
-const PodWriter = struct {
+pub const PodWriter = struct {
     buf: []u8,
     pos: usize = 0,
     overflow: bool = false,
@@ -212,7 +208,7 @@ const PodWriter = struct {
 };
 
 /// Build the EnumFormat pod: raw video in BGRA/BGRx/RGBA/RGBx at any size.
-fn buildFormatPod(buf: []u8) ?[]const u8 {
+pub fn buildFormatPod(buf: []u8) ?[]const u8 {
     var w = PodWriter{ .buf = buf };
     w.put(0); // body size, patched by finish
     w.put(SPA_TYPE_Object);
@@ -287,7 +283,7 @@ fn buildFormatPod(buf: []u8) ?[]const u8 {
 }
 
 /// Build a Meta param asking the producer to attach VideoCrop regions.
-fn buildCropMetaPod(buf: []u8) ?[]const u8 {
+pub fn buildCropMetaPod(buf: []u8) ?[]const u8 {
     var w = PodWriter{ .buf = buf };
     w.put(0);
     w.put(SPA_TYPE_Object);
@@ -313,7 +309,7 @@ fn buildCropMetaPod(buf: []u8) ?[]const u8 {
 
 /// Walk an object pod and call `visit(key, value_type, value_bytes)` for
 /// each property, unwrapping fixated Choice values. Bounds-checked.
-fn forEachProp(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
+pub fn forEachProp(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
     if (pod.len < 16) return;
     const body_size = std.mem.readInt(u32, pod[0..4], .little);
     const pod_type = std.mem.readInt(u32, pod[4..8], .little);
@@ -353,7 +349,7 @@ pub const Frame = struct {
     }
 };
 
-const Ctx = struct {
+pub const Ctx = struct {
     loop: ?*anyopaque = null,
     stream: ?*anyopaque = null,
     width: u32 = 0,
@@ -367,7 +363,7 @@ const Ctx = struct {
     failed: bool = false,
 };
 
-fn visitFormat(ctx: *Ctx, key: u32, vt: u32, val: []const u8) void {
+pub fn visitFormat(ctx: *Ctx, key: u32, vt: u32, val: []const u8) void {
     if (key == SPA_FORMAT_VIDEO_format and vt == SPA_TYPE_Id and val.len >= 4) {
         ctx.format = std.mem.readInt(u32, val[0..4], .little);
     } else if (key == SPA_FORMAT_VIDEO_size and vt == SPA_TYPE_Rectangle and val.len >= 8) {
@@ -407,7 +403,7 @@ fn onStateChanged(data: ?*anyopaque, old: c_int, new: c_int, msg: ?[*:0]const u8
 
 /// The valid area of a buffer: its VideoCrop region when the producer
 /// attached a sensible one, else the whole negotiated frame.
-fn cropRegion(sb: *const SpaBuffer, width: u32, height: u32) SpaMetaRegion {
+pub fn cropRegion(sb: *const SpaBuffer, width: u32, height: u32) SpaMetaRegion {
     const full = SpaMetaRegion{ .x = 0, .y = 0, .width = width, .height = height };
     const metas = sb.metas orelse return full;
     for (metas[0..sb.n_metas]) |m| {
@@ -530,7 +526,7 @@ pub fn discard(pre: *Pre) void {
     teardown(pre, &.{});
 }
 
-fn teardown(pre: *Pre, streams: []const ?*anyopaque) void {
+pub fn teardown(pre: *Pre, streams: []const ?*anyopaque) void {
     if (pre.loop != null) api.thread_loop_stop(pre.loop);
     for (streams) |s| if (s != null) api.stream_destroy(s);
     if (pre.core != null) _ = api.core_disconnect(pre.core);
@@ -734,50 +730,5 @@ test "truncated or garbage pods are walked safely" {
         prng.random().bytes(&junk);
         std.mem.writeInt(u32, junk[4..8], SPA_TYPE_Object, .little);
         forEachProp(&junk, &ctx, visitFormat);
-    }
-}
-
-/// The ABI mirrors and helpers above, for the recorder's continuous
-/// streams (pwstream.zig).
-pub const abi = struct {
-    pub const SpaHook_ = SpaHook;
-    pub const StreamEvents_ = StreamEvents;
-    pub const PwBuffer_ = PwBuffer;
-    pub const SpaBuffer_ = SpaBuffer;
-    pub const SpaMetaRegion_ = SpaMetaRegion;
-    pub const PodWriter_ = PodWriter;
-    pub const flag_autoconnect = PW_STREAM_FLAG_AUTOCONNECT;
-    pub const flag_map_buffers = PW_STREAM_FLAG_MAP_BUFFERS;
-    pub const direction_input = PW_DIRECTION_INPUT;
-    pub const state_error = PW_STREAM_STATE_ERROR;
-    pub const param_format = SPA_PARAM_Format;
-    pub const chunk_corrupted = SPA_CHUNK_FLAG_CORRUPTED;
-    pub const buildVideoFormatPod = buildFormatPod;
-    pub const buildCropMeta = buildCropMetaPod;
-    pub const crop = cropRegion;
-    pub const visitVideoFormat = visitFormatInto;
-
-    pub fn lib() *const Api {
-        return &api;
-    }
-
-    pub fn props(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
-        forEachProp(pod, ctx, visit);
-    }
-
-    /// Release a connection (and its streams).
-    pub fn teardownPre(pre: *Pre, streams: []const ?*anyopaque) void {
-        teardown(pre, streams);
-    }
-};
-
-/// The negotiated video format and size, out of a Format pod.
-fn visitFormatInto(out: *[3]u32, key: u32, vt: u32, val: []const u8) void {
-    var c: Ctx = .{};
-    visitFormat(&c, key, vt, val);
-    if (c.format != 0) out[0] = c.format;
-    if (c.width != 0) {
-        out[1] = c.width;
-        out[2] = c.height;
     }
 }

@@ -8,7 +8,63 @@
 const std = @import("std");
 const pw = @import("pw.zig");
 const sys = @import("sys.zig");
-const abi = pw.abi;
+
+/// What pwstream uses of pw.zig, and three functions it loads itself.
+const abi = struct {
+    const SpaHook_ = pw.SpaHook;
+    const StreamEvents_ = pw.StreamEvents;
+    const PodWriter_ = pw.PodWriter;
+    const flag_autoconnect = pw.PW_STREAM_FLAG_AUTOCONNECT;
+    const flag_map_buffers = pw.PW_STREAM_FLAG_MAP_BUFFERS;
+    const direction_input = pw.PW_DIRECTION_INPUT;
+    const state_error = pw.PW_STREAM_STATE_ERROR;
+    const param_format = pw.SPA_PARAM_Format;
+    const chunk_corrupted = pw.SPA_CHUNK_FLAG_CORRUPTED;
+    const buildVideoFormatPod = pw.buildFormatPod;
+    const buildCropMeta = pw.buildCropMetaPod;
+    const crop = pw.cropRegion;
+
+    fn lib() *const pw.Api {
+        return &pw.api;
+    }
+
+    fn props(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
+        pw.forEachProp(pod, ctx, visit);
+    }
+
+    fn teardownPre(pre: *pw.Pre, streams: []const ?*anyopaque) void {
+        pw.teardown(pre, streams);
+    }
+
+    /// The negotiated video format and size, out of a Format pod.
+    fn visitVideoFormat(out: *[3]u32, key: u32, vt: u32, val: []const u8) void {
+        var c: pw.Ctx = .{};
+        pw.visitFormat(&c, key, vt, val);
+        if (c.format != 0) out[0] = c.format;
+        if (c.width != 0) {
+            out[1] = c.width;
+            out[2] = c.height;
+        }
+    }
+};
+
+const Extra = struct {
+    pw_context_connect: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
+    pw_properties_new_string: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
+};
+var extra: ?Extra = null;
+
+fn extraApi() !*const Extra {
+    if (extra == null) {
+        if (!pw.available()) return error.PipeWireUnavailable;
+        const l = &pw.lib.?;
+        extra = .{
+            .pw_context_connect = l.lookup(@FieldType(Extra, "pw_context_connect"), "pw_context_connect") orelse return error.PwSymbols,
+            .pw_properties_new_string = l.lookup(@FieldType(Extra, "pw_properties_new_string"), "pw_properties_new_string") orelse return error.PwSymbols,
+        };
+    }
+    return &extra.?;
+}
 
 pub const VideoFormat = pw.VideoFormat;
 
@@ -108,9 +164,10 @@ pub const Capture = struct {
 
     fn connect(self: *Capture, slot: *Slot, name: [*:0]const u8, props: ?[*:0]const u8, target: u32, pod: []const u8) !void {
         const api = abi.lib();
+        const ex = try extraApi();
         api.thread_loop_lock(self.pre.loop);
         defer api.thread_loop_unlock(self.pre.loop);
-        const p = if (props) |s| api.properties_new_string(s) else null;
+        const p = if (props) |s| ex.pw_properties_new_string(s) else null;
         slot.stream = api.stream_new(self.pre.core, name, p) orelse return error.PwStream;
         self.n += 1;
         api.stream_add_listener(slot.stream, &slot.hook, &events, slot);
@@ -127,7 +184,7 @@ const events: abi.StreamEvents_ = .{
 };
 
 fn connectDefault() !pw.Pre {
-    if (!pw.available()) return error.PipeWireUnavailable;
+    const ex = try extraApi();
     const api = abi.lib();
     var pre: pw.Pre = .{};
     pre.loop = api.thread_loop_new("shotlet-rec", null) orelse return error.PwLoop;
@@ -137,7 +194,7 @@ fn connectDefault() !pw.Pre {
     }
     api.thread_loop_lock(pre.loop);
     pre.context = api.context_new(api.thread_loop_get_loop(pre.loop), null, 0);
-    if (pre.context != null) pre.core = api.context_connect(pre.context, null, 0);
+    if (pre.context != null) pre.core = ex.pw_context_connect(pre.context, null, 0);
     api.thread_loop_unlock(pre.loop);
     if (pre.core == null) {
         abi.teardownPre(&pre, &.{});
