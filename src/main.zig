@@ -254,6 +254,7 @@ test "default bus address escapes the runtime dir" {
 
 test {
     _ = @import("platform/dbus.zig");
+    _ = @import("platform/permstore.zig");
     _ = @import("platform/portal.zig");
     _ = @import("platform/pw.zig");
     _ = @import("platform/portal_test.zig");
