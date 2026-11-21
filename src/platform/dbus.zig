@@ -944,7 +944,7 @@ pub const Connection = struct {
             if (msg.reply_serial == serial) {
                 if (msg.type == .@"error") {
                     const name = msg.error_name orelse "unknown";
-                    std.log.err("dbus error: {s}", .{name});
+                    std.log.warn("dbus error reply: {s}", .{name});
                     msg.deinit(self.alloc);
                     return error.DBusError;
                 }
