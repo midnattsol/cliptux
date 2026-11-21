@@ -68,6 +68,10 @@ pub const ButtonKind = union(enum) {
     more,
     help,
     cancel,
+    // other capture modes (app/modes/): the editor closes and they start
+    capture_window,
+    capture_scroll,
+    capture_timer,
 };
 
 /// Which floating surface a control sits on.
@@ -138,7 +142,7 @@ pub fn nameLayer(name: []const u8) ?Layer {
     for (shapes_mod.palette_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     inline for (@typeInfo(Seg).@"enum".field_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "custom_color", "thickness" }) |n| if (std.mem.eql(u8, n, name)) return .popover;
-    for ([_][]const u8{ "save_as", "help", "cancel", "beautify" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
+    for ([_][]const u8{ "save_as", "help", "cancel", "beautify", "capture_window", "capture_scroll", "capture_timer" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
     return null;
 }
 
@@ -195,6 +199,9 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
         .more => .{ "More", null, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
+        .capture_window => .{ "Capture window", null, "" },
+        .capture_scroll => .{ "Scrolling capture", null, "" },
+        .capture_timer => .{ "Timer\u{2026}", null, "" },
     };
     const key = if (action) |a| config.bindName(self.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = name, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
@@ -482,7 +489,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
     return n;
 }
 
-const menu_items = [_]ButtonKind{ .beautify, .save_as, .help, .cancel };
+const menu_items = [_]ButtonKind{ .beautify, .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel };
 
 fn layoutPopover(self: *Editor) !void {
     const f = self.uf();
@@ -1274,6 +1281,9 @@ fn kindIcon(self: *const Editor, kind: ButtonKind) ?Icon {
         .padding => .padding,
         .corners => .corners,
         .shadow => .shadow,
+        .capture_window => .capture_window,
+        .capture_scroll => .capture_scroll,
+        .capture_timer => .timer,
         else => null,
     };
 }

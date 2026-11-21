@@ -56,6 +56,10 @@ pub const Icon = enum {
     plus,
     search,
     trash,
+    // capture modes
+    capture_window,
+    capture_scroll,
+    timer,
 };
 
 /// Path data, 24x24 units. The first block is the "Glass" mockup's set.
@@ -97,6 +101,9 @@ pub fn data(icon: Icon) []const u8 {
         .width_fit => "M4 12h16M7.5 8.5L4 12l3.5 3.5M16.5 8.5L20 12l-3.5 3.5",
         .width_fixed => "M4 6h12M4 11h12M4 16h8M20 4v16",
         .trash => "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+        .capture_window => "M3 5h18v14H3zM3 9h18",
+        .capture_scroll => "M7 3h10v18H7zM12 8v8M9 13l3 3 3-3",
+        .timer => "M12 6c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8zM12 10v4l2.5 1.5M10 2h4",
     };
 }
 

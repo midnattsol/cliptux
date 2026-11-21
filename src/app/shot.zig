@@ -187,10 +187,15 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
         if (reopen == null) rememberEditorPrefs(gpa, env, cfg, &ed);
         defer if (result.png_data) |d| gpa.free(d);
         const replace: ?keep_mod.Kept = if (reopen) |r| r.kept else null;
-        if (reopen == null and result.action != .cancel) if (ed.doc.sel) |r|
+        if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
             last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
 
         switch (result.action) {
+            .new_capture => {
+                // the More menu's other capture modes: a fresh shotlet
+                win.closeWindow();
+                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
+            },
             .cancel, .copied => {
                 win.closeWindow();
                 ed.releaseCaches(); // serving may outlive the session; drop ~140MB

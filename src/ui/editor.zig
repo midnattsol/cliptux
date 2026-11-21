@@ -43,6 +43,8 @@ pub const Action = enum {
     save,
     /// save to a path the user picks (the caller shows the dialog)
     save_as,
+    /// close and start another capture: `next_capture` names the command
+    new_capture,
 };
 
 pub const CopyNotice = enum { none, copying, copied, failed };
@@ -309,6 +311,8 @@ pub const Editor = struct {
     keep_alpha: bool = false,
     /// how far a tall image is scrolled (ui/tall_view.zig), buffer pixels
     tall_scroll: i32 = 0,
+    /// the capture mode to start after .new_capture (a shotlet command)
+    next_capture: [:0]const u8 = "",
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -1728,6 +1732,15 @@ pub const Editor = struct {
             .save_as => {
                 self.closePopover();
                 self.finish(.save_as);
+            },
+            .capture_window, .capture_scroll, .capture_timer => {
+                self.closePopover();
+                self.next_capture = switch (kind) {
+                    .capture_window => "window",
+                    .capture_scroll => "scroll",
+                    else => "timer",
+                };
+                self.finish(.new_capture);
             },
             .help => {
                 self.closePopover();
