@@ -5,6 +5,7 @@ const devtools = @import("app/devtools.zig");
 const shellcap = @import("app/shellcap.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
+const launch = @import("ui/tools/launch.zig");
 
 const usage =
     \\Shotlet - Wayland-native screenshot tool with annotation editor
@@ -17,8 +18,11 @@ const usage =
     \\                      scrolling capture; --delay: the self-timer
     \\  shotlet timer [3|5|10]   area capture after a countdown
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
+    \\  shotlet text        capture text: select a region, its text (OCR)
+    \\                      goes to the clipboard
+    \\  shotlet edit FILE   open a PNG, JPEG or WebP in the editor
     \\  shotlet history     recent captures (history clear: forget them)
-    \\  shotlet pin FILE    pin a PNG to the screen
+    \\  shotlet pin [FILE]  pin an image (default: the clipboard's) to the screen
     \\  shotlet gnome-integration [status|install|uninstall]
     \\                      the GNOME Shell extension: prompt-free captures,
     \\                      floating windows
@@ -55,6 +59,7 @@ pub fn main(init: std.process.Init) !void {
         .envp = init.minimal.environ.block.slice.ptr,
         .tz = vars.get("TZ"),
     };
+    launch.env = env;
     env_mod.xdg = .{
         .config_home = env_mod.absolute(vars.get("XDG_CONFIG_HOME")),
         .state_home = env_mod.absolute(vars.get("XDG_STATE_HOME")),
@@ -66,8 +71,11 @@ pub fn main(init: std.process.Init) !void {
     // starts a capture: `shotlet shot --from-shell ID ...`
     const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
     const cmd = if (shell_launch) "shot" else if (args.len > 1) args[1] else "shot";
+    if (shell_launch) launch.takeHandOff(env.runtime_dir);
+    // `shotlet text` is a capture whose region's text is copied
+    if (std.mem.eql(u8, cmd, "text")) launch.text_capture = true;
 
-    if (std.mem.eql(u8, cmd, "shot")) {
+    if (std.mem.eql(u8, cmd, "shot") or std.mem.eql(u8, cmd, "text")) {
         // dev/testing flags: --from FILE (skip portal), --sel X,Y,W,H
         // (preset selection), --smoke MS (auto-cancel, for leak runs),
         // --from-monitors A.png,B.png (one image per monitor, side by side)
@@ -140,12 +148,16 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("app/history_ui.zig").run(gpa, env, smoke);
-    } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {
-        try @import("app/pin.zig").run(gpa, env, args[2]);
+    } else if (std.mem.eql(u8, cmd, "pin")) {
+        if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
     } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
+    } else if (std.mem.eql(u8, cmd, "toast") and args.len > 2) {
+        try @import("app/toastwin.zig").run(gpa, env, args[2], if (args.len > 3) args[3] else "");
+    } else if (std.mem.eql(u8, cmd, "edit") and args.len == 3) {
+        try @import("app/editfile.zig").run(gpa, env, args[2]);
     } else if (try @import("app/modes/cli.zig").run(gpa, env, cmd, args[2..])) {
         // a capture mode
     } else if (try devtools.run(gpa, env, cmd, args)) {
@@ -213,13 +225,31 @@ test {
     _ = @import("app/scroll/capture.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
+    _ = @import("app/clipimg.zig");
+    _ = @import("app/binds.zig");
+    _ = @import("app/quick_ipc.zig");
+    _ = @import("app/editor_prefs.zig");
+    _ = @import("ui/beautify.zig");
+    _ = @import("ui/drag.zig");
+    _ = @import("ui/help.zig");
+    _ = @import("ui/rect_list.zig");
+    _ = @import("ui/caret.zig");
+    _ = @import("ui/scroll_steps.zig");
+    _ = @import("ui/transfer.zig");
+    _ = @import("app/editfile.zig");
+    _ = @import("app/toastwin.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
+    _ = @import("ocr/page.zig");
+    _ = @import("ocr/reflow.zig");
+    _ = @import("redact/detect.zig");
+    _ = @import("redact/locate.zig");
     _ = @import("ui/floatui.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
     _ = @import("ui/textbox.zig");
     _ = @import("ui/shapes.zig");
+    _ = @import("ui/tools/mod.zig");
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");
@@ -228,6 +258,9 @@ test {
     _ = @import("ui/hsv.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
+    _ = @import("gfx/jpeg.zig");
+    _ = @import("gfx/imgload.zig");
+    _ = @import("gfx/codec_libs.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");

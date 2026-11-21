@@ -18,6 +18,8 @@ const editor_mod = @import("editor.zig");
 const theme = @import("theme.zig");
 const motion = @import("motion.zig");
 const icons = @import("icons.zig");
+const tools = @import("tools/mod.zig");
+const tui = @import("tools/tui.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -41,6 +43,14 @@ pub const Seg = enum {
     mode_solid,
     width_fit,
     width_fixed,
+    // spotlight and ruler (tools/mod.zig)
+    spot_rect,
+    spot_ellipse,
+    dim_light,
+    dim_medium,
+    dim_strong,
+    measure_show,
+    measure_hide,
 };
 
 pub const ButtonKind = union(enum) {
@@ -69,6 +79,8 @@ pub const ButtonKind = union(enum) {
     more,
     help,
     cancel,
+    /// the extra tools' controls (tools/mod.zig)
+    ext: tools.Ext,
     // other capture modes (app/modes/): the editor closes and they start
     capture_window,
     capture_scroll,
@@ -125,14 +137,15 @@ pub const Backdrop = struct {
 pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice };
 pub const n_slots = @typeInfo(Slot).@"enum".field_names.len;
 
-/// The ten tool buttons; Blur stands for blur, pixelate and solid.
-pub const tool_list = [_]Tool{ .select, .pen, .arrow, .rect, .ellipse, .line, .highlight, .blur, .counter, .text };
+/// The tool buttons; Blur stands for blur, pixelate and solid.
+pub const tool_list = [_]Tool{ .select, .pen, .arrow, .rect, .ellipse, .line, .highlight, .blur, .spotlight, .counter, .text, .ruler };
 
 pub fn buttonName(kind: ButtonKind) []const u8 {
     return switch (kind) {
         .tool => |t| @tagName(t),
         .color => |c| shapes_mod.palette_names[c],
         .seg => |s| @tagName(s),
+        .ext => |e| tui.name(e),
         else => @tagName(kind),
     };
 }
@@ -144,10 +157,10 @@ pub fn nameLayer(name: []const u8) ?Layer {
     inline for (@typeInfo(Seg).@"enum".field_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "custom_color", "thickness" }) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "save_as", "help", "cancel", "beautify", "capture_window", "capture_scroll", "capture_timer" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
-    return null;
+    return tui.nameLayer(name);
 }
 
-const Label = struct { name: []const u8, key: []const u8 = "" };
+pub const Label = struct { name: []const u8, key: []const u8 = "" };
 
 /// A control's name and its shortcut, for tooltips and menu rows.
 fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
@@ -163,6 +176,8 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
             .blur, .pixelate, .redact => .{ "Blur, pixelate, redact", .pixelate, "" },
             .counter => .{ "Counter", .counter, "" },
             .text => .{ "Text", .text, "" },
+            .spotlight => .{ "Spotlight", .spotlight, "" },
+            .ruler => .{ "Ruler", .ruler, "" },
         },
         .color => |c| return .{ .name = shapes_mod.palette_labels[c], .key = if (c < 8) (std.fmt.bufPrint(kb, "{d}", .{@as(u8, c) + 1}) catch "") else "" },
         .custom_color => .{ "Custom colour", null, "9" },
@@ -179,6 +194,7 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
             .mode_solid => "Solid",
             .width_fit => "Fit text",
             .width_fixed => "Wrap",
+            else => tools.segLabel(s),
         }, null, "" },
         .style => .{ "Fill / rounded / text background", .style, "" },
         .text_width => .{ "Text width", null, "Alt+W" },
@@ -200,6 +216,7 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
         .more => .{ "More", null, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
+        .ext => |e| return tui.label(self, e, kb),
         .capture_window => .{ "Capture window", null, "" },
         .capture_scroll => .{ "Scrolling capture", null, "" },
         .capture_timer => .{ "Timer\u{2026}", null, "" },
@@ -221,7 +238,7 @@ fn ff(v: i32) f64 {
 
 // --- layout ---
 
-const Item = struct { kind: ButtonKind, w: i32, group: u8 };
+pub const Item = struct { kind: ButtonKind, w: i32, group: u8 };
 
 fn copyButtonWidth(self: *const Editor) i32 {
     return self.sc(10) + self.sc(16) + self.sc(6) + text_mod.widthStyled(theme.font_label * self.uf(), .bold, "Copy") + self.sc(14);
@@ -280,7 +297,7 @@ pub fn layoutToolbar(self: *Editor) !void {
         .none, .picking, .size_slider => false,
         else => true,
     };
-    if (sel_b == null or dragging) {
+    if (sel_b == null or dragging or tui.hideBar(self)) {
         self.toolbar_rect = Rect.empty;
         self.panel_rect = Rect.empty;
         self.popover = .none;
@@ -296,23 +313,7 @@ pub fn layoutToolbar(self: *Editor) !void {
     const margin = self.sc(8);
 
     var items: [24]Item = undefined;
-    var n: usize = 0;
-    for (tool_list) |t| {
-        items[n] = .{ .kind = .{ .tool = t }, .w = btn, .group = 0 };
-        n += 1;
-    }
-    items[n] = .{ .kind = .colors, .w = self.sc(8 + 18 + 8 + 12 + 8), .group = 1 };
-    n += 1;
-    for ([_]ButtonKind{ .undo, .redo }) |k| {
-        items[n] = .{ .kind = k, .w = btn, .group = 2 };
-        n += 1;
-    }
-    for ([_]ButtonKind{ .save, .more }) |k| {
-        items[n] = .{ .kind = k, .w = btn, .group = 3 };
-        n += 1;
-    }
-    items[n] = .{ .kind = .copy, .w = copyButtonWidth(self) + self.sc(2), .group = 3 };
-    n += 1;
+    const n = tui.barItems(self, &items) orelse mainItems(self, &items);
 
     var xs: [24]i32 = undefined;
     var rows: [24]u8 = undefined;
@@ -368,8 +369,10 @@ pub fn layoutToolbar(self: *Editor) !void {
     }
     // the copy button sits 2 px apart from More
     const cb = &self.buttons.items[self.buttons.items.len - 1];
-    cb.rect.x += self.sc(2);
-    cb.rect.w -= self.sc(2);
+    if (cb.kind == .copy) {
+        cb.rect.x += self.sc(2);
+        cb.rect.w -= self.sc(2);
+    }
     for (seps[0..fl.n_seps]) |sp| {
         if (self.n_seps == self.seps.len) break;
         const sy = ay + pad + sp[1] * (btn + gap) + @divTrunc(btn - self.sc(theme.sep_h), 2);
@@ -416,6 +419,31 @@ pub fn layoutToolbar(self: *Editor) !void {
     if (self.focus) |f| {
         if (f >= self.buttons.items.len) self.focus = if (self.buttons.items.len > 0) self.buttons.items.len - 1 else null;
     }
+}
+
+/// The toolbar's usual controls: tools, colour and size, undo and redo,
+/// save, More and Copy.
+fn mainItems(self: *const Editor, items: *[24]Item) usize {
+    const btn = self.sc(theme.button);
+    var n: usize = 0;
+    for (tool_list) |t| {
+        items[n] = .{ .kind = .{ .tool = t }, .w = btn, .group = 0 };
+        n += 1;
+    }
+    n = tui.barTools(self, items, n);
+    items[n] = .{ .kind = .colors, .w = self.sc(8 + 18 + 8 + 12 + 8), .group = 1 };
+    n += 1;
+    for ([_]ButtonKind{ .undo, .redo }) |k| {
+        items[n] = .{ .kind = k, .w = btn, .group = 2 };
+        n += 1;
+    }
+    for ([_]ButtonKind{ .save, .more }) |k| {
+        items[n] = .{ .kind = k, .w = btn, .group = 3 };
+        n += 1;
+    }
+    items[n] = .{ .kind = .copy, .w = copyButtonWidth(self) + self.sc(2), .group = 3 };
+    n += 1;
+    return n;
 }
 
 /// The beautify panel: its own small bar beside the toolbar while
@@ -481,7 +509,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
             out[n] = .{ .mode_blur, .mode_pixelate, .mode_solid };
             n += 1;
         },
-        else => {},
+        else => |t| n += tools.segRows(self, t, out[n..]),
     }
     if (self.textHandleShape() != null) {
         out[n] = .{ .width_fit, .width_fixed, null };
@@ -490,7 +518,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
     return n;
 }
 
-const menu_items = [_]ButtonKind{ .beautify, .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel };
+const menu_items = [_]ButtonKind{ .{ .ext = .copy_text }, .{ .ext = .redact_sensitive }, .{ .ext = .pin }, .beautify, .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel };
 
 fn layoutPopover(self: *Editor) !void {
     const f = self.uf();
@@ -515,6 +543,7 @@ fn layoutPopover(self: *Editor) !void {
         .colors => {
             pw = 2 * pad + 6 * sw + 5 * sgap;
             ph = pad + 2 * sw + sgap + self.sc(14) + text_mod.height(theme.font_small * f) + self.sc(8) + self.sc(20) + pad;
+            ph += tui.historyHeight(self);
             ph += @as(i32, @intCast(n_seg_rows)) * (self.sc(10) + self.sc(30));
         },
         .more => {
@@ -548,6 +577,7 @@ fn layoutPopover(self: *Editor) !void {
             }
             try self.buttons.append(self.alloc, .{ .rect = .{ .x = x + pad + 5 * (sw + sgap), .y = y + pad + sw + sgap, .w = sw, .h = sw }, .kind = .custom_color, .layer = .popover });
             var cy = y + pad + 2 * sw + sgap + self.sc(14);
+            cy = try tui.layoutHistory(self, x + pad, cy, pw - 2 * pad);
             const lh = text_mod.height(theme.font_small * f);
             // slider: the whole row is the hit area
             try self.buttons.append(self.alloc, .{ .rect = .{ .x = x + pad, .y = cy + lh + self.sc(8), .w = pw - 2 * pad, .h = self.sc(20) }, .kind = .thickness, .layer = .popover });
@@ -654,7 +684,7 @@ fn chromePad(self: *const Editor) i32 {
 }
 
 /// What a floating surface with `sh` covers: itself plus its shadow.
-fn shadowFootprint(self: *const Editor, r: Rect, sh: theme.Shadow) Rect {
+pub fn shadowFootprint(self: *const Editor, r: Rect, sh: theme.Shadow) Rect {
     const b = self.sc(sh.blur);
     const dy = self.sc(sh.dy);
     return .{ .x = r.x - b, .y = r.y - b + @min(0, dy), .w = r.w + 2 * b, .h = r.h + 2 * b + @as(i32, @intCast(@abs(dy))) };
@@ -688,6 +718,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.picker.open and !self.toolbar_rect.isEmpty()) list.add(shadowFootprint(self, self.picker.rect.expand(self.sc(1)), th.popover_shadow));
     if (self.copy_notice != .none) list.add(shadowFootprint(self, noticeRect(self), th.bar_shadow));
     if (self.help_open) list.add(shadowFootprint(self, helpRect(self), th.popover_shadow));
+    tools.collectOverlays(self, list);
 }
 
 fn shapeChromeRect(self: *const Editor, i: usize) ?Rect {
@@ -718,12 +749,14 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (self.textHandleShape()) |i| drawTextHandle(self, canvas, i);
     drawSelectionChrome(self, canvas);
     if (self.isMousePane()) drawLoupe(self, canvas);
+    tools.drawChrome(self, canvas);
     if (!self.isTbPane()) return;
     drawToolbar(self, canvas);
     if (self.popover != .none and !self.pop_rect.isEmpty()) drawPopover(self, canvas);
     if (self.picker.open and !self.toolbar_rect.isEmpty()) drawPicker(self, canvas);
     drawTooltip(self, canvas);
     if (self.copy_notice != .none) drawCopyNotice(self, canvas);
+    tools.drawTop(self, canvas);
     if (self.help_open) drawHelp(self, canvas);
 }
 
@@ -887,7 +920,7 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
     const th = self.theme;
     if (self.selBuf()) |s| {
         canvas.rectOutline(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 1, th.sel_edge);
-        if (self.tool == .select and self.drag == .none and self.selected == null) {
+        if (self.tool == .select and self.drag == .none and self.selected == null and self.tools.mode == .none) {
             for (handlePoints(s), 0..) |p, i| {
                 if (!showHandle(self, s, i)) continue;
                 drawHandle(self, canvas, ff(p.x), ff(p.y), handleDrawRadius(self));
@@ -1101,7 +1134,7 @@ fn drawShadow(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, 
 
 /// The floating material: shadow, the tinted blurred backdrop clipped to
 /// the rounded rect, and a hairline edge.
-fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow) void {
+pub fn drawMaterial(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow) void {
     if (r.w <= 0 or r.h <= 0) return;
     const th = self.theme;
     drawShadow(self, canvas, slot, r, radius, sh, 1);
@@ -1227,12 +1260,13 @@ fn buttonActive(self: *const Editor, kind: ButtonKind) bool {
         .shadow => self.beautify.shadow,
         .beautify => self.beautify.enabled,
         .help => self.help_open,
+        .ext => |e| tui.active(self, e),
         else => false,
     };
 }
 
 /// Hover highlight strength of button `bi` (fades in and out).
-fn hoverAmount(self: *const Editor, bi: usize) f64 {
+pub fn hoverAmount(self: *const Editor, bi: usize) f64 {
     const t = motion.now();
     const k = self.hov.at(t);
     if (self.hover_btn >= 0 and bi == @as(usize, @intCast(self.hover_btn))) return k;
@@ -1240,7 +1274,7 @@ fn hoverAmount(self: *const Editor, bi: usize) f64 {
     return 0;
 }
 
-fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
+pub fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
     const g = self.sc(theme.focus_gap);
     const fw = theme.focus_w * self.uf();
     const rr = r.expand(g + @as(i32, @intFromFloat(@ceil(fw / 2))));
@@ -1263,6 +1297,8 @@ fn toolIcon(self: *const Editor, t: Tool) Icon {
         },
         .counter => .counter,
         .text => .text,
+        .spotlight => .spotlight,
+        .ruler => .ruler,
     };
 }
 
@@ -1282,6 +1318,7 @@ fn kindIcon(self: *const Editor, kind: ButtonKind) ?Icon {
         .padding => .padding,
         .corners => .corners,
         .shadow => .shadow,
+        .ext => |e| tui.icon(e),
         .capture_window => .capture_window,
         .capture_scroll => .capture_scroll,
         .capture_timer => .timer,
@@ -1360,7 +1397,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
                     if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
                 }
                 const fg: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
-                if (kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg);
+                if (kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
             },
         }
         if (self.focus == bi) focusRing(self, canvas, r, rad);
@@ -1399,6 +1436,7 @@ fn segOn(self: *const Editor, s: Seg) bool {
         .mode_solid => mode == .redact,
         .width_fit => !fixed,
         .width_fixed => fixed,
+        else => tools.segOn(self, s),
     };
 }
 
@@ -1505,6 +1543,7 @@ fn drawColorsContent(self: *Editor, canvas: *Canvas) void {
                 text_mod.draw(canvas, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, if (on) th.fg else th.muted, l);
                 if (self.focus == bi) focusRing(self, canvas, r, 7.0 * f);
             },
+            .ext => tui.drawPopoverButton(self, canvas, b, bi),
             else => {},
         }
     }
@@ -1782,7 +1821,7 @@ pub const hsvToRgb = hsv_mod.hsvToRgb;
 pub const rgbToHsv = hsv_mod.rgbToHsv;
 
 pub fn loupeVisible(self: *const Editor) bool {
-    if (self.help_open) return false;
+    if (self.help_open or self.tools.mode != .none) return false;
     const m = self.mouse;
     if (!self.screenRect().contains(m.x, m.y)) return false;
     return switch (self.drag) {
@@ -1864,65 +1903,10 @@ fn drawLoupe(self: *Editor, canvas: *Canvas) void {
     text_mod.draw(canvas, r.x + @divTrunc(size - text_mod.width(fs, label), 2), ly + self.sc(4), fs, th.pill_fg, label);
 }
 
-// --- help ---
-
-const help_lines = [_][2][]const u8{
-    .{ "Drag", "Select a region; drag inside to move it" },
-    .{ "Shift / Alt + drag", "Square, circle, 45\u{00B0} lines; from the centre" },
-    .{ "Space + drag", "Move the region or shape while drawing it" },
-    .{ "Arrows / Shift", "Move selection or shape by 1 / 10 px" },
-    .{ "Alt+Arrows", "Resize the selection" },
-    .{ "V P L A R E M", "Select, pen, line, arrow, rect, ellipse, marker" },
-    .{ "X (again)", "Blur, then pixelate, then solid redaction" },
-    .{ "N  T", "Counter badge, text" },
-    .{ "F", "Fill / rounded corners / text background" },
-    .{ "1-8, 9", "Preset colours, custom colour" },
-    .{ "Scroll, - =", "Stroke and text size" },
-    .{ "Click / double-click", "Select a shape (select tool) / edit text" },
-    .{ "Delete", "Delete selected shape" },
-    .{ "Ctrl+D  Ctrl+]", "Duplicate, bring to front" },
-    .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
-    .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
-    .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },
-    .{ "Text: side handle, Alt+W", "Drag to wrap at a width; double-click / Alt+W: fit text" },
-    .{ "B", "Beautify frame (padding, background, shadow)" },
-    .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
-    .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
-    .{ "Ctrl+S  Ctrl+Shift+S", "Save, save as" },
-    .{ "Right click / Esc", "Cancel current action; Esc again closes" },
-};
-
-fn helpRect(self: *const Editor) Rect {
-    const fs = theme.font_label * self.uf();
-    const lh = text_mod.height(fs) + self.sc(7);
-    const pw = self.sc(620);
-    const ph = lh * @as(i32, help_lines.len) + self.sc(76);
-    const w: i32 = @intCast(self.pn().width);
-    const h: i32 = @intCast(self.pn().height);
-    return .{ .x = @divTrunc(w - pw, 2), .y = @max(4, @divTrunc(h - ph, 2)), .w = pw, .h = ph };
-}
-
-fn drawHelp(self: *Editor, canvas: *Canvas) void {
-    const r = helpRect(self);
-    const f = self.uf();
-    const th = self.theme;
-    drawMaterial(self, canvas, .help, r, theme.popover_radius * f, th.popover_shadow);
-    const fs = theme.font_label * f;
-    const lh = text_mod.height(fs) + self.sc(7);
-    const pad = self.sc(24);
-    icons.draw(canvas, .keyboard, r.x + pad, r.y + self.sc(20), self.sc(18), th.fg);
-    text_mod.drawStyled(canvas, r.x + pad + self.sc(26), r.y + self.sc(20) + @divTrunc(self.sc(18) - text_mod.heightStyled(15 * f, .bold), 2), 15.0 * f, th.fg, .bold, "Keyboard shortcuts");
-    var y = r.y + self.sc(58);
-    const ks = theme.font_small * f;
-    for (help_lines) |l| {
-        // the keys as a cap, the meaning beside it
-        const kw = text_mod.width(ks, l[0]) + self.sc(12);
-        canvas.fillRoundRectAA(r.x + pad, y + @divTrunc(lh - self.sc(20), 2) - self.sc(1), kw, self.sc(20), 5 * f, th.track);
-        text_mod.draw(canvas, r.x + pad + self.sc(6), y + @divTrunc(lh - text_mod.height(ks), 2) - self.sc(1), ks, th.fg, l[0]);
-        text_mod.draw(canvas, r.x + pad + self.sc(232), y + @divTrunc(lh - text_mod.height(fs), 2) - self.sc(1), fs, th.muted, l[1]);
-        y += lh;
-    }
-}
+// the shortcuts overlay (help.zig)
+const help = @import("help.zig");
+const helpRect = help.rect;
+const drawHelp = help.draw;
 
 // --- copy notice ---
 

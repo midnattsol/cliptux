@@ -48,13 +48,15 @@ test "zoom steps snap to 100% and stay in range" {
     try std.testing.expectEqual(@as(f64, zoom_min), zoomStep(0.11, 10));
 }
 
+/// `shotlet pin FILE`: PNG, JPEG or WebP (src/gfx/imgload.zig).
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
-    const data = try sys.readFileAlloc(gpa, path, 512 * 1024 * 1024);
-    var img = blk: {
-        defer gpa.free(data);
-        break :blk try png.decode(gpa, data);
-    };
+    var img = try @import("../gfx/imgload.zig").loadFile(gpa, path);
     defer img.deinit(gpa);
+    return show(gpa, env, &img, path);
+}
+
+/// Pin `img` (`what` names it in the log) until the pin is closed.
+pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []const u8) !void {
     text.init(gpa);
     defer text.deinit();
 
@@ -89,7 +91,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
             hint = !gnome.extensionActive(&bus);
         } else |_| hint = true;
     }
-    std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ path, img.width, img.height, if (layer) "layer shell" else if (hint) "plain window" else "kept above by the GNOME extension" });
+    std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (layer) "layer shell" else if (hint) "plain window" else "kept above by the GNOME extension" });
 
     var zoom: f64 = 1;
     var scaled: []u32 = &.{};

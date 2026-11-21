@@ -14,6 +14,8 @@ const Api = struct {
     TessBaseAPIInit3: *const fn (Handle, ?[*:0]const u8, ?[*:0]const u8) callconv(.c) c_int,
     TessBaseAPISetImage: *const fn (Handle, [*]const u8, c_int, c_int, c_int, c_int) callconv(.c) void,
     TessBaseAPIGetUTF8Text: *const fn (Handle) callconv(.c) ?[*:0]u8,
+    TessBaseAPIGetTsvText: *const fn (Handle, c_int) callconv(.c) ?[*:0]u8,
+    TessBaseAPISetSourceResolution: *const fn (Handle, c_int) callconv(.c) void,
     TessDeleteText: *const fn ([*:0]u8) callconv(.c) void,
     TessBaseAPIEnd: *const fn (Handle) callconv(.c) void,
 };
@@ -102,6 +104,16 @@ test "languages follow the locale, with English" {
 /// Text in an 0xAARRGGBB image (owned UTF-8), or null when Tesseract is
 /// missing or fails. Slow (hundreds of ms): call from a worker thread.
 pub fn recognize(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32) ?[]u8 {
+    return run(alloc, pixels, width, height, .text, 0);
+}
+
+/// Every word with its box, as Tesseract's TSV (parsed by
+/// src/ocr/page.zig); `ppi` is the image's resolution (0: unknown).
+pub fn recognizeTsv(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, ppi: u32) ?[]u8 {
+    return run(alloc, pixels, width, height, .tsv, ppi);
+}
+
+fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, what: enum { text, tsv }, ppi: u32) ?[]u8 {
     if (!available()) return null;
     const a = api.?;
     if (width == 0 or height == 0) return null;
@@ -126,7 +138,8 @@ pub fn recognize(alloc: std.mem.Allocator, pixels: []const u32, width: u32, heig
     }
     defer a.TessBaseAPIEnd(h);
     a.TessBaseAPISetImage(h, rgb.ptr, @intCast(width), @intCast(height), 3, @intCast(width * 3));
-    const out = a.TessBaseAPIGetUTF8Text(h) orelse return null;
+    if (ppi > 0) a.TessBaseAPISetSourceResolution(h, @intCast(ppi));
+    const out = (if (what == .tsv) a.TessBaseAPIGetTsvText(h, 0) else a.TessBaseAPIGetUTF8Text(h)) orelse return null;
     defer a.TessDeleteText(out);
     return alloc.dupe(u8, std.mem.trim(u8, std.mem.span(out), " \t\r\n")) catch null;
 }
