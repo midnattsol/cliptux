@@ -1,6 +1,6 @@
 //! Minimal PNG codec: enough to decode portal screenshots and other common
 //! PNGs (gray/RGB/palette/gray+alpha/RGBA at 1-16 bits, tRNS,
-//! non-interlaced) and encode annotated output (8-bit RGB). Pixels are
+//! plain or Adam7 interlaced) and encode annotated output (8-bit RGB). Pixels are
 //! exchanged as 0xAARRGGBB u32 values (matching wl_shm xrgb8888 layout on
 //! little-endian).
 //!
@@ -40,6 +40,7 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
     var bit_depth: u8 = 0;
     var color_type: u8 = 0;
     var have_ihdr = false;
+    var interlaced = false;
     var palette: [256]u32 = @splat(0xFF000000);
     var palette_len: usize = 0;
     // tRNS for gray/RGB: the one fully transparent sample value
@@ -65,8 +66,8 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
             bit_depth = chunk[8];
             color_type = chunk[9];
             if (chunk[10] != 0 or chunk[11] != 0) return error.BadIhdr;
-            if (chunk[12] == 1) return error.InterlacedUnsupported;
-            if (chunk[12] != 0) return error.BadIhdr;
+            if (chunk[12] > 1) return error.BadIhdr;
+            interlaced = chunk[12] == 1;
             if (width == 0 or height == 0) return error.BadIhdr;
             if (width > max_side or height > max_side) return error.TooLarge;
             if (@as(u64, width) * height > max_pixels) return error.TooLarge;
@@ -122,9 +123,17 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
         else => unreachable,
     };
     const bits_pp: u64 = @as(u64, channels) * bit_depth;
-    const line_bytes: u64 = (@as(u64, width) * bits_pp + 7) / 8;
-    const stride: u64 = 1 + line_bytes; // +1 filter byte per row
-    const raw_len = stride * height;
+    const passes: []const Pass = if (interlaced) &adam7 else &.{.{ .x0 = 0, .y0 = 0, .dx = 1, .dy = 1 }};
+    // every pass is an independent filtered sub-image, stored one after
+    // the other (a pass with no columns or rows stores nothing)
+    var raw_len: u64 = 0;
+    var max_pass_px: u64 = 0;
+    for (passes) |ps| {
+        const pw, const ph = ps.size(width, height);
+        if (pw == 0 or ph == 0) continue;
+        raw_len += (1 + (@as(u64, pw) * bits_pp + 7) / 8) * ph;
+        max_pass_px = @max(max_pass_px, @as(u64, pw) * ph);
+    }
     if (raw_len > max_raw_bytes) return error.TooLarge;
     const raw = try alloc.alloc(u8, @intCast(raw_len));
     defer alloc.free(raw);
@@ -138,14 +147,58 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
     }
 
     const filter_bpp: usize = @intCast(@max(1, bits_pp / 8));
-    try unfilter(raw, @intCast(stride), height, filter_bpp);
-
     const pixels = try alloc.alloc(u32, @as(usize, width) * height);
     errdefer alloc.free(pixels);
-    convert(raw, pixels, @intCast(stride), width, height, color_type, bit_depth, &palette, trns_key);
+    if (!interlaced) {
+        const stride: usize = @intCast(1 + (@as(u64, width) * bits_pp + 7) / 8);
+        try unfilter(raw, stride, height, filter_bpp);
+        convert(raw, pixels, stride, width, height, color_type, bit_depth, &palette, trns_key);
+    } else {
+        const sub_px = try alloc.alloc(u32, @intCast(max_pass_px));
+        defer alloc.free(sub_px);
+        var off: usize = 0;
+        for (passes) |ps| {
+            const pw, const ph = ps.size(width, height);
+            if (pw == 0 or ph == 0) continue;
+            const stride: usize = @intCast(1 + (@as(u64, pw) * bits_pp + 7) / 8);
+            const part = raw[off..][0 .. stride * ph];
+            off += part.len;
+            try unfilter(part, stride, ph, filter_bpp);
+            const sp = sub_px[0 .. @as(usize, pw) * ph];
+            convert(part, sp, stride, pw, ph, color_type, bit_depth, &palette, trns_key);
+            for (0..ph) |j| {
+                const y = ps.y0 + j * ps.dy;
+                for (0..pw) |i| pixels[y * width + ps.x0 + i * ps.dx] = sp[j * pw + i];
+            }
+        }
+    }
 
     return .{ .width = width, .height = height, .pixels = pixels };
 }
+
+const Pass = struct {
+    x0: u32,
+    y0: u32,
+    dx: u32,
+    dy: u32,
+
+    /// Columns and rows of this pass in a w x h image.
+    fn size(p: Pass, w: u32, h: u32) struct { u32, u32 } {
+        const pw = if (w > p.x0) (w - p.x0 + p.dx - 1) / p.dx else 0;
+        const ph = if (h > p.y0) (h - p.y0 + p.dy - 1) / p.dy else 0;
+        return .{ pw, ph };
+    }
+};
+
+const adam7 = [7]Pass{
+    .{ .x0 = 0, .y0 = 0, .dx = 8, .dy = 8 },
+    .{ .x0 = 4, .y0 = 0, .dx = 8, .dy = 8 },
+    .{ .x0 = 0, .y0 = 4, .dx = 4, .dy = 8 },
+    .{ .x0 = 2, .y0 = 0, .dx = 4, .dy = 4 },
+    .{ .x0 = 0, .y0 = 2, .dx = 2, .dy = 4 },
+    .{ .x0 = 1, .y0 = 0, .dx = 2, .dy = 2 },
+    .{ .x0 = 0, .y0 = 1, .dx = 1, .dy = 2 },
+};
 
 /// Reverse PNG row filters in place. Hot path: lengths were validated by the
 /// caller (raw.len == stride * height, stride == 1 + line bytes).
@@ -790,4 +843,141 @@ test "png decoder rejects hostile headers before allocating" {
     try std.testing.expectError(error.Truncated, decode(alloc, bad));
     try std.testing.expectError(error.NotPng, decode(alloc, good[0..4]));
     try std.testing.expectError(error.Truncated, decode(alloc, good[0 .. good.len - 20]));
+}
+
+/// Test-only PNG writer for any colour type, bit depth and interlace,
+/// cycling through all five row filters. `sample(x, y, ch)` gives each
+/// channel value (< 2^depth).
+fn buildTestPng(alloc: std.mem.Allocator, w: u32, h: u32, ct: u8, depth: u8, interlace: bool, plte: []const u8, comptime sample: fn (u32, u32, u32) u16) ![]u8 {
+    const channels: u32 = switch (ct) {
+        0, 3 => 1,
+        2 => 3,
+        4 => 2,
+        else => 4,
+    };
+    const bits = channels * depth;
+    const bpp: usize = @max(1, bits / 8);
+    var raw: std.ArrayList(u8) = .empty;
+    defer raw.deinit(alloc);
+    const passes: []const Pass = if (interlace) &adam7 else &.{.{ .x0 = 0, .y0 = 0, .dx = 1, .dy = 1 }};
+    var row_no: usize = 0;
+    for (passes) |ps| {
+        const pw, const ph = ps.size(w, h);
+        if (pw == 0 or ph == 0) continue;
+        const lb = (pw * bits + 7) / 8;
+        const prev = try alloc.alloc(u8, lb);
+        defer alloc.free(prev);
+        @memset(prev, 0);
+        const cur = try alloc.alloc(u8, lb);
+        defer alloc.free(cur);
+        for (0..ph) |j| {
+            @memset(cur, 0);
+            const y: u32 = @intCast(ps.y0 + j * ps.dy);
+            var bit: usize = 0;
+            for (0..pw) |i| {
+                const x: u32 = @intCast(ps.x0 + i * ps.dx);
+                for (0..channels) |chn| {
+                    const v = sample(x, y, @intCast(chn));
+                    if (depth == 16) {
+                        cur[bit / 8] = @intCast(v >> 8);
+                        cur[bit / 8 + 1] = @truncate(v);
+                    } else if (depth == 8) {
+                        cur[bit / 8] = @intCast(v);
+                    } else {
+                        const shift: u3 = @intCast(8 - depth - bit % 8);
+                        cur[bit / 8] |= @as(u8, @intCast(v)) << shift;
+                    }
+                    bit += depth;
+                }
+            }
+            const filter: u8 = @intCast(row_no % 5);
+            row_no += 1;
+            try raw.append(alloc, filter);
+            for (cur, 0..) |x, k| {
+                const a: u8 = if (k >= bpp) cur[k - bpp] else 0;
+                const b = prev[k];
+                const c: u8 = if (k >= bpp) prev[k - bpp] else 0;
+                try raw.append(alloc, switch (filter) {
+                    0 => x,
+                    1 => x -% a,
+                    2 => x -% b,
+                    3 => x -% @as(u8, @intCast((@as(u16, a) + b) / 2)),
+                    else => x -% paeth(a, b, c),
+                });
+            }
+            @memcpy(prev, cur);
+        }
+    }
+    var z: std.Io.Writer.Allocating = .init(alloc);
+    defer z.deinit();
+    try z.ensureUnusedCapacity(64);
+    {
+        const window = try alloc.alloc(u8, flate.max_window_len);
+        defer alloc.free(window);
+        var comp = try flate.Compress.init(&z.writer, window, .zlib, .default);
+        try comp.writer.writeAll(raw.items);
+        try comp.finish();
+    }
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    try out.appendSlice(alloc, &signature);
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], w, .big);
+    std.mem.writeInt(u32, ihdr[4..8], h, .big);
+    ihdr[8] = depth;
+    ihdr[9] = ct;
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = @intFromBool(interlace);
+    try writeChunk(alloc, &out, "IHDR", &ihdr);
+    if (plte.len > 0) try writeChunk(alloc, &out, "PLTE", plte);
+    try writeChunk(alloc, &out, "IDAT", z.written());
+    try writeChunk(alloc, &out, "IEND", "");
+    return out.toOwnedSlice(alloc);
+}
+
+fn testSample(comptime depth: u8) fn (u32, u32, u32) u16 {
+    return struct {
+        fn f(x: u32, y: u32, ch: u32) u16 {
+            const v = (x *% 2654435761 ^ y *% 40503 ^ ch *% 97) >> 7;
+            const max: u32 = (@as(u32, 1) << depth) - 1;
+            return @intCast(v & max);
+        }
+    }.f;
+}
+
+test "adam7 interlaced decode matches the same image non-interlaced" {
+    const alloc = std.testing.allocator;
+    var plte: [3 * 256]u8 = undefined;
+    for (&plte, 0..) |*b, i| b.* = @truncate(i * 7);
+    const Case = struct { ct: u8, depth: u8 };
+    const cases = [_]Case{
+        .{ .ct = 0, .depth = 1 },  .{ .ct = 0, .depth = 2 },  .{ .ct = 0, .depth = 4 },
+        .{ .ct = 0, .depth = 8 },  .{ .ct = 0, .depth = 16 }, .{ .ct = 2, .depth = 8 },
+        .{ .ct = 2, .depth = 16 }, .{ .ct = 3, .depth = 1 },  .{ .ct = 3, .depth = 4 },
+        .{ .ct = 3, .depth = 8 },  .{ .ct = 4, .depth = 8 },  .{ .ct = 4, .depth = 16 },
+        .{ .ct = 6, .depth = 8 },  .{ .ct = 6, .depth = 16 },
+    };
+    const sizes = [_][2]u32{ .{ 1, 1 }, .{ 2, 3 }, .{ 5, 1 }, .{ 1, 9 }, .{ 8, 8 }, .{ 13, 11 }, .{ 33, 17 } };
+    inline for (cases) |cs| {
+        for (sizes) |sz| {
+            const pl: []const u8 = if (cs.ct == 3) &plte else &.{};
+            const flat = try buildTestPng(alloc, sz[0], sz[1], cs.ct, cs.depth, false, pl, testSample(cs.depth));
+            defer alloc.free(flat);
+            const inter = try buildTestPng(alloc, sz[0], sz[1], cs.ct, cs.depth, true, pl, testSample(cs.depth));
+            defer alloc.free(inter);
+            var a = try decode(alloc, flat);
+            defer a.deinit(alloc);
+            var b = try decode(alloc, inter);
+            defer b.deinit(alloc);
+            try std.testing.expectEqualSlices(u32, a.pixels, b.pixels);
+        }
+    }
+    // fuzz the interlaced path too
+    const seed = try buildTestPng(alloc, 19, 13, 6, 8, true, &.{}, testSample(8));
+    defer alloc.free(seed);
+    try fuzzDecode(alloc, seed, 1500, 5);
+    const seed2 = try buildTestPng(alloc, 21, 9, 3, 2, true, plte[0..12], testSample(2));
+    defer alloc.free(seed2);
+    try fuzzDecode(alloc, seed2, 1500, 6);
 }
