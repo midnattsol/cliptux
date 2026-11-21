@@ -72,12 +72,14 @@ shotlet --daemon   # tray icon (autostart: ./install.sh --autostart)
 shotlet settings   # preferences and shortcut bindings
 ```
 
-Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts.
+Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts
+(on GNOME, the integration below brings its own shortcut).
 
 ```sh
 shotlet history                       # Recent captures (history clear: forget them)
 shotlet pin FILE.png                  # pin an image to the screen
-shotlet gnome-integration install     # GNOME: keep the thumbnail and pins above
+shotlet gnome-integration install     # GNOME: no prompts; thumbnail and pins above
+shotlet gnome-integration shortcut '<Shift><Super>s'   # its capture key
 ```
 
 ## After a capture
@@ -135,6 +137,55 @@ back to the app you were in when the thumbnail appears. Install it with
 GNOME Shell on Wayland only picks up a newly installed extension at your
 next login. `shotlet gnome-integration status` tells whether it is active.
 
+### Captures without prompts on GNOME
+
+With the extension active, capturing never shows a consent dialog:
+installing the extension is the consent. The extension takes the
+screenshot itself, inside GNOME Shell, and starts Shotlet's editor on it:
+
+- **Its own shortcut**, `capture-shortcut` in its settings, default
+  `Print`. On stock GNOME, Print opens GNOME's screenshot tool:
+  `shotlet gnome-integration install` offers to give Print to Shotlet
+  (it asks on a terminal, yes by default; the Enable button in Settings
+  just does it and says so), moving GNOME's screenshot tool to
+  Shift+Super+S when nothing else uses that key. Only the GNOME shortcuts
+  holding Print change, what they held is remembered
+  (`~/.config/shotlet/gnome-moved-keys`), and `uninstall` restores them
+  exactly. Decline, and the extension leaves the key alone and binds
+  nothing (Settings and `status` say so); pick another key with
+  `shotlet gnome-integration shortcut '<Shift><Super>s'` (`none` for no
+  key). install also finds custom shortcuts that run `shotlet`, offers
+  to move them to the extension's key, and `uninstall` puts them back.
+- **`shotlet` and the tray's Take screenshot** ask the extension
+  (`dev.shotlet.Shell1.Capture()`), so they need no prompt either.
+
+How it stays safe: no D-Bus method returns screen contents. `Capture()`
+only starts the same flow, which ends in Shotlet's editor on screen; it is
+honoured only for a caller whose executable is the shotlet binary the
+extension starts, one capture at a time and at most one a second, never
+while the screen is locked. The pixels go from
+`Shell.Screenshot.screenshot_area` (every monitor at its own scale, a few
+strips of it encoded in parallel; no cursor, and no flash or shutter
+sound: those belong to GNOME's screenshot UI) into fresh 0600 files in
+`$XDG_RUNTIME_DIR/shotlet` (a 0700 directory the extension checks is
+its own), and nowhere else; Shotlet opens them without following
+symlinks, refuses files that are not private and its own, and deletes
+them as soon as they are read (leftovers from a Shotlet that failed to
+start are deleted after a minute). Sandboxed (Flatpak) apps cannot reach
+the extension's bus name or that directory.
+
+When the extension is missing, older, or cannot capture, Shotlet uses the
+screen-sharing portal as before. `shotlet gnome-integration status` and
+Settings › General say which way captures go.
+
+Timings in the private headless GNOME (software rendering, release
+build), from the key press to the editor on screen, through the
+extension: one 1600×900 monitor 68–75 ms (40–45 ms of it in the shell);
+2560×1440 at 2 next to 1280×720 at 1, about 230 ms. The portal path with
+its remembered grant takes 52–66 ms and about 225 ms from the start of
+`shotlet` (plus launching it, and GNOME's screen-sharing indicator
+flashes), and seconds with its dialog the first time.
+
 Without the extension everything still works, but the thumbnail is an
 ordinary window wherever GNOME opens it (and it takes the keyboard focus,
 as any new window does), and a pin stays above other windows only if you
@@ -142,7 +193,8 @@ choose "Always on Top" in its window menu (right-click the pin). The
 thumbnail never covers more than itself: around the cards it lets clicks
 through to the window below.
 
-On GNOME the tray needs the AppIndicator extension. The first capture shows
+On GNOME the tray needs the AppIndicator extension. Without the GNOME
+integration, the first capture shows
 a one-time screen-share picker: select every monitor you want captured.
 The choice is remembered. Cancelling the picker just ends the capture.
 
@@ -210,7 +262,17 @@ Needs `gnome-shell`, `xdg-desktop-portal-gnome`, `pipewire`, `wireplumber`,
 bindings for "another app" (`tools/e2e/target.py`: focus, clicks, drops;
 `python3-gi gir1.2-gtk-4.0`). They load the bundled GNOME Shell extension
 into the private session (`HL_EXTENSIONS`), except `quick-plain`, which
-checks the fallback without it. On Debian/Ubuntu:
+checks the fallback without it. So do the prompt-free capture scenarios:
+`shell` (stock bindings: install takes Print, Print captures with no
+dialog and nothing in the permission store, the capture files gone and
+no PNG written anywhere else, the pixels, a Capture() from another
+program refused, uninstall restoring GNOME's keys), `shell-owner`
+(a custom shortcut running shotlet on Print, moved and put back),
+`shell-mixed` (two monitors at scales 2
+and 1, checked across the seam), `shell-tray` (the tray's Activate and
+menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
+and the portal when the extension cannot capture). The portal scenarios
+run without the extension. On Debian/Ubuntu:
 `apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul python3-gi gir1.2-gtk-4.0`.
 `E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
 nightly and on demand (`.github/workflows/e2e.yml`), never on pull requests.

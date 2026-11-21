@@ -8,6 +8,7 @@ const dbus = @import("../platform/dbus.zig");
 const portal = @import("../platform/portal.zig");
 const sys = @import("../platform/sys.zig");
 const env_mod = @import("env.zig");
+const gnome = @import("gnome.zig");
 const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
@@ -79,7 +80,15 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
             break :blk .none;
         };
         switch (action) {
-            .capture => spawnChild(env, "shot"),
+            // the GNOME integration captures inside the shell (no prompt)
+            // and starts the editor itself; else a capture child as usual
+            .capture => {
+                const how: gnome.CaptureRequest = if (gnome.isGnome() and gnome.extensionActive(&conn))
+                    gnome.requestCapture(gpa, &conn)
+                else
+                    .unavailable;
+                if (how == .unavailable) spawnChild(env, "shot");
+            },
             .history => spawnChild(env, "history"),
             .settings => spawnChild(env, "settings"),
             .quit => return,

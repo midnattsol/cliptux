@@ -355,7 +355,7 @@ pub const Identity = enum { registry, scope, sandbox, unknown };
 /// Flatpak the sandbox already names us.
 pub fn registerApp(alloc: std.mem.Allocator, conn: *dbus.Connection) void {
     const how = registerAppInner(alloc, conn);
-    std.log.debug("portal identity: {s} ({t})", .{ app_id, how });
+    std.log.info("portal identity: {s} ({t})", .{ app_id, how });
 }
 
 fn registerAppInner(alloc: std.mem.Allocator, conn: *dbus.Connection) Identity {

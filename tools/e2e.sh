@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -152,6 +152,63 @@ if [ "${1:-}" = "--inner" ]; then
         done | sort -u
     }
 
+    # --- the GNOME integration's captures: the shell starts shotlet, whose
+    # output lands in the compositor log
+    shell_count() { grep -c "$1" "$HL_SHELL_LOG" 2>/dev/null; }
+    shell_wait() { # shell_wait SECONDS PATTERN COUNT: until PATTERN shows COUNT times
+        local i
+        for i in $(seq 1 $(($1 * 50))); do
+            [ "$(shell_count "$2")" -ge "$3" ] && return 0
+            sleep 0.02
+        done
+        return 1
+    }
+    ext_gsettings() { # ext_gsettings get|set KEY [VALUE]: the extension's settings
+        gsettings --schemadir "$XDG_DATA_HOME/gnome-shell/extensions/shotlet@midnattsol.github.io/schemas" \
+            "$1" org.gnome.shell.extensions.shotlet "${@:2}"
+    }
+    shell1_prop() {
+        gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
+            --method org.freedesktop.DBus.Properties.Get dev.shotlet.Shell1 "$1" 2>/dev/null
+    }
+    # every file written since $OUT/marker under HOME, the runtime dir,
+    # /dev/shm and right in /tmp (other tools' trees below /tmp are not
+    # ours) that is a PNG: the capture must never be one of them
+    new_pngs() {
+        { find "$HOME" "$XDG_RUNTIME_DIR" /dev/shm -xdev -newer "$OUT/marker" -type f -user "$(id -u)" 2>/dev/null
+          find /tmp -maxdepth 1 -newer "$OUT/marker" -type f -user "$(id -u)" 2>/dev/null; } |
+            while read -r f; do
+                [ "$(head -c 8 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ] && echo "$f"
+            done
+    }
+    no_dialog() { # the portal's consent dialogs never came up
+        eq "$(perm_apps screencast)$(perm_apps screenshot)" "" &&
+            ! grep -qiE "screencast|screenshot portal" "$HL_SHELL_LOG" "$OUT"/*.log 2>/dev/null
+    }
+    capture_dir_empty() { [ -z "$(ls -A "$XDG_RUNTIME_DIR/shotlet" 2>/dev/null)" ]; }
+    # a plain blue desktop: known content to find in the capture
+    BG=2a5db0
+    plain_desktop() {
+        gsettings set org.gnome.desktop.background picture-uri ''
+        gsettings set org.gnome.desktop.background picture-uri-dark ''
+        gsettings set org.gnome.desktop.background picture-options none
+        gsettings set org.gnome.desktop.background color-shading-type solid
+        gsettings set org.gnome.desktop.background primary-color "#$BG"
+    }
+    near() { # near AARRGGBB RRGGBB: within 6 per channel
+        local a=${1:2:6} b=$2 i
+        for i in 0 2 4; do
+            local d=$((16#${a:$i:2} - 16#${b:$i:2}))
+            [ ${d#-} -le 6 ] || { echo "  $a is not $b" >&2; return 1; }
+        done
+    }
+    # the extension's key: GNOME's screenshot UI holds Print by default, so
+    # the extension leaves it alone; tests give Print to the extension
+    free_print() {
+        gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"
+        sleep 0.5
+    }
+
     # --- portal dialogs (xdg-desktop-portal-gnome), found by colour
     accent=3584e4 # Adwaita's accent: default buttons, checkboxes
     # wait_button MON [SECONDS]: wait for an accent-coloured button (at
@@ -278,10 +335,19 @@ if [ "${1:-}" = "--inner" ]; then
     }
 
     case $scenario in
-    capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime)
+    capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell*)
         # these check what happens without the floating thumbnail
         mkdir -p "$HOME/.config/shotlet"
         printf 'quick_access=false\n' >"$HOME/.config/shotlet/config"
+        ;;
+    esac
+
+    case $scenario in
+    quick | annotate | history)
+        # these load the extension for the floating windows but follow
+        # shotlet started here: its captures go through the portal (the
+        # extension cannot start this shotlet: Capture() is refused)
+        ext_gsettings set shotlet-path "'/nonexistent/shotlet'"
         ;;
     esac
 
@@ -361,6 +427,194 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 0.8
         shot 0 pinned-after-click
         check "  ... that stays above after clicking the app" drv find 0 ff453a 40 4
+        ;;
+    shell)
+        # stock GNOME: Print opens GNOME's screenshot tool. install offers
+        # Print to Shotlet (GNOME's tool moves to Shift+Super+S), the key
+        # then captures without any prompt, uninstall restores it all
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        plain_desktop
+        check "the extension leaves GNOME's Print alone" shell_wait 5 "Print is GNOME's screenshot shortcut" 1
+        shell1_prop BlockedShortcuts >"$OUT/blocked.txt"
+        check "  ... and says so on the bus" grep -q "Print" "$OUT/blocked.txt"
+        dump_keys() { for k in show-screenshot-ui screenshot screenshot-window show-screen-recording-ui; do
+            echo "$k $(gsettings get org.gnome.shell.keybindings $k) [$(dconf read /org/gnome/shell/keybindings/$k)]"; done; }
+        dump_keys >"$OUT/keys-before.txt"
+        "$BIN" gnome-integration install </dev/null >"$OUT/install.log" 2>&1
+        check "install gives Print to Shotlet" grep -q "Print now captures with Shotlet" "$OUT/install.log"
+        check "  ... moving GNOME's screenshot tool to Shift+Super+S" eq "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "['<Shift><Super>s']"
+        check "  ... and no other GNOME shortcut" eq "$(gsettings get org.gnome.shell.keybindings screenshot) $(gsettings get org.gnome.shell.keybindings screenshot-window)" "['<Shift>Print'] ['<Alt>Print']"
+        check "  ... the extension binds Print" eval 'shell1_prop Shortcuts | grep -q Print'
+        check "  ... pointing it at this shotlet" eq "$(ext_gsettings get shotlet-path)" "'$BIN'"
+        "$BIN" gnome-integration status >"$OUT/status.log" 2>&1
+        check "status: captures through the integration" grep -q "capture: through the GNOME integration (no prompts)" "$OUT/status.log"
+        # the capture
+        touch "$OUT/marker"
+        sleep 1
+        t0=$(date +%s%N)
+        drv key print
+        check "Print opens Shotlet's editor" shell_wait 10 "startup: capture=" 1
+        t1=$(date +%s%N)
+        echo "  key to editor (measured outside): $(((t1 - t0) / 1000000)) ms; shotlet says: $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+        sleep 0.8
+        shot 0 editor
+        check "  ... without any consent dialog" no_dialog
+        check "  ... or dialog button on screen" no_find 0 "$accent"
+        check "  ... the capture file is gone once read" capture_dir_empty
+        check "  ... and no capture was written anywhere else" eq "$(new_pngs)" ""
+        check "  ... the capture directory is private" eq "$(stat -c %a "$XDG_RUNTIME_DIR/shotlet")" 700
+        drv pixel "$OUT/editor.png" 800 600
+        check "  ... the editor shows the desktop (dimmed blue)" test "${VAL:2:6}" != "$BG"
+        drag 0 400 300 0 600 400 0 800 500
+        keys enter
+        sleep 1
+        check "Copy gives the selection" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
+        drv pixel "$OUT/clip.png" 200 100
+        check "  ... with the desktop's pixels, not the cursor or a dim" near "$VAL" "$BG"
+        # anyone else asking over the bus is refused
+        gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
+            --method dev.shotlet.Shell1.Capture >"$OUT/gdbus.txt" 2>&1
+        check "Capture() from another program is refused" grep -q "AccessDenied" "$OUT/gdbus.txt"
+        sleep 1
+        check "  ... and takes no screenshot" eq "$(shell_count "startup: capture=")" 1
+        check "  ... nor leaves a file" capture_dir_empty
+        "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
+        dump_keys >"$OUT/keys-after.txt"
+        check "uninstall gives GNOME its screenshot keys back exactly" cmp -s "$OUT/keys-before.txt" "$OUT/keys-after.txt"
+        check "  ... and the extension is gone" test ! -e "$XDG_DATA_HOME/gnome-shell/extensions/shotlet@midnattsol.github.io"
+        ;;
+    shell-owner)
+        # GNOME's screenshot tool off Print and a custom shortcut running
+        # shotlet on Print: install moves that shortcut to the extension
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        gsettings set org.gnome.shell.keybindings show-screenshot-ui "[]"
+        CK=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/
+        CKS=org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$CK
+        gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['$CK']"
+        gsettings set "$CKS" name 'Shotlet'
+        gsettings set "$CKS" command "$BIN"
+        gsettings set "$CKS" binding 'Print'
+        dump() { dconf dump /org/gnome/settings-daemon/plugins/media-keys/; dconf dump /org/gnome/shell/keybindings/; }
+        dump >"$OUT/before.txt"
+        "$BIN" gnome-integration install </dev/null >"$OUT/install.log" 2>&1
+        check "install moves the custom shortcut running shotlet" grep -q "Moved" "$OUT/install.log"
+        check "  ... off GNOME's custom shortcuts" eq "$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)" "@as []"
+        check "  ... to the extension's key" eq "$(ext_gsettings get capture-shortcut)" "['Print']"
+        check "  ... which it binds" eval 'shell1_prop Shortcuts | grep -q Print'
+        check "  ... leaving GNOME's shortcuts alone" eq "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "@as []"
+        drv key print
+        check "Print opens Shotlet's editor" shell_wait 10 "startup: capture=" 1
+        check "  ... without any consent dialog" no_dialog
+        sleep 0.8
+        keys esc
+        "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
+        dump >"$OUT/after.txt"
+        check "uninstall puts the custom shortcut back exactly" cmp -s "$OUT/before.txt" "$OUT/after.txt"
+        ;;
+    shell-mixed)
+        # Meta-0 2560x1440 at 2 (1280x720 logical), Meta-1 1280x720 at 1:
+        # the shell paints the stage at 2, Shotlet maps both monitors on it
+        plain_desktop
+        "$ROOT/tools/e2e/monitors.sh" Meta-0=2 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
+        drv_start Meta-0 Meta-1 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 1280 720
+        free_print
+        touch "$OUT/marker"
+        drv key print
+        check "Print opens the editor on both monitors" shell_wait 10 "startup: capture=" 1
+        check "  ... capturing both" grep -q "monitors=2 through the GNOME integration" "$HL_SHELL_LOG"
+        echo "  $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+        sleep 0.8
+        shot 0 editor0
+        shot 1 editor1
+        check "  ... with no consent dialog" no_dialog
+        check "  ... the capture file is gone" capture_dir_empty
+        check "  ... nothing written elsewhere" eq "$(new_pngs)" ""
+        # 480x300 logical across the seam, from the top: monitor 0's top
+        # bar (it is the primary) on the left, plain desktop on the right
+        drag 0 2000 0 0 2550 300 1 100 450 1 200 300
+        sleep 0.3
+        shot 0 sel0
+        keys ctrl+c
+        sleep 1
+        check "the selection is exported at 2x" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 960x600
+        drv pixel "$OUT/clip.png" 100 8
+        check "  ... the 2x monitor's top bar on the left" test "${VAL:2:6}" != "$BG"
+        drv pixel "$OUT/clip.png" 100 300
+        check "  ... the desktop below it" near "$VAL" "$BG"
+        drv pixel "$OUT/clip.png" 800 8
+        check "  ... the 1x monitor (no top bar) on the right" near "$VAL" "$BG"
+        drv pixel "$OUT/clip.png" 559 8; a=$VAL
+        drv pixel "$OUT/clip.png" 561 8; b=$VAL
+        check "  ... meeting at the seam (x=560)" eval 'test "${a:2:6}" != "$BG" && near "$b" "$BG"'
+        # once more, everything warm (the portal running, as in a session)
+        sleep 1
+        drv key print
+        check "a second Print captures too" shell_wait 10 "startup: capture=" 2
+        echo "  warm: $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+        sleep 0.8
+        keys esc
+        ;;
+    shell-tray)
+        # the tray's Take screenshot asks the extension (Capture()), which
+        # takes the shot and starts the editor; no prompt, no child capture
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet daemon --daemon -f
+        sleep 1
+        ext_gsettings set shotlet-path "'$BIN'"
+        sni Activate 0 0
+        check "tray Activate captures through the extension" shell_wait 10 "startup: capture=" 1
+        check "  ... with no consent dialog" no_dialog
+        sleep 0.8
+        keys esc
+        sleep 1.2
+        gdbus call --session --dest io.github.midnattsol.Shotlet --object-path /MenuBar \
+            --method com.canonical.dbusmenu.Event 1 clicked "<0>" 0 >/dev/null 2>&1
+        check "  ... and so does the menu's Take screenshot" shell_wait 10 "startup: capture=" 2
+        sleep 0.8
+        keys esc
+        sleep 1.2
+        # rate limit: two asks at once give one capture
+        sni Activate 0 0
+        sni Activate 0 0
+        sleep 3
+        check "two asks at once start one capture" eq "$(shell_count "startup: capture=")" 3
+        check "  ... the other one declined" grep -q "Error.Busy" "$SHOT_LOG"
+        check "  ... and no portal capture child" not_grep "screencast" "$SHOT_LOG"
+        keys esc
+        check "the daemon keeps running" alive
+        ;;
+    shell-terminal)
+        # `shotlet` from a terminal asks the extension too
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        ext_gsettings set shotlet-path "'$BIN'"
+        t0=$(date +%s%N)
+        run_shotlet term
+        check "shotlet hands the capture to the extension" wait_exit 5
+        check "  ... and exits with status 0" eq "$RC" 0
+        check "  ... saying so" grep -q "capture handed to the GNOME integration" "$SHOT_LOG"
+        check "the extension's shotlet opens the editor" shell_wait 10 "startup: capture=" 1
+        t1=$(date +%s%N)
+        echo "  launch to editor: $(((t1 - t0) / 1000000)) ms"
+        check "  ... with no consent dialog" no_dialog
+        sleep 0.8
+        keys esc
+        # an older or broken integration: the portal path as before
+        ext_gsettings set shotlet-path "'/nonexistent/shotlet'"
+        sleep 1.2
+        run_shotlet portal
+        check "if the extension cannot capture, the portal asks" share_dialog 0
+        check "  ... and the editor opens" wait_editor 10
+        keys esc
         ;;
     quick-plain)
         # no extension: the thumbnail is an ordinary window, still usable
@@ -613,6 +867,10 @@ if [ "${1:-}" = "--inner" ]; then
         drv key ctrl+c
         sleep 1
         check "mixed-scale selection exported at 2x" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 960x600
+        run_shotlet again
+        check "a second capture needs no dialog" wait_editor 5
+        echo "  warm, through the portal: $(grep -o "startup: .*" "$SHOT_LOG")"
+        keys esc
         ;;
     fractional | integer)
         # Meta-0 2560x1440 at 1.5 (mutter's nearest: 1.4953) or 2
@@ -1011,13 +1269,26 @@ rm -f "$E2E_OUT/results.txt"
 export E2E_BIN=$BIN E2E_DRIVE=$DRIVE E2E_OUT
 
 total_fail=0
+# the extension ships its settings schema compiled: it must match the XML
+if command -v glib-compile-schemas >/dev/null; then
+    sdir=$ROOT/gnome-extension/shotlet@midnattsol.github.io/schemas
+    tmp=$(mktemp -d)
+    cp "$sdir"/*.gschema.xml "$tmp/" && glib-compile-schemas --strict "$tmp" &&
+        if cmp -s "$tmp/gschemas.compiled" "$sdir/gschemas.compiled"; then
+            echo "PASS schema: gschemas.compiled matches the XML" | tee -a "$E2E_OUT/results.txt"
+        else
+            echo "FAIL schema: gschemas.compiled is stale (glib-compile-schemas $sdir)" | tee -a "$E2E_OUT/results.txt"
+            total_fail=1
+        fi
+    rm -rf "$tmp"
+fi
 for s in $want; do
     # each scenario gets a fresh session: its own HOME, portal state,
     # monitors and keyboard layout
     mons="1600x900" layout=""
     case $s in
         multimon) mons="1600x900 1280x720" ;;
-        mixed | fractional | integer) mons="2560x1440 1280x720" ;;
+        mixed | fractional | integer | shell-mixed) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
     # GNOME maps windows (and portal callers) to apps through installed
@@ -1026,7 +1297,7 @@ for s in $want; do
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
     case $s in
-        quick | annotate | history) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
+        quick | annotate | history | shell*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
     esac
     HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
