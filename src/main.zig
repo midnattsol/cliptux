@@ -91,4 +91,5 @@ test {
     _ = @import("gfx/render.zig");
     _ = @import("platform/wayland.zig");
     _ = @import("ui/keyboard.zig");
+    _ = @import("ui/window.zig");
 }

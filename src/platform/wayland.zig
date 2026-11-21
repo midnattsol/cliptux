@@ -95,10 +95,50 @@ pub const wl_keyboard = struct {
 };
 
 pub const wl_output = struct {
+    pub const release = 0; // since v3
     pub const ev_geometry = 0;
     pub const ev_mode = 1;
+    pub const ev_done = 2; // since v2
+    pub const ev_scale = 3; // since v2
+    pub const ev_name = 4; // since v4
+    pub const ev_description = 5; // since v4
+    pub const mode_current: u32 = 1;
+};
+
+pub const zxdg_output_manager_v1 = struct {
+    pub const destroy = 0;
+    pub const get_xdg_output = 1;
+};
+
+pub const zxdg_output_v1 = struct {
+    pub const destroy = 0;
+    pub const ev_logical_position = 0;
+    pub const ev_logical_size = 1;
     pub const ev_done = 2;
-    pub const ev_scale = 3;
+    pub const ev_name = 3; // since v2
+    pub const ev_description = 4; // since v2
+};
+
+pub const zwp_text_input_manager_v3 = struct {
+    pub const destroy = 0;
+    pub const get_text_input = 1;
+};
+
+pub const zwp_text_input_v3 = struct {
+    pub const destroy = 0;
+    pub const enable = 1;
+    pub const disable = 2;
+    pub const set_surrounding_text = 3;
+    pub const set_text_change_cause = 4;
+    pub const set_content_type = 5;
+    pub const set_cursor_rectangle = 6;
+    pub const commit = 7;
+    pub const ev_enter = 0;
+    pub const ev_leave = 1;
+    pub const ev_preedit_string = 2;
+    pub const ev_commit_string = 3;
+    pub const ev_delete_surrounding_text = 4;
+    pub const ev_done = 5;
 };
 
 pub const xdg_wm_base = struct {
