@@ -34,6 +34,8 @@ const std = @import("std");
 const kit = @import("shotlet");
 const dbus = kit.dbus;
 const sys = kit.sys;
+const pixels = @import("drive/pixels.zig");
+const keys = @import("drive/keys.zig");
 
 const rd_dest = "org.gnome.Mutter.RemoteDesktop";
 const sc_dest = "org.gnome.Mutter.ScreenCast";
@@ -63,9 +65,26 @@ pub fn main(init: std.process.Init) !void {
     var conn = try dbus.Connection.connectSession(gpa, bus);
     defer conn.deinit();
 
-    // remote desktop session (input), then a screencast session tied to it
-    const rd_path = try callPath(gpa, &conn, rd_dest, "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop", "CreateSession", "", &.{});
-    const session_id = try getStringProp(gpa, &conn, rd_dest, rd_path, rd_session_iface, "SessionId");
+    const rd_path = try createSession(gpa, &conn);
+    const mons = try recordMonitors(gpa, arena, &conn, rd_path, args[1..]);
+    try callVoid(&conn, rd_dest, rd_path, rd_session_iface, "Start", "", &.{});
+    try waitStreams(gpa, &conn, mons);
+
+    var d: Driver = .{ .gpa = gpa, .conn = &conn, .rd = rd_path, .mons = mons, .runtime = runtime };
+    reply("ok ready", .{});
+    try serve(&d);
+    callVoid(&conn, rd_dest, rd_path, rd_session_iface, "Stop", "", &.{}) catch {};
+}
+
+/// A remote desktop session (input); its object path.
+fn createSession(gpa: std.mem.Allocator, conn: *dbus.Connection) ![]u8 {
+    return callPath(gpa, conn, rd_dest, "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop", "CreateSession", "", &.{});
+}
+
+/// A screencast session tied to the remote desktop session at `rd_path`,
+/// recording each monitor in `connectors`.
+fn recordMonitors(gpa: std.mem.Allocator, arena: std.mem.Allocator, conn: *dbus.Connection, rd_path: []const u8, connectors: []const [:0]const u8) ![]Monitor {
+    const session_id = try getStringProp(gpa, conn, rd_dest, rd_path, rd_session_iface, "SessionId");
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     {
@@ -75,11 +94,11 @@ pub fn main(init: std.process.Init) !void {
         try m.putVariantString(session_id);
         m.endArray(arr);
     }
-    const sc_path = try callPath(gpa, &conn, sc_dest, "/org/gnome/Mutter/ScreenCast", "org.gnome.Mutter.ScreenCast", "CreateSession", "a{sv}", m.buf.items);
+    const sc_path = try callPath(gpa, conn, sc_dest, "/org/gnome/Mutter/ScreenCast", "org.gnome.Mutter.ScreenCast", "CreateSession", "a{sv}", m.buf.items);
 
     try conn.addMatch("type='signal',interface='org.gnome.Mutter.ScreenCast.Stream',member='PipeWireStreamAdded'");
     var mons: std.ArrayList(Monitor) = .empty;
-    for (args[1..]) |connector| {
+    for (connectors) |connector| {
         m.buf.clearRetainingCapacity();
         try m.putString(connector);
         const arr = try m.beginArray(8);
@@ -87,64 +106,62 @@ pub fn main(init: std.process.Init) !void {
         try m.putString("cursor-mode");
         try m.putVariantU32(1); // embedded: screenshots show the pointer
         m.endArray(arr);
-        const stream = try callPath(gpa, &conn, sc_dest, sc_path, sc_session_iface, "RecordMonitor", "sa{sv}", m.buf.items);
+        const stream = try callPath(gpa, conn, sc_dest, sc_path, sc_session_iface, "RecordMonitor", "sa{sv}", m.buf.items);
         try mons.append(arena, .{ .connector = connector, .stream = stream });
     }
-    try callVoid(&conn, rd_dest, rd_path, rd_session_iface, "Start", "", &.{});
+    return mons.items;
+}
 
-    // every stream announces its PipeWire node once started
+/// Every stream announces its PipeWire node once started: note each.
+fn waitStreams(gpa: std.mem.Allocator, conn: *dbus.Connection, mons: []Monitor) !void {
     const deadline = sys.monoMs() + 10_000;
-    var missing = mons.items.len;
+    var missing = mons.len;
     while (missing > 0) {
         var msg = (try conn.nextMessageDeadline(deadline)) orelse return error.NoPipeWireStream;
         defer msg.deinit(gpa);
         if (!msg.isSignal("org.gnome.Mutter.ScreenCast.Stream", "PipeWireStreamAdded")) continue;
         var r = msg.reader();
         const node = try r.readU32();
-        for (mons.items) |*mon| {
+        for (mons) |*mon| {
             if (mon.node == 0 and std.mem.eql(u8, mon.stream, msg.path orelse "")) {
                 mon.node = node;
                 missing -= 1;
             }
         }
     }
+}
 
-    var d: Driver = .{ .gpa = gpa, .conn = &conn, .rd = rd_path, .mons = mons.items, .runtime = runtime };
-    reply("ok ready", .{});
-
+/// Answer one command per line on stdin until `quit` or its end.
+fn serve(d: *Driver) !void {
     var buf: [4096]u8 = undefined;
     var len: usize = 0;
     while (true) {
         if (std.mem.indexOfScalar(u8, buf[0..len], '\n')) |nl| {
-            const line = std.mem.trim(u8, buf[0..nl], " \t\r");
-            const quit = std.mem.eql(u8, line, "quit");
-            if (line.len > 0 and line[0] != '#') {
-                if (d.run(line)) |val| {
-                    if (val.len > 0) reply("ok {s}", .{val}) else reply("ok", .{});
-                } else |err| reply("err {t}", .{err});
-            }
+            const quit = d.answer(std.mem.trim(u8, buf[0..nl], " \t\r"));
             std.mem.copyForwards(u8, buf[0..], buf[nl + 1 .. len]);
             len -= nl + 1;
-            if (quit) break;
+            if (quit) return;
             continue;
         }
         if (len == buf.len) return error.LineTooLong;
         const n = try sys.read(0, buf[len..]);
-        if (n == 0) break;
+        if (n == 0) return;
         len += n;
-        // drop signals and stray replies queued meanwhile
-        while (conn.hasPending()) {
-            var msg = (try conn.nextMessageDeadline(0)) orelse break;
-            msg.deinit(gpa);
-        }
+        try d.dropPending();
     }
-    callVoid(&conn, rd_dest, rd_path, rd_session_iface, "Stop", "", &.{}) catch {};
 }
 
 fn reply(comptime fmt: []const u8, args: anytype) void {
     var out: [512]u8 = undefined;
     const s = std.fmt.bufPrint(&out, fmt ++ "\n", args) catch "err reply too long\n";
     sys.writeAll(1, s) catch {};
+}
+
+const Args = std.mem.TokenIterator(u8, .any);
+
+/// The next argument of a command.
+fn arg(it: *Args) ![]const u8 {
+    return it.next() orelse error.MissingArg;
 }
 
 const Driver = struct {
@@ -155,179 +172,212 @@ const Driver = struct {
     runtime: []const u8,
     out: [64]u8 = undefined,
 
+    /// Run one line (blank and # lines are ignored) and reply to it;
+    /// whether it was `quit`.
+    fn answer(self: *Driver, line: []const u8) bool {
+        if (line.len > 0 and line[0] != '#') {
+            if (self.run(line)) |val| {
+                if (val.len > 0) reply("ok {s}", .{val}) else reply("ok", .{});
+            } else |err| reply("err {t}", .{err});
+        }
+        return std.mem.eql(u8, line, "quit");
+    }
+
+    /// Drop signals and stray replies queued meanwhile.
+    fn dropPending(self: *Driver) !void {
+        while (self.conn.hasPending()) {
+            var msg = (try self.conn.nextMessageDeadline(0)) orelse break;
+            msg.deinit(self.gpa);
+        }
+    }
+
     fn run(self: *Driver, line: []const u8) ![]const u8 {
         var it = std.mem.tokenizeAny(u8, line, " \t");
         const cmd = it.next() orelse return "";
-        if (eql(cmd, "key")) {
-            const combo = it.next() orelse return error.MissingArg;
-            const mode = it.next() orelse "tap";
-            var codes: [8]u32 = undefined;
-            var n: usize = 0;
-            var parts = std.mem.splitScalar(u8, combo, '+');
-            while (parts.next()) |p| {
-                if (n == codes.len) return error.TooManyKeys;
-                codes[n] = keyCode(p) orelse return error.UnknownKey;
-                n += 1;
-            }
-            const press = !eql(mode, "up");
-            const release = !eql(mode, "down");
-            if (press) for (codes[0..n]) |c| try self.keycode(c, true);
-            if (release) {
-                var i = n;
-                while (i > 0) {
-                    i -= 1;
-                    try self.keycode(codes[i], false);
-                }
-            }
-            return "";
-        }
-        if (eql(cmd, "hold")) {
-            const code = keyCode(it.next() orelse return error.MissingArg) orelse return error.UnknownKey;
-            const ms = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
-            try self.keycode(code, true);
-            sleepMs(ms);
-            try self.keycode(code, false);
-            return "";
-        }
-        if (eql(cmd, "keysym")) {
-            const sym = try std.fmt.parseInt(u32, trimHex(it.next() orelse return error.MissingArg), 16);
-            for ([_]bool{ true, false }) |state| {
-                var m = dbus.Marshal.init(self.gpa);
-                defer m.deinit();
-                try m.putU32(sym);
-                try m.putBool(state);
-                try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyKeyboardKeysym", "ub", m.buf.items);
-            }
-            return "";
-        }
-        if (eql(cmd, "move")) {
-            const mon = try self.monitor(it.next() orelse return error.MissingArg);
-            const x = try std.fmt.parseFloat(f64, it.next() orelse return error.MissingArg);
-            const y = try std.fmt.parseFloat(f64, it.next() orelse return error.MissingArg);
-            var m = dbus.Marshal.init(self.gpa);
-            defer m.deinit();
-            try m.putString(mon.stream);
-            try putDouble(&m, x);
-            try putDouble(&m, y);
-            try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyPointerMotionAbsolute", "sdd", m.buf.items);
-            // let the client see enter/motion before a following click
-            sleepMs(40);
-            return "";
-        }
-        if (eql(cmd, "rel")) {
-            const dx = try std.fmt.parseFloat(f64, it.next() orelse return error.MissingArg);
-            const dy = try std.fmt.parseFloat(f64, it.next() orelse return error.MissingArg);
-            var m = dbus.Marshal.init(self.gpa);
-            defer m.deinit();
-            try putDouble(&m, dx);
-            try putDouble(&m, dy);
-            try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyPointerMotionRelative", "dd", m.buf.items);
-            return "";
-        }
-        if (eql(cmd, "down") or eql(cmd, "up") or eql(cmd, "click")) {
-            const name = it.next() orelse "left";
-            const btn: i32 = if (eql(name, "left")) 0x110 else if (eql(name, "right")) 0x111 else if (eql(name, "middle")) 0x112 else return error.UnknownButton;
-            if (!eql(cmd, "up")) try self.button(btn, true);
-            if (!eql(cmd, "down")) try self.button(btn, false);
-            return "";
-        }
-        if (eql(cmd, "wheel")) {
-            const steps = try std.fmt.parseInt(i32, it.next() orelse return error.MissingArg, 10);
-            var m = dbus.Marshal.init(self.gpa);
-            defer m.deinit();
-            try m.putU32(0); // vertical
-            try m.putI32(steps);
-            try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyPointerAxisDiscrete", "ui", m.buf.items);
-            return "";
-        }
-        if (eql(cmd, "shot")) {
-            const mon = try self.monitor(it.next() orelse return error.MissingArg);
-            const path = it.next() orelse return error.MissingArg;
-            return self.shot(mon, path);
-        }
-        if (eql(cmd, "find")) {
-            const mon = try self.monitor(it.next() orelse return error.MissingArg);
-            const rgb = try std.fmt.parseInt(u32, trimHex(it.next() orelse return error.MissingArg), 16);
-            const tol = try std.fmt.parseInt(u32, it.next() orelse "24", 10);
-            const min_w = try std.fmt.parseInt(u32, it.next() orelse "1", 10);
-            var frame = try self.grab(mon);
-            defer frame.deinit();
-            // optional region X0 Y0 X1 Y1: pixels outside it never match
-            var region = [4]u32{ 0, 0, frame.width, frame.height };
-            if (it.next()) |first| {
-                region[0] = try std.fmt.parseInt(u32, first, 10);
-                for (region[1..]) |*v| v.* = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
-                for (frame.pixels, 0..) |*p, i| {
-                    const x: u32 = @intCast(i % frame.width);
-                    const y: u32 = @intCast(i / frame.width);
-                    if (x < region[0] or y < region[1] or x >= region[2] or y >= region[3]) p.* = ~rgb;
-                }
-            }
-            const box = try findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol, min_w);
-            return std.fmt.bufPrint(&self.out, "{d} {d} {d} {d}", .{ (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, box[2] - box[0] + 1, box[3] - box[1] + 1 });
-        }
-        if (eql(cmd, "runs")) {
-            // runs PATH X RRGGBB [TOL]: vertical runs of that colour in column X
-            const path = it.next() orelse return error.MissingArg;
-            const data = try sys.readFileAlloc(self.gpa, path, 256 * 1024 * 1024);
-            defer self.gpa.free(data);
-            var img = try kit.png.decode(self.gpa, data);
-            defer img.deinit(self.gpa);
-            const x = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
-            const want = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 16);
-            const tol = try std.fmt.parseInt(u32, it.next() orelse "8", 10);
-            if (x >= img.width) return error.OutOfImage;
-            var runs: u32 = 0;
-            var inside = false;
-            for (0..img.height) |y| {
-                const hit = near(img.pixels[y * img.width + x], want, tol);
-                if (hit and !inside) runs += 1;
-                inside = hit;
-            }
-            return std.fmt.bufPrint(&self.out, "{d}", .{runs});
-        }
-        if (eql(cmd, "png") or eql(cmd, "pixel")) {
-            const path = it.next() orelse return error.MissingArg;
-            const data = try sys.readFileAlloc(self.gpa, path, 256 * 1024 * 1024);
-            defer self.gpa.free(data);
-            var img = try kit.png.decode(self.gpa, data);
-            defer img.deinit(self.gpa);
-            if (eql(cmd, "png")) return std.fmt.bufPrint(&self.out, "{d}x{d}", .{ img.width, img.height });
-            const x = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
-            const y = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
-            if (x >= img.width or y >= img.height) return error.OutOfImage;
-            return std.fmt.bufPrint(&self.out, "{x:0>8}", .{img.pixels[@as(usize, y) * img.width + x]});
-        }
-        if (eql(cmd, "sni-watcher")) {
-            // play org.kde.StatusNotifierWatcher until an item registers
-            const ms = try std.fmt.parseInt(u32, it.next() orelse "5000", 10);
-            if (!try self.conn.requestName("org.kde.StatusNotifierWatcher")) return error.NameTaken;
-            const deadline = sys.monoMs() + ms;
-            while (try self.conn.nextMessageDeadline(deadline)) |msg_| {
-                var msg = msg_;
-                defer msg.deinit(self.gpa);
-                if (!msg.isCall("org.kde.StatusNotifierWatcher", "RegisterStatusNotifierItem")) continue;
-                try self.conn.replyTo(&msg, "", &.{});
-                var r = msg.reader();
-                const item = try r.readString();
-                return std.fmt.bufPrint(&self.out, "{s} {s}", .{ msg.sender orelse "?", item }) catch "?";
-            }
-            return error.NoRegistration;
-        }
+        if (eql(cmd, "key")) return self.cmdKey(&it);
+        if (eql(cmd, "hold")) return self.cmdHold(&it);
+        if (eql(cmd, "keysym")) return self.cmdKeysym(&it);
+        if (eql(cmd, "move")) return self.cmdMove(&it);
+        if (eql(cmd, "rel")) return self.cmdRel(&it);
+        if (eql(cmd, "down") or eql(cmd, "up") or eql(cmd, "click")) return self.cmdButton(cmd, &it);
+        if (eql(cmd, "wheel")) return self.cmdWheel(&it);
+        if (eql(cmd, "shot")) return self.shot(try self.monitor(try arg(&it)), try arg(&it));
+        if (eql(cmd, "find")) return self.cmdFind(&it);
+        if (eql(cmd, "runs")) return self.cmdRuns(&it);
+        if (eql(cmd, "png") or eql(cmd, "pixel")) return self.cmdImage(cmd, &it);
+        if (eql(cmd, "sni-watcher")) return self.cmdSniWatcher(&it);
         if (eql(cmd, "sleep")) {
-            sleepMs(try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10));
+            sleepMs(try std.fmt.parseInt(u32, try arg(&it), 10));
             return "";
         }
-        if (eql(cmd, "monitors")) {
-            var w: usize = 0;
-            for (self.mons) |mon| {
-                const s = std.fmt.bufPrint(self.out[w..], "{s}{s}", .{ if (w > 0) " " else "", mon.connector }) catch break;
-                w += s.len;
-            }
-            return self.out[0..w];
-        }
+        if (eql(cmd, "monitors")) return self.cmdMonitors();
         if (eql(cmd, "quit")) return "";
         return error.UnknownCommand;
+    }
+
+    /// key COMBO [down|up]
+    fn cmdKey(self: *Driver, it: *Args) ![]const u8 {
+        const combo = try arg(it);
+        const mode = it.next() orelse "tap";
+        var codes: [8]u32 = undefined;
+        const n = try keys.parseCombo(combo, &codes);
+        const press = !eql(mode, "up");
+        const release = !eql(mode, "down");
+        if (press) for (codes[0..n]) |c| try self.keycode(c, true);
+        if (release) {
+            var i = n;
+            while (i > 0) {
+                i -= 1;
+                try self.keycode(codes[i], false);
+            }
+        }
+        return "";
+    }
+
+    /// hold NAME MS
+    fn cmdHold(self: *Driver, it: *Args) ![]const u8 {
+        const code = keys.keyCode(try arg(it)) orelse return error.UnknownKey;
+        const ms = try std.fmt.parseInt(u32, try arg(it), 10);
+        try self.keycode(code, true);
+        sleepMs(ms);
+        try self.keycode(code, false);
+        return "";
+    }
+
+    /// keysym HEX
+    fn cmdKeysym(self: *Driver, it: *Args) ![]const u8 {
+        const sym = try std.fmt.parseInt(u32, trimHex(try arg(it)), 16);
+        for ([_]bool{ true, false }) |state| {
+            var m = dbus.Marshal.init(self.gpa);
+            defer m.deinit();
+            try m.putU32(sym);
+            try m.putBool(state);
+            try self.notify("NotifyKeyboardKeysym", "ub", &m);
+        }
+        return "";
+    }
+
+    /// move MON X Y
+    fn cmdMove(self: *Driver, it: *Args) ![]const u8 {
+        const mon = try self.monitor(try arg(it));
+        const x = try std.fmt.parseFloat(f64, try arg(it));
+        const y = try std.fmt.parseFloat(f64, try arg(it));
+        var m = dbus.Marshal.init(self.gpa);
+        defer m.deinit();
+        try m.putString(mon.stream);
+        try putDouble(&m, x);
+        try putDouble(&m, y);
+        try self.notify("NotifyPointerMotionAbsolute", "sdd", &m);
+        // let the client see enter/motion before a following click
+        sleepMs(40);
+        return "";
+    }
+
+    /// rel DX DY
+    fn cmdRel(self: *Driver, it: *Args) ![]const u8 {
+        const dx = try std.fmt.parseFloat(f64, try arg(it));
+        const dy = try std.fmt.parseFloat(f64, try arg(it));
+        var m = dbus.Marshal.init(self.gpa);
+        defer m.deinit();
+        try putDouble(&m, dx);
+        try putDouble(&m, dy);
+        try self.notify("NotifyPointerMotionRelative", "dd", &m);
+        return "";
+    }
+
+    /// down|up|click [BTN]
+    fn cmdButton(self: *Driver, cmd: []const u8, it: *Args) ![]const u8 {
+        const name = it.next() orelse "left";
+        const btn: i32 = if (eql(name, "left")) 0x110 else if (eql(name, "right")) 0x111 else if (eql(name, "middle")) 0x112 else return error.UnknownButton;
+        if (!eql(cmd, "up")) try self.button(btn, true);
+        if (!eql(cmd, "down")) try self.button(btn, false);
+        return "";
+    }
+
+    /// wheel STEPS
+    fn cmdWheel(self: *Driver, it: *Args) ![]const u8 {
+        const steps = try std.fmt.parseInt(i32, try arg(it), 10);
+        var m = dbus.Marshal.init(self.gpa);
+        defer m.deinit();
+        try m.putU32(0); // vertical
+        try m.putI32(steps);
+        try self.notify("NotifyPointerAxisDiscrete", "ui", &m);
+        return "";
+    }
+
+    /// find MON RRGGBB [TOL [MINW [X0 Y0 X1 Y1]]]
+    fn cmdFind(self: *Driver, it: *Args) ![]const u8 {
+        const mon = try self.monitor(try arg(it));
+        const rgb = try std.fmt.parseInt(u32, trimHex(try arg(it)), 16);
+        const tol = try std.fmt.parseInt(u32, it.next() orelse "24", 10);
+        const min_w = try std.fmt.parseInt(u32, it.next() orelse "1", 10);
+        var frame = try self.grab(mon);
+        defer frame.deinit();
+        // optional region X0 Y0 X1 Y1: pixels outside it never match
+        if (it.next()) |first| {
+            var region: [4]u32 = undefined;
+            region[0] = try std.fmt.parseInt(u32, first, 10);
+            for (region[1..]) |*v| v.* = try std.fmt.parseInt(u32, try arg(it), 10);
+            pixels.maskOutside(frame.pixels, frame.width, region, rgb);
+        }
+        const box = try pixels.findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol, min_w);
+        return std.fmt.bufPrint(&self.out, "{d} {d} {d} {d}", .{ (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, box[2] - box[0] + 1, box[3] - box[1] + 1 });
+    }
+
+    /// runs PATH X RRGGBB [TOL]: vertical runs of that colour in column X
+    fn cmdRuns(self: *Driver, it: *Args) ![]const u8 {
+        var img = try self.loadPng(try arg(it));
+        defer img.deinit(self.gpa);
+        const x = try std.fmt.parseInt(u32, try arg(it), 10);
+        const want = try std.fmt.parseInt(u32, try arg(it), 16);
+        const tol = try std.fmt.parseInt(u32, it.next() orelse "8", 10);
+        if (x >= img.width) return error.OutOfImage;
+        return std.fmt.bufPrint(&self.out, "{d}", .{pixels.columnRuns(img.pixels, img.width, img.height, x, want, tol)});
+    }
+
+    /// png PATH | pixel PATH X Y
+    fn cmdImage(self: *Driver, cmd: []const u8, it: *Args) ![]const u8 {
+        var img = try self.loadPng(try arg(it));
+        defer img.deinit(self.gpa);
+        if (eql(cmd, "png")) return std.fmt.bufPrint(&self.out, "{d}x{d}", .{ img.width, img.height });
+        const x = try std.fmt.parseInt(u32, try arg(it), 10);
+        const y = try std.fmt.parseInt(u32, try arg(it), 10);
+        if (x >= img.width or y >= img.height) return error.OutOfImage;
+        return std.fmt.bufPrint(&self.out, "{x:0>8}", .{img.pixels[@as(usize, y) * img.width + x]});
+    }
+
+    /// sni-watcher MS: play org.kde.StatusNotifierWatcher until an item
+    /// registers
+    fn cmdSniWatcher(self: *Driver, it: *Args) ![]const u8 {
+        const ms = try std.fmt.parseInt(u32, it.next() orelse "5000", 10);
+        if (!try self.conn.requestName("org.kde.StatusNotifierWatcher")) return error.NameTaken;
+        const deadline = sys.monoMs() + ms;
+        while (try self.conn.nextMessageDeadline(deadline)) |msg_| {
+            var msg = msg_;
+            defer msg.deinit(self.gpa);
+            if (!msg.isCall("org.kde.StatusNotifierWatcher", "RegisterStatusNotifierItem")) continue;
+            try self.conn.replyTo(&msg, "", &.{});
+            var r = msg.reader();
+            const item = try r.readString();
+            return std.fmt.bufPrint(&self.out, "{s} {s}", .{ msg.sender orelse "?", item }) catch "?";
+        }
+        return error.NoRegistration;
+    }
+
+    /// monitors: the connectors, in command line order
+    fn cmdMonitors(self: *Driver) []const u8 {
+        var w: usize = 0;
+        for (self.mons) |mon| {
+            const s = std.fmt.bufPrint(self.out[w..], "{s}{s}", .{ if (w > 0) " " else "", mon.connector }) catch break;
+            w += s.len;
+        }
+        return self.out[0..w];
+    }
+
+    fn loadPng(self: *Driver, path: []const u8) !kit.png.Image {
+        const data = try sys.readFileAlloc(self.gpa, path, 256 * 1024 * 1024);
+        defer self.gpa.free(data);
+        return kit.png.decode(self.gpa, data);
     }
 
     fn monitor(self: *Driver, name: []const u8) !*Monitor {
@@ -337,12 +387,17 @@ const Driver = struct {
         return &self.mons[i];
     }
 
+    /// Call a method of the remote desktop session.
+    fn notify(self: *Driver, member: []const u8, sig: []const u8, m: *const dbus.Marshal) !void {
+        try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, member, sig, m.buf.items);
+    }
+
     fn keycode(self: *Driver, code: u32, state: bool) !void {
         var m = dbus.Marshal.init(self.gpa);
         defer m.deinit();
         try m.putU32(code);
         try m.putBool(state);
-        try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyKeyboardKeycode", "ub", m.buf.items);
+        try self.notify("NotifyKeyboardKeycode", "ub", &m);
         // give the compositor a beat so clients see distinct events
         sleepMs(15);
     }
@@ -352,7 +407,7 @@ const Driver = struct {
         defer m.deinit();
         try m.putI32(btn);
         try m.putBool(state);
-        try callVoid(self.conn, rd_dest, self.rd, rd_session_iface, "NotifyPointerButton", "ib", m.buf.items);
+        try self.notify("NotifyPointerButton", "ib", &m);
         sleepMs(15);
     }
 
@@ -381,50 +436,6 @@ const Driver = struct {
     }
 };
 
-/// Within `t` per channel of `c`.
-fn near(p: u32, c: u32, t: u32) bool {
-    inline for (.{ 0, 8, 16 }) |sh| {
-        const a: i32 = @intCast((p >> sh) & 0xFF);
-        const b: i32 = @intCast((c >> sh) & 0xFF);
-        if (@abs(a - b) > t) return false;
-    }
-    return true;
-}
-
-/// Bounding box (x0, y0, x1, y1) of the first blob, in reading order, at
-/// least `min_w` wide, of pixels within `tol` (per channel) of `rgb`: e.g.
-/// a dialog's accent coloured default button.
-fn findBlob(gpa: std.mem.Allocator, px: []const u32, w: u32, h: u32, rgb: u32, tol: u32, min_w: u32) ![4]u32 {
-    var seen = try gpa.alloc(bool, px.len);
-    defer gpa.free(seen);
-    @memset(seen, false);
-    var stack: std.ArrayList(usize) = .empty;
-    defer stack.deinit(gpa);
-    for (px, 0..) |p, start| {
-        if (seen[start] or !near(p, rgb, tol)) continue;
-        try stack.append(gpa, start);
-        seen[start] = true;
-        var box = [4]u32{ w, h, 0, 0 };
-        while (stack.pop()) |i| {
-            const x: u32 = @intCast(i % w);
-            const y: u32 = @intCast(i / w);
-            box = .{ @min(box[0], x), @min(box[1], y), @max(box[2], x), @max(box[3], y) };
-            const nbrs = [4]?usize{
-                if (x > 0) i - 1 else null,
-                if (x + 1 < w) i + 1 else null,
-                if (y > 0) i - w else null,
-                if (y + 1 < h) i + w else null,
-            };
-            for (nbrs) |n| if (n) |j| if (!seen[j] and near(px[j], rgb, tol)) {
-                seen[j] = true;
-                try stack.append(gpa, j);
-            };
-        }
-        if (box[2] - box[0] + 1 >= min_w) return box;
-    }
-    return error.NotFound;
-}
-
 fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
@@ -440,37 +451,6 @@ fn sleepMs(ms: u32) void {
 
 fn putDouble(m: *dbus.Marshal, v: f64) !void {
     try m.putU64(@bitCast(v));
-}
-
-/// evdev key codes by name (US physical positions; the compositor's keymap
-/// decides what they type)
-fn keyCode(name: []const u8) ?u32 {
-    if (name.len > 1 and name[0] == '#') return std.fmt.parseInt(u32, name[1..], 10) catch null;
-    if (name.len == 1) {
-        const c = name[0];
-        const letters = "qwertyuiop"; // 16..25
-        const row2 = "asdfghjkl"; // 30..38
-        const row3 = "zxcvbnm"; // 44..50
-        if (std.mem.indexOfScalar(u8, letters, c)) |i| return @intCast(16 + i);
-        if (std.mem.indexOfScalar(u8, row2, c)) |i| return @intCast(30 + i);
-        if (std.mem.indexOfScalar(u8, row3, c)) |i| return @intCast(44 + i);
-        if (c >= '1' and c <= '9') return @intCast(2 + c - '1');
-        if (c == '0') return 11;
-    }
-    const table = [_]struct { []const u8, u32 }{
-        .{ "esc", 1 },       .{ "minus", 12 },     .{ "equal", 13 },      .{ "backspace", 14 },
-        .{ "tab", 15 },      .{ "leftbrace", 26 }, .{ "rightbrace", 27 }, .{ "enter", 28 },
-        .{ "ctrl", 29 },     .{ "semicolon", 39 }, .{ "apostrophe", 40 }, .{ "grave", 41 },
-        .{ "shift", 42 },    .{ "backslash", 43 }, .{ "comma", 51 },      .{ "dot", 52 },
-        .{ "slash", 53 },    .{ "rshift", 54 },    .{ "alt", 56 },        .{ "space", 57 },
-        .{ "capslock", 58 }, .{ "f1", 59 },        .{ "f2", 60 },         .{ "102nd", 86 },
-        .{ "rctrl", 97 },    .{ "altgr", 100 },    .{ "home", 102 },      .{ "up", 103 },
-        .{ "pageup", 104 },  .{ "left", 105 },     .{ "right", 106 },     .{ "end", 107 },
-        .{ "down", 108 },    .{ "pagedown", 109 }, .{ "insert", 110 },    .{ "delete", 111 },
-        .{ "super", 125 },   .{ "print", 99 },
-    };
-    for (table) |e| if (eql(e[0], name)) return e[1];
-    return null;
 }
 
 fn callPath(gpa: std.mem.Allocator, conn: *dbus.Connection, dest: []const u8, path: []const u8, iface: []const u8, member: []const u8, sig: []const u8, body: []const u8) ![]u8 {
