@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -380,6 +380,32 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... and its Ctrl+C copies" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
         keys esc
         check "Esc closes it" wait_log 5 "quick access: closed"
+        ;;
+    settings)
+        # the quick-access, history and GNOME integration settings, from
+        # the keyboard (SHOTLET_SETTINGS_FOCUS=n focuses the n-th control:
+        # 3 thumbnail switch, 5 seconds +, 11 Clear history, 13 Enable)
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        cfgf=$HOME/.config/shotlet/config
+        open_settings() { # open_settings N KEY...
+            local n=$1; shift
+            SHOTLET_SETTINGS_FOCUS=$n SHOTLET_DUMP_FRAME=$OUT/settings-$n run_shotlet "settings-$n" settings
+            sleep 2
+            keys "$@"
+            sleep 0.5
+            keys esc
+            wait_exit 5
+        }
+        open_settings 3 space
+        check "the thumbnail switch turns quick access off" grep -q "^quick_access=false" "$cfgf"
+        open_settings 5 enter
+        check "  ... and + makes it stay longer" grep -q "^quick_access_seconds=10" "$cfgf"
+        mkdir -p "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+        open_settings 11 enter
+        check "Clear history empties it" test ! -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+        open_settings 13 enter
+        check "Enable installs the GNOME Shell extension" test -f "$HOME/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io/extension.js"
         ;;
     annotate)
         # Annotate on the thumbnail reopens the editor with the shapes
