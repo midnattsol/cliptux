@@ -84,6 +84,9 @@ test {
     _ = @import("ui/editor.zig");
     _ = @import("ui/shapes.zig");
     _ = @import("ui/editor_ui.zig");
+    _ = @import("ui/doc.zig");
+    _ = @import("ui/view.zig");
+    _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
