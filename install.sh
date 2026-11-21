@@ -50,6 +50,9 @@ if [ -f "$config/autostart/shotlet.desktop" ]; then
     autostart=yes
 fi
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$data/applications" || true
+# KDE: KWin finds the file's X-KDE-DBUS-Restricted-Interfaces (screenshots
+# without a dialog) through the KService cache
+command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1 || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$data/icons/hicolor" 2>/dev/null || true
 echo "installed $prefix/bin/shotlet, $app_id.desktop and its icon"
 
