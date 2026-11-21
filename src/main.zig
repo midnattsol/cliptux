@@ -90,4 +90,5 @@ test {
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
     _ = @import("platform/wayland.zig");
+    _ = @import("ui/keyboard.zig");
 }

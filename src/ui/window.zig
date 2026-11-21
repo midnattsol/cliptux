@@ -7,7 +7,7 @@ const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
 const render = @import("../gfx/render.zig");
 const png = @import("../gfx/png.zig");
-const shapes = @import("shapes.zig");
+const keyboard = @import("keyboard.zig");
 
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64 },
@@ -28,6 +28,8 @@ pub const Key = struct {
     ctrl: bool,
     shift: bool,
     alt: bool = false,
+    /// Caps Lock is on (already applied to text)
+    caps: bool = false,
     /// true for presses synthesized by key repeat
     repeat: bool = false,
     /// xkb keysym for the active layout; 0 when unknown
@@ -172,6 +174,8 @@ pub const Window = struct {
     ptr_y: f64 = 0,
     ctrl: bool = false,
     shift: bool = false,
+    /// layout translation (libxkbcommon when available) and key repeat
+    kb: keyboard.Keyboard = .{},
     enter_serial: u32 = 0,
     input_serial: u32 = 0, // last button/key serial, for set_selection
 
@@ -190,6 +194,8 @@ pub const Window = struct {
             .conn = try wl.Connection.connect(alloc, runtime_dir, display),
         };
         errdefer self.conn.deinit();
+        self.kb = keyboard.Keyboard.init();
+        errdefer self.kb.deinit();
 
         self.registry = try self.conn.getRegistry();
         const done = try self.conn.sync();
@@ -241,6 +247,7 @@ pub const Window = struct {
         self.destroyPool();
         if (self.cursor_pool_mem.len > 0) sys.munmap(self.cursor_pool_mem);
         self.queue.deinit(self.alloc);
+        self.kb.deinit();
         self.conn.deinit();
     }
 
@@ -432,36 +439,72 @@ pub const Window = struct {
         std.log.info("frame dump: wrote {s} ({d}x{d})", .{ path, w, h });
     }
 
-    /// Blocking: next logical input event.
+    /// Blocking: next logical input event (including synthesized key
+    /// repeats, which wake the wait when due).
     pub fn nextEvent(self: *Window) !InputEvent {
         while (self.queue.items.len == 0) {
-            try self.dispatchOne();
+            _ = try self.waitAndDispatch(-1);
         }
         return self.queue.orderedRemove(0);
     }
 
     /// Like nextEvent but returns null after timeout_ms with no events.
     pub fn nextEventTimeout(self: *Window, timeout_ms: i32) !?InputEvent {
+        const deadline = keyboard.monotonicMs() + @max(0, timeout_ms);
         while (self.queue.items.len == 0) {
-            try self.conn.flush();
-            if (try self.conn.pollEvent()) |ev| {
-                try self.handleEvent(ev);
-                continue;
-            }
-            var fds = [_]sys.pollfd{.{ .fd = self.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
-            const n = try sys.poll(&fds, timeout_ms);
-            if (n == 0) return null;
-            try self.dispatchOne();
+            const left = @max(0, deadline - keyboard.monotonicMs());
+            const progressed = try self.waitAndDispatch(@intCast(left));
+            if (!progressed and keyboard.monotonicMs() >= deadline) return null;
         }
         return self.queue.orderedRemove(0);
     }
 
+    /// One wait step: queue a due key repeat, dispatch buffered events, or
+    /// poll the socket for at most max_ms (-1 = forever), waking early for
+    /// the next key repeat. Returns false when it timed out idle.
+    fn waitAndDispatch(self: *Window, max_ms: i32) !bool {
+        try self.pumpRepeat();
+        if (self.queue.items.len > 0) return true;
+        try self.conn.flush();
+        if (try self.conn.pollEvent()) |ev| {
+            try self.handleEvent(ev);
+            return true;
+        }
+        var fds = [_]sys.pollfd{.{ .fd = self.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
+        const n = try sys.poll(&fds, self.pollTimeoutMs(max_ms));
+        if (n > 0) {
+            try self.dispatchOne();
+            return true;
+        }
+        try self.pumpRepeat();
+        return self.queue.items.len > 0;
+    }
+
+    /// How long a caller that polls conn.fd itself may sleep: max_ms
+    /// (-1 = forever) shortened to the next pending key repeat. Such loops
+    /// should call drainPending() after waking so repeats get queued.
+    pub fn pollTimeoutMs(self: *const Window, max_ms: i32) i32 {
+        const rep = self.kb.repeat.timeoutMs(keyboard.monotonicMs()) orelse return max_ms;
+        const r: i32 = @intCast(@min(rep, std.math.maxInt(i32)));
+        return if (max_ms < 0) r else @min(max_ms, r);
+    }
+
+    /// Queue a synthesized key press if the held key is due to repeat.
+    fn pumpRepeat(self: *Window) !void {
+        const code = self.kb.repeat.due(keyboard.monotonicMs()) orelse return;
+        var key = self.translateKey(code, true, false);
+        key.repeat = true;
+        try self.queue.append(self.alloc, .{ .key = key });
+    }
+
     /// Read and dispatch all events already buffered in the Wayland socket
-    /// without blocking. Call before rendering to get the latest input state.
+    /// without blocking, plus any due key repeat. Call before rendering to
+    /// get the latest input state.
     pub fn drainPending(self: *Window) !void {
         while (try self.conn.pollEvent()) |ev| {
             try self.handleEvent(ev);
         }
+        try self.pumpRepeat();
     }
 
     fn dispatchOne(self: *Window) !void {
@@ -630,11 +673,32 @@ pub const Window = struct {
         return @as(f64, @floatFromInt(self.scale120)) / 120.0;
     }
 
+    fn translateKey(self: *Window, code: u32, pressed: bool, use_compose: bool) Key {
+        const t = self.kb.translate(code, pressed, use_compose);
+        self.ctrl = t.ctrl;
+        self.shift = t.shift;
+        return .{
+            .code = code,
+            .pressed = pressed,
+            .ctrl = t.ctrl,
+            .shift = t.shift,
+            .alt = t.alt,
+            .caps = t.caps,
+            .keysym = t.keysym,
+            .text_buf = t.text_buf,
+            .text_len = t.text_len,
+        };
+    }
+
     fn handleKeyboard(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
             wl.wl_keyboard.ev_keymap => {
-                // we use raw evdev codes; just close the keymap fd
-                if (self.conn.takeFd()) |fd| sys.close(fd);
+                const format = try r.uint();
+                const size = try r.uint();
+                if (self.conn.takeFd()) |fd| {
+                    defer sys.close(fd);
+                    self.kb.setKeymapFd(format, fd, size);
+                }
             },
             wl.wl_keyboard.ev_key => {
                 const serial = try r.uint();
@@ -642,33 +706,36 @@ pub const Window = struct {
                 const code = try r.uint();
                 const state = try r.uint();
                 self.input_serial = serial;
-                switch (code) {
-                    KEY_LEFTCTRL, KEY_RIGHTCTRL => self.ctrl = state == 1,
-                    KEY_LEFTSHIFT, KEY_RIGHTSHIFT => self.shift = state == 1,
-                    else => {},
+                const pressed = state == 1;
+                const key = self.translateKey(code, pressed, true);
+                if (pressed) {
+                    self.kb.repeat.press(code, self.kb.keyRepeats(code), keyboard.monotonicMs());
+                } else {
+                    self.kb.repeat.release(code);
                 }
-                var key: Key = .{
-                    .code = code,
-                    .pressed = state == 1,
-                    .ctrl = self.ctrl,
-                    .shift = self.shift,
-                };
-                // US layout until the keymap is read
-                if (!self.ctrl) if (shapes.evdevToChar(code, self.shift)) |ch| {
-                    key.text_buf[0] = ch;
-                    key.text_len = 1;
-                };
                 try self.queue.append(self.alloc, .{ .key = key });
             },
             wl.wl_keyboard.ev_modifiers => {
                 _ = try r.uint(); // serial
                 const depressed = try r.uint();
-                // conventional xkb modifier bit positions
-                self.ctrl = (depressed & (1 << 2)) != 0;
-                self.shift = (depressed & (1 << 0)) != 0;
+                const latched = try r.uint();
+                const locked = try r.uint();
+                const group = try r.uint();
+                self.kb.updateMods(depressed, latched, locked, group);
+                const t = self.kb.translate(0, false, false);
+                self.ctrl = t.ctrl;
+                self.shift = t.shift;
+            },
+            wl.wl_keyboard.ev_repeat_info => {
+                const rate = try r.int();
+                const delay = try r.int();
+                self.kb.repeat.setInfo(rate, delay);
             },
             wl.wl_keyboard.ev_enter => {
                 self.input_serial = try r.uint();
+            },
+            wl.wl_keyboard.ev_leave => {
+                self.kb.leave();
             },
             else => {},
         }
