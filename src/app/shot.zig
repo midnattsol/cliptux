@@ -14,6 +14,7 @@ const sys = @import("../platform/sys.zig");
 const keep_mod = @import("keep.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
+const shellcap = @import("shellcap.zig");
 const Env = env_mod.Env;
 
 fn warmupPw() void {
@@ -30,18 +31,24 @@ pub const From = struct {
     file: ?[]const u8 = null,
     /// comma-separated PNGs, one per monitor, laid out left to right
     monitors: ?[]const u8 = null,
+    /// taken by the GNOME Shell extension (not a dev source)
+    shell: ?shellcap.Args = null,
+
+    fn any(self: From) bool {
+        return self.file != null or self.monitors != null or self.shell != null;
+    }
 };
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
     const window = @import("../ui/window.zig");
     const t0 = nowMs();
 
-    // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
-    const pw_thread = std.Thread.spawn(.{}, warmupPw, .{}) catch null;
-
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
     const t_dbus = nowMs();
+
+    // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
+    const pw_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupPw, .{}) catch null;
     portal.registerApp(gpa, &conn);
     const t_scope = nowMs();
 
@@ -71,6 +78,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     if (per_monitor) try win.openOutputs("Shotlet") else try win.open("Shotlet", .{ .fullscreen = true });
     const t_open = nowMs();
     std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
+    if (from.shell) |sh| if (sh.t0_ms) |key| {
+        std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t_open - key, t0 - key });
+    };
     std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
         t_dbus - t0,
         t_scope - t_dbus,
@@ -224,6 +234,12 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
     const pw = @import("../platform/pw.zig");
 
+    if (from.shell) |args| {
+        const t_load = nowMs();
+        const cap = try shellcap.load(gpa, env.runtime_dir, args);
+        std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
+        return cap;
+    }
     if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
     if (from.file) |path| {
         const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);

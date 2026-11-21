@@ -2,6 +2,7 @@ const std = @import("std");
 const shot = @import("app/shot.zig");
 const daemon = @import("app/daemon.zig");
 const devtools = @import("app/devtools.zig");
+const shellcap = @import("app/shellcap.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
 
@@ -53,7 +54,10 @@ pub fn main(init: std.process.Init) !void {
         .cache_home = env_mod.absolute(vars.get("XDG_CACHE_HOME")),
     };
 
-    const cmd = if (args.len > 1) args[1] else "shot";
+    // `shotlet --from-shell ID ...` is how the GNOME Shell extension
+    // starts a capture: `shotlet shot --from-shell ID ...`
+    const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
+    const cmd = if (shell_launch) "shot" else if (args.len > 1) args[1] else "shot";
 
     if (std.mem.eql(u8, cmd, "shot")) {
         // dev/testing flags: --from FILE (skip portal), --sel X,Y,W,H
@@ -61,14 +65,27 @@ pub fn main(init: std.process.Init) !void {
         // --from-monitors A.png,B.png (one image per monitor, side by side)
         var from: ?[]const u8 = null;
         var from_monitors: ?[]const u8 = null;
+        var from_shell: ?shellcap.Args = null;
+        var shell_monitors: []const u8 = "";
+        var shell_pieces: []const u8 = "";
+        var t0: ?i64 = null;
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
-        var i: usize = 2;
+        var i: usize = if (shell_launch) 1 else 2;
         while (i + 1 < args.len) : (i += 2) {
             if (std.mem.eql(u8, args[i], "--from")) {
                 from = args[i + 1];
             } else if (std.mem.eql(u8, args[i], "--from-monitors")) {
                 from_monitors = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--from-shell")) {
+                // the GNOME Shell extension's capture (src/app/shellcap.zig)
+                from_shell = .{ .id = args[i + 1] };
+            } else if (std.mem.eql(u8, args[i], "--monitors")) {
+                shell_monitors = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--pieces")) {
+                shell_pieces = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--t0")) {
+                t0 = std.fmt.parseInt(i64, args[i + 1], 10) catch null;
             } else if (std.mem.eql(u8, args[i], "--smoke")) {
                 smoke_ms = std.fmt.parseInt(i64, args[i + 1], 10) catch 0;
             } else if (std.mem.eql(u8, args[i], "--sel")) {
@@ -80,7 +97,12 @@ pub fn main(init: std.process.Init) !void {
                 sel = vals;
             }
         }
-        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors }, sel, smoke_ms);
+        if (from_shell) |*fs| {
+            fs.monitors = shell_monitors;
+            fs.pieces = shell_pieces;
+            fs.t0_ms = t0;
+        }
+        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
             (std.mem.eql(u8, args[2], "--foreground") or std.mem.eql(u8, args[2], "-f"));
@@ -164,6 +186,7 @@ test {
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
+    _ = @import("app/shellcap.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
