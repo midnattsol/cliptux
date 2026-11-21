@@ -10,7 +10,7 @@
 //! one line on stdout: `ok [value]` or `err <reason>`.
 //!
 //!   key COMBO [down|up]   tap (or press/release) evdev keys: ctrl+shift+s,
-//!                         altgr+e, semicolon, 30 (raw evdev code)
+//!                         altgr+e, semicolon, 2, #30 (raw evdev code)
 //!   hold NAME MS          press, wait MS, release (key repeat)
 //!   keysym HEX            tap a keysym (mutter picks the keycode)
 //!   move MON X Y          absolute motion, logical pixels of monitor MON
@@ -18,7 +18,9 @@
 //!   down|up|click [BTN]   left (default), right, middle
 //!   wheel STEPS           discrete vertical scroll (+ is down)
 //!   shot MON PATH         write the monitor's current picture as a PNG
-//!   find MON RRGGBB [TOL] answer "cx cy w h" of the first blob of that colour
+//!   find MON RRGGBB [TOL [MINW]]
+//!                         answer "cx cy w h" of the first blob of that colour
+//!                         (at least MINW wide)
 //!   png PATH              answer the image size, WxH
 //!   pixel PATH X Y        answer one pixel as AARRGGBB hex
 //!   sleep MS
@@ -243,9 +245,10 @@ const Driver = struct {
             const mon = try self.monitor(it.next() orelse return error.MissingArg);
             const rgb = try std.fmt.parseInt(u32, trimHex(it.next() orelse return error.MissingArg), 16);
             const tol = try std.fmt.parseInt(u32, it.next() orelse "24", 10);
+            const min_w = try std.fmt.parseInt(u32, it.next() orelse "1", 10);
             var frame = try self.grab(mon);
             defer frame.deinit();
-            const box = try findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol);
+            const box = try findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol, min_w);
             return std.fmt.bufPrint(&self.out, "{d} {d} {d} {d}", .{ (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, box[2] - box[0] + 1, box[3] - box[1] + 1 });
         }
         if (eql(cmd, "png") or eql(cmd, "pixel")) {
@@ -327,10 +330,10 @@ const Driver = struct {
     }
 };
 
-/// Bounding box (x0, y0, x1, y1) of the first blob, in reading order, of
-/// pixels within `tol` (per channel) of `rgb`: e.g. a dialog's accent
-/// coloured default button.
-fn findBlob(gpa: std.mem.Allocator, px: []const u32, w: u32, h: u32, rgb: u32, tol: u32) ![4]u32 {
+/// Bounding box (x0, y0, x1, y1) of the first blob, in reading order, at
+/// least `min_w` wide, of pixels within `tol` (per channel) of `rgb`: e.g.
+/// a dialog's accent coloured default button.
+fn findBlob(gpa: std.mem.Allocator, px: []const u32, w: u32, h: u32, rgb: u32, tol: u32, min_w: u32) ![4]u32 {
     const near = struct {
         fn f(p: u32, c: u32, t: u32) bool {
             inline for (.{ 0, 8, 16 }) |sh| {
@@ -341,33 +344,34 @@ fn findBlob(gpa: std.mem.Allocator, px: []const u32, w: u32, h: u32, rgb: u32, t
             return true;
         }
     }.f;
-    const start = for (px, 0..) |p, i| {
-        if (near(p, rgb, tol)) break i;
-    } else return error.NotFound;
     var seen = try gpa.alloc(bool, px.len);
     defer gpa.free(seen);
     @memset(seen, false);
     var stack: std.ArrayList(usize) = .empty;
     defer stack.deinit(gpa);
-    try stack.append(gpa, start);
-    seen[start] = true;
-    var box = [4]u32{ w, h, 0, 0 };
-    while (stack.pop()) |i| {
-        const x: u32 = @intCast(i % w);
-        const y: u32 = @intCast(i / w);
-        box = .{ @min(box[0], x), @min(box[1], y), @max(box[2], x), @max(box[3], y) };
-        const nbrs = [4]?usize{
-            if (x > 0) i - 1 else null,
-            if (x + 1 < w) i + 1 else null,
-            if (y > 0) i - w else null,
-            if (y + 1 < h) i + w else null,
-        };
-        for (nbrs) |n| if (n) |j| if (!seen[j] and near(px[j], rgb, tol)) {
-            seen[j] = true;
-            try stack.append(gpa, j);
-        };
+    for (px, 0..) |p, start| {
+        if (seen[start] or !near(p, rgb, tol)) continue;
+        try stack.append(gpa, start);
+        seen[start] = true;
+        var box = [4]u32{ w, h, 0, 0 };
+        while (stack.pop()) |i| {
+            const x: u32 = @intCast(i % w);
+            const y: u32 = @intCast(i / w);
+            box = .{ @min(box[0], x), @min(box[1], y), @max(box[2], x), @max(box[3], y) };
+            const nbrs = [4]?usize{
+                if (x > 0) i - 1 else null,
+                if (x + 1 < w) i + 1 else null,
+                if (y > 0) i - w else null,
+                if (y + 1 < h) i + w else null,
+            };
+            for (nbrs) |n| if (n) |j| if (!seen[j] and near(px[j], rgb, tol)) {
+                seen[j] = true;
+                try stack.append(gpa, j);
+            };
+        }
+        if (box[2] - box[0] + 1 >= min_w) return box;
     }
-    return box;
+    return error.NotFound;
 }
 
 fn eql(a: []const u8, b: []const u8) bool {
@@ -390,7 +394,7 @@ fn putDouble(m: *dbus.Marshal, v: f64) !void {
 /// evdev key codes by name (US physical positions; the compositor's keymap
 /// decides what they type)
 fn keyCode(name: []const u8) ?u32 {
-    if (std.fmt.parseInt(u32, name, 10)) |c| return c else |_| {}
+    if (name.len > 1 and name[0] == '#') return std.fmt.parseInt(u32, name[1..], 10) catch null;
     if (name.len == 1) {
         const c = name[0];
         const letters = "qwertyuiop"; // 16..25

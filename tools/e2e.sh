@@ -98,26 +98,50 @@ if [ "${1:-}" = "--inner" ]; then
             [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
     }
     not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
-    no_find() { ! drv find "$1" "$2" 2>/dev/null; }
+    no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }
     eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
 
-    # --- the ScreenCast portal dialog (xdg-desktop-portal-gnome)
-    accent=3584e4 # Adwaita's accent: the Share button, the checkbox
-    # share_dialog MON [TILES]: wait for the dialog on MON, tick TILES
-    # monitor tiles (indexes in the dialog, for multi-monitor pickers), Share
-    share_dialog() {
-        local mon=$1 tiles=${2:-} sc=${3:-1} i
-        for i in $(seq 1 50); do
-            drv find "$mon" "$accent" 2>/dev/null && break
+    # --- portal dialogs (xdg-desktop-portal-gnome), found by colour
+    accent=3584e4 # Adwaita's accent: default buttons, checkboxes
+    # wait_button MON [SECONDS]: wait for an accent-coloured button (at
+    # least 40 px wide) on MON; its centre lands in BX, BY
+    wait_button() {
+        local i
+        BX=
+        for i in $(seq 1 $((${2:-10} * 5))); do
+            if drv find "$1" "$accent" 24 40 2>/dev/null; then
+                read -r BX BY _ <<<"$VAL"
+                return 0
+            fi
             sleep 0.2
         done
-        [ -n "$VAL" ] || { echo "  no share dialog" >&2; return 1; }
-        sleep 0.3
+        echo "  no dialog button on monitor $1" >&2
+        return 1
+    }
+    # press_button MON: click the button until its dialog goes away
+    press_button() {
+        local try
+        for try in 1 2 3; do
+            click "$1" "$BX" "$BY"
+            sleep 1
+            drv find "$1" "$accent" 24 40 2>/dev/null || return 0
+            read -r BX BY _ <<<"$VAL"
+        done
+        return 1
+    }
+    # share_dialog MON [TILES [SCALE]]: on the ScreenCast picker, tick the
+    # monitor TILES (0 1: for multi-monitor pickers, where nothing is
+    # preselected and Share starts disabled), then press Share
+    share_dialog() {
+        local mon=$1 tiles=${2:-} sc=${3:-1} t cx cy
         if [ -n "$tiles" ]; then
-            # with several monitors nothing is preselected: the first accent
-            # blob is the "Remember" checkbox; tiles sit below it
-            drv find "$mon" "$accent" || return 1
-            local cx cy
+            # Share is disabled: the first accent blob is the "Remember"
+            # checkbox; the tiles sit below it
+            local i
+            for i in $(seq 1 50); do drv find "$mon" "$accent" 24 10 2>/dev/null && break; sleep 0.2; done
+            [ -n "$VAL" ] || return 1
+            sleep 0.5
+            drv find "$mon" "$accent" 24 10 || return 1
             read -r cx cy _ <<<"$VAL"
             for t in $tiles; do
                 case $t in
@@ -125,13 +149,11 @@ if [ "${1:-}" = "--inner" ]; then
                     1) click "$mon" $((cx + 240 * sc)) $((cy + 173 * sc)) ;;
                 esac || return 1
             done
-            sleep 0.3
         fi
-        drv find "$mon" "$accent" || return 1 # now the enabled Share button
-        local sx sy
-        read -r sx sy _ <<<"$VAL"
+        wait_button "$mon" || return 1
+        sleep 0.5 # let the dialog finish mapping before clicking
         shot "$mon" dialog
-        click "$mon" "$sx" "$sy"
+        press_button "$mon"
     }
 
     case $scenario in
@@ -184,8 +206,8 @@ if [ "${1:-}" = "--inner" ]; then
         drv key esc
         drv move 0 800 450
         run_shotlet cancel
-        for i in $(seq 1 50); do drv find 0 "$accent" 2>/dev/null && break; sleep 0.2; done
-        sleep 0.3
+        wait_button 0
+        sleep 0.5
         shot 0 dialog
         drv key esc
         check "Esc in the dialog ends shotlet" wait_exit 5
@@ -379,6 +401,83 @@ if [ "${1:-}" = "--inner" ]; then
         f=$(ls "$HOME"/Pictures/shotlet-*.png 2>/dev/null | head -1)
         check "Ctrl+S wrote ~/Pictures/shotlet-*.png" test -n "$f"
         check "  ... of the selection's size" eq "$(png_size "$f")" 160x120
+        ;;
+    clipboard)
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet clip
+        share_dialog 0 && wait_editor 10 || { fail "editor"; exit 1; }
+        drag 0 200 200 0 700 500
+        keys t
+        click 0 260 260
+        drv sleep 200
+        # paste in: wl-copy offers text the way other apps do
+        timeout 5 wl-copy -- "pegado €ñ¿ 漢字 👍" &
+        sleep 0.5
+        keys ctrl+v
+        sleep 0.3
+        keys ctrl+a ctrl+c
+        sleep 0.3
+        check "paste then copy round-trips non-ASCII text" eq "$(timeout 5 wl-paste -n)" "pegado €ñ¿ 漢字 👍"
+        keys home shift+right shift+right shift+right ctrl+x
+        sleep 0.3
+        check "Ctrl+X cuts the selected characters" eq "$(timeout 5 wl-paste -n)" "peg"
+        keys ctrl+a ctrl+c
+        sleep 0.3
+        check "  ... out of the text" eq "$(timeout 5 wl-paste -n)" "ado €ñ¿ 漢字 👍"
+        shot 0 text
+        keys esc enter
+        sleep 1
+        check "Enter copies the image after text editing" eq "$(clip_png "$OUT/img.png" && png_size "$OUT/img.png")" 500x300
+        # the image stays pasteable, repeatedly, while shotlet serves it
+        check "  ... and pastes again" clip_png "$OUT/img2.png"
+        check "  ... as the same bytes" cmp -s "$OUT/img.png" "$OUT/img2.png"
+        check "  ... from a still running shotlet" alive
+        timeout 5 wl-copy -- "other" &
+        sleep 0.5
+        check "shotlet exits once another app takes the clipboard" wait_exit 5
+        ;;
+    saveas)
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet saveas
+        share_dialog 0 && wait_editor 10 || { fail "editor"; exit 1; }
+        drag 0 300 300 0 500 450
+        keys ctrl+shift+s
+        # the GTK file chooser: its Save button is the accent-coloured blob
+        check "Ctrl+Shift+S opens the file chooser" wait_button 0 15
+        sleep 0.5
+        shot 0 chooser
+        # the proposed name is selected, minus the extension
+        keys e 2 e minus s a v e enter
+        check "Save As closes after the chooser" wait_exit 10
+        check "  ... with status 0" eq "$RC" 0
+        ls -la "$HOME/Pictures" >"$OUT/pictures.txt"
+        check "  ... writing the chosen file" eq "$(png_size "$HOME/Pictures/e2e-save.png")" 200x150
+        run_shotlet cancel
+        wait_editor 5
+        drag 0 300 300 0 500 450
+        keys ctrl+shift+s
+        wait_button 0 15
+        sleep 0.5
+        keys esc
+        sleep 1
+        shot 0 cancelled
+        check "cancelling the chooser writes nothing" eq "$(ls "$HOME/Pictures" | wc -l)" 1
+        if alive; then
+            check "  ... and returns to the editor" test "$(drv find 0 e03131 40 && echo found)" = found
+            keys ctrl+shift+s
+            wait_button 0 15
+            sleep 0.5
+            keys a g a i n enter
+            check "  ... which can still save" wait_exit 10
+            check "  ... the same selection" eq "$(png_size "$HOME/Pictures/again.png")" 200x150
+        else
+            wait "$SHOT_PID"; RC=$?
+            fail "  ... and returns to the editor (shotlet exited, status $RC)"
+        fi
         ;;
     *)
         skip "unknown scenario"
