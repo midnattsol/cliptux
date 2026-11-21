@@ -139,6 +139,8 @@ test {
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");
+    _ = @import("app/tray.zig");
+    _ = @import("app/daemon.zig");
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
     _ = @import("platform/wayland.zig");

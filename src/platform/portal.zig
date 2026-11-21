@@ -863,6 +863,10 @@ fn fakeSignal(body: []const u8, path: []const u8, iface: []const u8, member: []c
 
 test "Request outcomes from Response codes, errors and a vanished portal" {
     const alloc = std.testing.allocator;
+    // the failures below are expected; keep their warnings out of the output
+    const saved_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_level;
     const path = "/org/freedesktop/portal/desktop/request/1_5/tok";
 
     const Case = struct { code: u32, want: Outcome };

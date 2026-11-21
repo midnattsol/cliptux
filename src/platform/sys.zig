@@ -522,6 +522,10 @@ pub fn fdSize(fd: fd_t) !u64 {
     return stx.size;
 }
 
+pub fn fchmod(fd: fd_t, mode: u32) void {
+    _ = linux.fchmod(fd, mode);
+}
+
 pub fn ftruncateFd(fd: fd_t, len: u64) void {
     _ = linux.ftruncate(fd, @intCast(len));
 }
