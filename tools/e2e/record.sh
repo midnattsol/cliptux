@@ -165,6 +165,13 @@ rec-trim)
     d=$(duration_ms "$t")
     check "  ... a shorter file ($d ms)" test "${d:-0}" -ge 1300 -a "${d:-0}" -le 1800
     check "  ... next to the original" test "$(dirname "$t")" = "$(dirname "$f")"
+    check "  ... kept with its own thumbnail" any_log 10 "quick video: showing"
+    run_shotlet trimwin trim "$XDG_STATE_HOME/shotlet/history" "$id"
+    wait_log 10 "trim: " && sleep 1.5
+    shot 0 trim
+    check "the trim window shows the filmstrip's handles" eval 'drv find 0 ffcc00 20 4'
+    keys esc
+    check "  ... and Esc closes it" wait_exit 5
     ;;
 rec-portal)
     drv_start Meta-0 || { fail "driver"; exit 1; }
