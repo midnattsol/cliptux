@@ -13,6 +13,10 @@
 //   shotlet:pin[:...]   a pinned screenshot: above other windows, on every
 //                       workspace (it may take the focus when clicked)
 //
+// Tagged windows are left out of Alt+Tab (both switchers build their lists
+// from Meta.Display.get_tab_list, filtered here): a Wayland client cannot
+// set skip-taskbar itself.
+//
 // It also owns dev.shotlet.Shell1 on the session bus, so Shotlet can tell
 // that it is active, with Place(title, x, y) to move one of these windows.
 // No polling: everything hangs off window signals, and disable() undoes it.
@@ -21,7 +25,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const APP_ID = 'io.github.midnattsol.Shotlet';
 const BUS_NAME = 'dev.shotlet.Shell1';
@@ -64,6 +68,12 @@ export default class ShotletExtension extends Extension {
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
 
+        this._injections = new InjectionManager();
+        this._injections.overrideMethod(Meta.Display.prototype, 'get_tab_list',
+            original => function (...args) {
+                return original.call(this, ...args).filter(w => !roleOf(w));
+            });
+
         this._dbus = Gio.DBusExportedObject.wrapJSObject(IFACE, this);
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
         this._nameId = Gio.bus_own_name_on_connection(Gio.DBus.session,
@@ -74,6 +84,8 @@ export default class ShotletExtension extends Extension {
         if (this._idleId)
             GLib.source_remove(this._idleId);
         this._idleId = 0;
+        this._injections.clear();
+        this._injections = null;
         global.display.disconnect(this._createdId);
         this._createdId = 0;
         for (const [win, st] of this._windows) {
