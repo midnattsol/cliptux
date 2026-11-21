@@ -113,6 +113,8 @@ installed (`libtesseract.so.5`, plus its language data, e.g.
 field finds them by their text (`SHOTLET_OCR_LANG=eng+spa` for other
 languages); without it there is no search field. Settings: `history=false`
 keeps nothing, `history_max=50` captures and `history_max_mb=500` cap it.
+All of these are also in `shotlet settings` (General), with Clear history
+and the GNOME integration's state.
 
 ### Where the floating windows go (and GNOME)
 
@@ -127,7 +129,7 @@ GNOME's mutter has no such protocol (and will not add it), so Shotlet
 ships a small GNOME Shell extension (`gnome-extension/`, GNOME 45 to 50)
 that does it for Shotlet's windows only: it places the thumbnail
 bottom-left on the monitor under the pointer, keeps it and pins above
-other windows on every workspace, and hands the keyboard focus straight
+other windows on every workspace, leaves them out of Alt+Tab, and hands the keyboard focus straight
 back to the app you were in when the thumbnail appears. Install it with
 `shotlet gnome-integration install` (or the link on the thumbnail):
 GNOME Shell on Wayland only picks up a newly installed extension at your
