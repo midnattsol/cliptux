@@ -82,6 +82,7 @@ says `capture path: direct (...)` or `capture path: portal (...)`.
 shotlet            # capture + editor
 shotlet --daemon   # tray icon (autostart: ./install.sh --autostart)
 shotlet settings   # preferences and shortcut bindings
+shotlet window     # other capture modes: see Capture modes below
 ```
 
 Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts
@@ -93,6 +94,63 @@ shotlet pin FILE.png                  # pin an image to the screen
 shotlet gnome-integration install     # GNOME: no prompts; thumbnail and pins above
 shotlet gnome-integration shortcut '<Shift><Super>s'   # its capture key
 ```
+
+## Capture modes
+
+| Mode | Command | GNOME shortcut |
+| --- | --- | --- |
+| Area (select in the editor) | `shotlet` | `Print` |
+| Screen under the pointer | `shotlet fullscreen` | `Ctrl+Print` |
+| All screens | `shotlet screens` | `Ctrl+Shift+Print` |
+| Previous area | `shotlet previous` | `Shift+Super+Print` |
+| Window | `shotlet window` | `Super+Print` |
+| Scrolling capture | `shotlet scroll` | `Ctrl+Super+Print` |
+| Self-timer (3, 5 or 10 s, then an area) | `shotlet timer [S]` | `Ctrl+Shift+Super+Print` |
+
+Every mode takes `--delay S`. With the GNOME integration each mode has its
+own shortcut (none of them is one of GNOME's; a key GNOME's screenshot
+tool holds is left unbound and `shotlet gnome-integration shortcut` says
+so); change one in Settings › Shortcuts or with
+`shotlet gnome-integration shortcut window '<Super>w'` (`none` turns it
+off). Elsewhere, bind the commands in your desktop's keyboard settings.
+The editor's More menu and the tray menu start a window, scrolling or
+timed capture too.
+
+- **Screen, all screens, window** skip the region selection and do what
+  `after_fullscreen` says (Settings › General › Capture modes): `thumbnail`
+  (the default: the floating thumbnail and the history), `copy`, or
+  `editor` (with that screen selected). The screen is the one under the
+  pointer on GNOME; elsewhere the first one.
+- **Previous area** opens the editor with the last selection you copied or
+  saved already selected. It is remembered per monitor layout
+  (`$XDG_STATE_HOME/shotlet/last-area`), so it never lands on a different
+  set of monitors.
+- **Window**, as on macOS: the windows are outlined, the one under the
+  pointer lights up, a click captures just that window at its native
+  resolution, also where other windows cover it, with its own rounded
+  corners on a transparent background and a soft shadow
+  (`window_shadow=false` for none; with beautify on, it sits on the
+  beautify background instead). On GNOME the extension paints the window
+  from its own surface; on KDE it is KWin's window picker
+  (`ScreenShot2.CaptureInteractive`, authorized by the desktop entry like
+  the other screenshots). wlroots compositors tell clients nothing about
+  windows: there it selects an area instead.
+- **Scrolling capture**: drag over what scrolls, then Start (or Enter).
+  Shotlet turns the wheel there step by step and stitches the frames
+  (sticky headers and footers kept once, repeated rows handled, frames
+  verified pixel by pixel) until the page stops moving, you press Stop,
+  or the image reaches `scroll_max_height=20000` px; a small control
+  beside the region shows the image growing. The result opens in the
+  editor, where a tall image fits the screen's width and the wheel scrolls
+  it (Ctrl+wheel: size). On GNOME the extension scrolls (see below); on
+  wlroots Shotlet uses the virtual pointer (`zwlr_virtual_pointer_v1`)
+  and direct capture; on KDE, unless KWin offers Shotlet its fake input,
+  you scroll yourself and Shotlet captures as the content moves (also
+  with `scroll_auto=false`).
+- **Self-timer**: a small countdown in the middle of the screen, gone
+  before the capture; on GNOME the shell draws it and it never takes the
+  keyboard focus, so a menu left open for it stays open. Click it to
+  cancel. `timer_seconds=5` in the settings (3, 5, 10).
 
 ## After a capture
 
@@ -186,6 +244,20 @@ them as soon as they are read (leftovers from a Shotlet that failed to
 start are deleted after a minute). Sandboxed (Flatpak) apps cannot reach
 the extension's bus name or that directory.
 
+The capture modes keep to the same rules. `CaptureMode(mode, delay)` is
+`Capture()` for a mode, with the same caller check and rate limit. A
+window capture's picker runs in the shell and its PNG takes the same
+path. A scrolling capture is a session the shotlet binary opens with
+`ScrollBegin` on one region of one monitor; only that bus connection may
+step or end it, one session at a time, never on the lock screen, and only
+while Shotlet's scrolling control is on screen. Each step returns the id
+of a fresh 0600 capture file of that region, nothing else. To scroll,
+the extension creates a virtual pointer for that session only: it puts
+the pointer in the middle of the region, turns the wheel there (at most
+10 notches a step, 25 steps a second) and puts the pointer back at the
+end; the device is dropped when the session ends, when Shotlet's
+connection goes away, after 30 s without a step or after 5 minutes.
+
 When the extension is missing, older, or cannot capture, Shotlet uses the
 screen-sharing portal as before. `shotlet gnome-integration status` and
 Settings › General say which way captures go.
@@ -241,6 +313,7 @@ the editor for the full list.
 | What | Where |
 | --- | --- |
 | Settings | `$XDG_CONFIG_HOME/shotlet/config` (default `~/.config/shotlet/config`), mode 0600 |
+| Previous area | `$XDG_STATE_HOME/shotlet/last-area`: the last selection per monitor layout |
 | Daemon log | `$XDG_STATE_HOME/shotlet/daemon.log` (default `~/.local/state/shotlet`), rotated at 1 MiB |
 | Screenshots | the `save_dir` setting, else your XDG Pictures folder (`XDG_PICTURES_DIR` / `user-dirs.dirs`), else `~/Pictures` |
 | Recent captures | `$XDG_STATE_HOME/shotlet/history/<id>/`: `image.png`, `thumb.png`, `meta` (time, size, saved path, recognised text), `source.png` + `doc` (to annotate again); private (0700/0600) |
@@ -283,7 +356,15 @@ program refused, uninstall restoring GNOME's keys), `shell-owner`
 `shell-mixed` (two monitors at scales 2
 and 1, checked across the seam), `shell-tray` (the tray's Activate and
 menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
-and the portal when the extension cannot capture). The portal scenarios
+and the portal when the extension cannot capture). The capture modes'
+scenarios (`tools/e2e/modes.sh`) also run with the extension:
+`modes-screen` (two monitors: the one under the pointer, all screens,
+the previous area, each `after_fullscreen`), `modes-timer` (the countdown
+on screen but not in the capture), `modes-window` (a 640x480 GTK window
+captured at exactly its size with see-through corners, then with its
+shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the
+expected height, its marker band exactly once, scrolling in the editor)
+and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
 run without the extension. On Debian/Ubuntu:
 `apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul python3-gi gir1.2-gtk-4.0`.
 `E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
@@ -303,7 +384,9 @@ permission-check overrides), two outputs at mixed scales and rotated or
 flipped outputs; the portal path (`xdg-desktop-portal-wlr` with direct
 capture turned off by `SHOTLET_NO_DIRECT=1`, `xdg-desktop-portal-kde` when
 Shotlet is not installed and KWin refuses it) with restore tokens; and the
-text search with Tesseract (English and Spanish). Scenarios count the
+text search with Tesseract (English and Spanish); `modes`: screen
+capture without the editor and window capture (KWin's picker; an area on
+wlroots). Scenarios count the
 consent prompts: zero on the direct path. Shotlet is installed in each
 container with `install.sh`. Each scenario runs in a throwaway
 container (Debian trixie, `--rm`, no network) with its own session bus,
