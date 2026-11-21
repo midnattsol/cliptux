@@ -52,10 +52,14 @@ pub fn autoWidth(fs: f64, str: []const u8) i32 {
 
 /// Direction of the paragraph `p` (first strong character; LTR if none).
 pub fn paragraphRtl(p: []const u8) bool {
+    // P2/P3: text inside isolates does not count
     var it = utf8.Iterator.init(p);
+    var depth: usize = 0;
     while (it.next()) |cp| switch (bidi.class(cp)) {
-        .L => return false,
-        .R, .AL => return true,
+        .L => if (depth == 0) return false,
+        .R, .AL => if (depth == 0) return true,
+        .LRI, .RLI, .FSI => depth += 1,
+        .PDI => depth -|= 1,
         else => {},
     };
     return false;

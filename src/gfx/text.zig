@@ -213,7 +213,7 @@ pub fn available() bool {
 
 /// Zero-width codepoints that should neither draw nor advance.
 fn invisible(cp: u21) bool {
-    return cp < 0x20 or cp == 0x7F or (cp >= 0x200B and cp <= 0x200F) or
+    return cp < 0x20 or cp == 0x7F or (cp >= 0x200B and cp <= 0x200F) or bidi.isExplicit(cp) or
         (cp >= 0xFE00 and cp <= 0xFE0F) or cp == 0xFEFF or cp == 0x2060;
 }
 
