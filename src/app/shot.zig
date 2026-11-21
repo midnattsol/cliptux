@@ -14,6 +14,7 @@ const sys = @import("../platform/sys.zig");
 const keep_mod = @import("keep.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
+const gnome = @import("gnome.zig");
 const shellcap = @import("shellcap.zig");
 const Env = env_mod.Env;
 
@@ -46,6 +47,19 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
     const t_dbus = nowMs();
+
+    // with the GNOME Shell extension, the shell takes the screenshot (no
+    // prompt) and starts another shotlet on it
+    if (!from.any() and gnome.isGnome() and gnome.extensionActive(&conn)) {
+        switch (gnome.requestCapture(gpa, &conn)) {
+            .started => {
+                std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
+                return;
+            },
+            .declined => return,
+            .unavailable => {},
+        }
+    }
 
     // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
     const pw_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupPw, .{}) catch null;

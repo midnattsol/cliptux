@@ -91,4 +91,8 @@ fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
     const dir = "gnome-extension/shotlet@midnattsol.github.io/";
     m.addAnonymousImport("gnome_ext_js", .{ .root_source_file = b.path(dir ++ "extension.js") });
     m.addAnonymousImport("gnome_ext_metadata", .{ .root_source_file = b.path(dir ++ "metadata.json") });
+    m.addAnonymousImport("gnome_ext_schema", .{ .root_source_file = b.path(dir ++ "schemas/org.gnome.shell.extensions.shotlet.gschema.xml") });
+    // compiled with glib-compile-schemas and committed: the extension
+    // directory is copied as is (GNOME Shell does not compile schemas)
+    m.addAnonymousImport("gnome_ext_schema_compiled", .{ .root_source_file = b.path(dir ++ "schemas/gschemas.compiled") });
 }

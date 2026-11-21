@@ -15,7 +15,10 @@ const usage =
     \\  shotlet history     recent captures (history clear: forget them)
     \\  shotlet pin FILE    pin a PNG to the screen
     \\  shotlet gnome-integration [status|install|uninstall]
-    \\                      the GNOME Shell extension for floating windows
+    \\                      the GNOME Shell extension: prompt-free captures,
+    \\                      floating windows
+    \\  shotlet gnome-integration shortcut [KEY...|none]
+    \\                      its capture shortcut (default Print)
     \\  shotlet --help      show this help
     \\
 ;
@@ -130,7 +133,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {
         try @import("app/pin.zig").run(gpa, env, args[2]);
     } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
-        try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status");
+        try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
     } else if (try devtools.run(gpa, env, cmd, args)) {
@@ -187,6 +190,7 @@ test {
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
     _ = @import("app/shellcap.zig");
+    _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");

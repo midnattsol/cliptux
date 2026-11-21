@@ -488,7 +488,7 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
             return false;
         },
         .gnome_enable => {
-            st.gnome = switch (gnome.install(alloc, st.env, bus)) {
+            st.gnome = switch (gnome.install(alloc, st.env, bus, .yes)) {
                 .active => .active,
                 .installed_relogin => .installed,
                 .failed => .failed,

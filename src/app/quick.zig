@@ -521,7 +521,7 @@ const Quick = struct {
         switch (h.control) {
             .menu => self.act(h.card, menu_items[h.item].action),
             .hint => {
-                const res = gnome.install(self.gpa, self.env, self.bus_());
+                const res = gnome.install(self.gpa, self.env, self.bus_(), .yes);
                 self.hint_text = switch (res) {
                     .active => "GNOME integration is on.",
                     .installed_relogin => "Installed. Log out and in once",

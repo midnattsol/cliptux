@@ -1,8 +1,9 @@
 {
   "uuid": "shotlet@midnattsol.github.io",
   "name": "Shotlet integration",
-  "description": "Lets Shotlet's floating screenshot thumbnail sit in the bottom-left corner above other windows without taking the keyboard focus, and keeps pinned screenshots on top. Only windows of the Shotlet app (app id shotlet) are touched.",
+  "description": "Takes screenshots for Shotlet without any prompt: its own shortcut (default Print, left alone while GNOME's screenshot tool uses that key) captures inside GNOME Shell and opens Shotlet's editor. Also lets Shotlet's floating screenshot thumbnail sit in the bottom-left corner above other windows without taking the keyboard focus, and keeps pinned screenshots on top. Only windows of the Shotlet app are touched, and captures go only to Shotlet.",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://github.com/midnattsol/shotlet",
-  "version": 1
+  "settings-schema": "org.gnome.shell.extensions.shotlet",
+  "version": 2
 }
