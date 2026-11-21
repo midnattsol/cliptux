@@ -153,6 +153,16 @@ pub const Config = struct {
     beautify_shadow: bool = true,
     /// the editor's first-run hint was shown
     hint_shown: bool = false,
+    /// after Copy/Save, a floating thumbnail with more actions
+    quick_access: bool = true,
+    /// how long the thumbnail stays (it stays while hovered)
+    quick_access_seconds: u16 = 8,
+    /// keep copied and saved captures in $XDG_STATE_HOME/shotlet/history
+    history: bool = true,
+    /// at most this many captures...
+    history_max: u16 = 50,
+    /// ...taking at most this many MiB
+    history_max_mb: u32 = 500,
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from
     /// disk) means every key is written.
@@ -177,7 +187,7 @@ pub const Config = struct {
 
 // --- keys ---
 
-const n_fixed_keys = 12;
+const n_fixed_keys = 17;
 pub const n_keys = n_fixed_keys + n_actions;
 
 const fixed_key_names = [n_fixed_keys][]const u8{
@@ -195,6 +205,11 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     "beautify_corners",
     "beautify_shadow",
     "hint_shown",
+    "quick_access",
+    "quick_access_seconds",
+    "history",
+    "history_max",
+    "history_max_mb",
 };
 
 pub const padding_names = [4][]const u8{ "none", "small", "medium", "large" };
@@ -236,6 +251,11 @@ fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         9 => if (cfg.beautify_corners) "true" else "false",
         10 => if (cfg.beautify_shadow) "true" else "false",
         11 => if (cfg.hint_shown) "true" else "false",
+        12 => if (cfg.quick_access) "true" else "false",
+        13 => std.fmt.bufPrint(buf, "{d}", .{cfg.quick_access_seconds}) catch unreachable,
+        14 => if (cfg.history) "true" else "false",
+        15 => std.fmt.bufPrint(buf, "{d}", .{cfg.history_max}) catch unreachable,
+        16 => std.fmt.bufPrint(buf, "{d}", .{cfg.history_max_mb}) catch unreachable,
         else => blk: {
             const b = cfg.binds[k - n_fixed_keys];
             break :blk std.fmt.bufPrint(buf, "{s}{s}{d}", .{
@@ -279,6 +299,17 @@ fn applyValue(cfg: *Config, key: []const u8, value: []const u8) void {
         cfg.beautify_shadow = !std.mem.eql(u8, value, "false");
     } else if (std.mem.eql(u8, key, "hint_shown")) {
         cfg.hint_shown = std.mem.eql(u8, value, "true");
+    } else if (std.mem.eql(u8, key, "quick_access")) {
+        cfg.quick_access = !std.mem.eql(u8, value, "false");
+    } else if (std.mem.eql(u8, key, "quick_access_seconds")) {
+        const v = std.fmt.parseInt(u16, value, 10) catch cfg.quick_access_seconds;
+        cfg.quick_access_seconds = std.math.clamp(v, 1, 3600);
+    } else if (std.mem.eql(u8, key, "history")) {
+        cfg.history = !std.mem.eql(u8, value, "false");
+    } else if (std.mem.eql(u8, key, "history_max")) {
+        cfg.history_max = std.math.clamp(std.fmt.parseInt(u16, value, 10) catch cfg.history_max, 1, 10000);
+    } else if (std.mem.eql(u8, key, "history_max_mb")) {
+        cfg.history_max_mb = std.math.clamp(std.fmt.parseInt(u32, value, 10) catch cfg.history_max_mb, 1, 1 << 20);
     } else if (std.mem.startsWith(u8, key, "bind_")) {
         const name = key["bind_".len..];
         inline for (@typeInfo(Action).@"enum".field_names, 0..) |fld_name, i| {
@@ -581,6 +612,11 @@ test "config save/load roundtrip" {
     cfg.default_color = 5;
     cfg.binds[@backingInt(Action.pen)] = .{ .code = 33, .ctrl = true };
     cfg.setScToken("tok-123");
+    cfg.quick_access = false;
+    cfg.quick_access_seconds = 12;
+    cfg.history = false;
+    cfg.history_max = 7;
+    cfg.history_max_mb = 64;
     try saveDir(alloc, dir, &cfg);
 
     const loaded = loadDir(alloc, dir);
@@ -590,6 +626,11 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(@as(u3, 5), loaded.default_color);
     try std.testing.expect(loaded.binds[@backingInt(Action.pen)].matches(33, true, false));
     try std.testing.expectEqualStrings("tok-123", loaded.scToken().?);
+    try std.testing.expectEqual(false, loaded.quick_access);
+    try std.testing.expectEqual(@as(u16, 12), loaded.quick_access_seconds);
+    try std.testing.expectEqual(false, loaded.history);
+    try std.testing.expectEqual(@as(u16, 7), loaded.history_max);
+    try std.testing.expectEqual(@as(u32, 64), loaded.history_max_mb);
 
     // private to the user
     var path_buf: [600]u8 = undefined;
