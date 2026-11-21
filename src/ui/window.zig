@@ -1744,6 +1744,12 @@ test "live: one surface per output" {
         std.debug.print("output {s} \"{s}\": {d},{d} {d}x{d} scale {d}\n", .{ o.name(), o.description(), r.x, r.y, r.w, r.h, o.scale });
     };
     try win.openOutputs("Shotlet live test");
+    // IME: enabling/disabling must not upset the compositor
+    std.debug.print("text-input-v3: {}\n", .{win.hasTextInput()});
+    try win.setTextInput(true, .{ .x = 100, .y = 100, .w = 2, .h = 20 });
+    try win.roundtrip();
+    try win.setTextInput(false, null);
+    try win.roundtrip();
     try std.testing.expectEqual(n_out, win.surfaceList().len);
     const colors = [_]u32{ 0xFF2060C0, 0xFFC04020, 0xFF20A040, 0xFFA0A020 };
     for (win.surfaceList(), 0..) |s, i| {
@@ -1805,4 +1811,59 @@ test "live: one surface per output" {
         _ = try win.nextEventTimeout(200);
     }
     win.closeWindow();
+}
+
+fn testWireString(buf: []u8, s: []const u8) []const u8 {
+    std.mem.writeInt(u32, buf[0..4], @intCast(s.len + 1), .little);
+    @memcpy(buf[4..][0..s.len], s);
+    const padded = std.mem.alignForward(usize, s.len + 1, 4);
+    @memset(buf[4 + s.len .. 4 + padded], 0);
+    return buf[0 .. 4 + padded];
+}
+
+test "text-input-v3 events become key-like text and preedit" {
+    const t = std.testing;
+    var win = Window{ .alloc = t.allocator, .conn = undefined };
+    defer win.queue.deinit(t.allocator);
+    var buf: [128]u8 = undefined;
+
+    // preedit "n" (composition in progress), applied on done
+    var r = wl.ArgReader{ .data = testWireString(&buf, "ñ") };
+    try win.handleTextInput(wl.zwp_text_input_v3.ev_preedit_string, &r);
+    try t.expectEqual(@as(usize, 0), win.queue.items.len); // nothing before done
+    r = .{ .data = &[_]u8{ 1, 0, 0, 0 } };
+    try win.handleTextInput(wl.zwp_text_input_v3.ev_done, &r);
+    try t.expectEqualStrings("ñ", win.preedit());
+    try t.expectEqual(@as(usize, 1), win.queue.items.len);
+    const pe = win.queue.items[0].key;
+    try t.expect(pe.preedit and !pe.pressed and pe.code == 0 and pe.text_len == 0);
+    win.queue.clearRetainingCapacity();
+
+    // commit a long string: split at character boundaries, preedit cleared
+    const long = "¿Qué tal, señor? ñandú €€€";
+    r = .{ .data = testWireString(&buf, long) };
+    try win.handleTextInput(wl.zwp_text_input_v3.ev_commit_string, &r);
+    r = .{ .data = &[_]u8{ 2, 0, 0, 0 } };
+    try win.handleTextInput(wl.zwp_text_input_v3.ev_done, &r);
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(t.allocator);
+    var saw_preedit_clear = false;
+    for (win.queue.items) |ev| {
+        const k = ev.key;
+        try t.expectEqual(@as(u32, 0), k.code);
+        if (k.preedit) {
+            saw_preedit_clear = true;
+            continue;
+        }
+        try t.expect(k.pressed);
+        try t.expect(std.unicode.utf8ValidateSlice(k.text()));
+        try joined.appendSlice(t.allocator, k.text());
+    }
+    try t.expectEqualStrings(long, joined.items);
+    try t.expect(saw_preedit_clear);
+    try t.expectEqualStrings("", win.preedit());
+
+    // malformed payload is an error, not a crash
+    r = .{ .data = &[_]u8{ 9, 0, 0, 0, 'x' } };
+    try t.expectError(error.Malformed, win.handleTextInput(wl.zwp_text_input_v3.ev_commit_string, &r));
 }
