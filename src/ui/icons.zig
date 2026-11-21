@@ -63,6 +63,10 @@ pub const Icon = enum {
     // editor tools in the More menu
     scan_text,
     shield,
+    // capture modes
+    capture_window,
+    capture_scroll,
+    timer,
 };
 
 /// Path data, 24x24 units. The first block is the "Glass" mockup's set.
@@ -110,6 +114,9 @@ pub fn data(icon: Icon) []const u8 {
         .crop => "M6 2v16h16M2 6h16v16",
         .scan_text => "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M8 10h8M8 14h5",
         .shield => "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6zM9 12l2 2 4-4",
+        .capture_window => "M3 5h18v14H3zM3 9h18",
+        .capture_scroll => "M7 3h10v18H7zM12 8v8M9 13l3 3 3-3",
+        .timer => "M12 6c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8zM12 10v4l2.5 1.5M10 2h4",
     };
 }
 

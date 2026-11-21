@@ -1,5 +1,5 @@
-//! What the editor remembers between captures: the beautify settings and
-//! that the first-run hint was seen.
+//! What the editor remembers between captures: its beautify frame and
+//! whether the first-run hint was shown.
 
 const std = @import("std");
 const config = @import("config.zig");

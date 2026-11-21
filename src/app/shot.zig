@@ -17,6 +17,10 @@ const history = @import("history.zig");
 const annot = @import("annot.zig");
 const gnome = @import("gnome.zig");
 const shellcap = @import("shellcap.zig");
+const modes = @import("modes/mode.zig");
+const mode_flow = @import("modes/flow.zig");
+const shell_bus = @import("modes/shell_bus.zig");
+const last_area = @import("modes/last_area.zig");
 const Env = env_mod.Env;
 
 fn warmupPw() void {
@@ -35,9 +39,13 @@ pub const From = struct {
     monitors: ?[]const u8 = null,
     /// taken by the GNOME Shell extension (not a dev source)
     shell: ?shellcap.Args = null,
+    /// the capture mode (app/modes/), and its self-timer
+    req: modes.Request = .{},
+    /// already taken (a window KWin captured); owned by the capture
+    image: ?png.Image = null,
 
     fn any(self: From) bool {
-        return self.file != null or self.monitors != null or self.shell != null;
+        return self.file != null or self.monitors != null or self.shell != null or self.image != null;
     }
 };
 
@@ -53,7 +61,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     // prompt) and starts another shotlet on it
     if (!from.any() and gnome.isGnome() and gnome.extensionActive(&conn)) {
         @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
-        switch (gnome.requestCapture(gpa, &conn)) {
+        switch (shell_bus.requestMode(gpa, &conn, from.req)) {
             .started => {
                 std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
                 return;
@@ -80,12 +88,19 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 
     if (pw_thread) |t| t.join();
     const t_pw = nowMs();
+    // the self-timer, where the GNOME extension did not count down
+    if (from.req.delay_s > 0 and !from.any() and !try @import("../ui/countdown.zig").run(&win, from.req.delay_s)) return;
     var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
         std.log.info("capture cancelled", .{});
         return;
     };
     defer cap.deinit(gpa);
+    if (from.req.delay_s > 0) win.closeWindow();
     const t_capture = nowMs();
+    const edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
+        .done => return,
+        .edit => |e| e,
+    };
 
     // one fullscreen surface per monitor when the layout is known
     const per_monitor = cap.monitors.len > 1 and for (cap.monitors) |m| {
@@ -106,7 +121,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         t_capture - t_pw,
         t_open - t_capture,
     });
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null);
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null, edit);
 }
 
 /// The editor's fullscreen surfaces: one per monitor when the capture has
@@ -130,7 +145,7 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen) !void {
+pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     const editor_mod = @import("../ui/editor.zig");
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
@@ -152,6 +167,8 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
     };
     ed.show_hint = !cfg.hint_shown;
     ed.presetSelection(preset_sel);
+    if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
+    ed.keep_alpha = edit.keep_alpha;
     defer ed.deinit();
     if (reopen) |r| {
         // the shapes as they were, still editable
@@ -171,8 +188,15 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
         if (reopen == null) @import("editor_prefs.zig").remember(gpa, env, cfg, &ed);
         defer if (result.png_data) |d| gpa.free(d);
         const replace: ?keep_mod.Kept = if (reopen) |r| r.kept else null;
+        if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
+            last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
 
         switch (result.action) {
+            .new_capture => {
+                // the More menu's other capture modes: a fresh shotlet
+                win.closeWindow();
+                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
+            },
             .cancel, .copied => {
                 win.closeWindow();
                 ed.releaseCaches(); // serving may outlive the session; drop ~140MB
@@ -255,7 +279,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     if (root.len > kept.root_buf.len) return error.PathTooLong;
     @memcpy(kept.root_buf[0..root.len], root);
     kept.root_len = root.len;
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc });
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc }, .{});
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
@@ -269,6 +293,7 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }
+    if (from.image) |img| return try capture.Capture.single(gpa, img);
     if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
     if (from.file) |path| {
         const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
@@ -312,7 +337,7 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         // GNOME only shows its consent dialog to the focused app, so a
         // windowless first run is denied (or, with no app focused, never
         // answered); ask again from a focused window
-        .denied, .timeout => (try firstRunPermissionFlow(gpa, env, conn)) orelse return null,
+        .denied, .timeout => (try @import("first_run.zig").permissionFlow(gpa, env, conn)) orelse return null,
         .unavailable => return error.NoScreenshotPortal,
     };
     defer gpa.free(png_data);
@@ -405,114 +430,6 @@ fn passOn(comptime R: type, o: anytype) R {
         .denied => .denied,
         .unavailable => .unavailable,
         .timeout => .timeout,
-    };
-}
-
-/// First-run consent: open a small focused window, re-request the screenshot
-/// so GNOME can show its permission dialog, then recapture once granted.
-/// Null when the person closes the window.
-fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?[]u8 {
-    const window = @import("../ui/window.zig");
-    const render = @import("../gfx/render.zig");
-
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
-    defer win.deinit();
-    try win.open("Shotlet", .{ .fullscreen = false, .width = 640, .height = 220 });
-
-    var pending: ?portal.Request = null;
-    defer if (pending) |*p| p.deinit(gpa);
-    var status: []const u8 = "Press Enter to request it";
-    var hint_logged = false;
-
-    var uri: ?[]u8 = null;
-    defer if (uri) |u| gpa.free(u);
-
-    outer: while (uri == null) {
-        // draw the dialog
-        if (!win.frame_pending and win.width > 0) {
-            const px = try win.backBuffer();
-            @memset(px, 0xFF1D2125);
-            var canvas = render.Canvas.init(px, win.width, win.height);
-            const w: i32 = @intCast(win.width);
-            canvas.rectOutline(0, 0, w, @intCast(win.height), 1, 0xFF3A3F44);
-            const title = "Shotlet needs screenshot permission";
-            canvas.text(@divTrunc(w - render.Canvas.textWidth(2, title), 2), 42, 2, 0xFFE9ECEF, title);
-            canvas.text(@divTrunc(w - render.Canvas.textWidth(2, status), 2), 96, 2, 0xFF74B3F2, status);
-            const hint = "GNOME remembers it (once more after an update)   Esc: cancel";
-            canvas.text(@divTrunc(w - render.Canvas.textWidth(1, hint), 2), 156, 1, 0xFF868E96, hint);
-            try win.present();
-        }
-
-        // pump both wayland and dbus
-        try win.conn.flush();
-        var fds = [_]sys.pollfd{
-            .{ .fd = win.conn.fd, .events = sys.POLL.IN, .revents = 0 },
-            .{ .fd = conn.fd, .events = sys.POLL.IN, .revents = 0 },
-        };
-        _ = try sys.poll(&fds, 200);
-
-        if (fds[0].revents != 0 or win.queue.items.len > 0) {
-            while (try win.nextEventTimeout(0)) |ev| switch (ev) {
-                .key => |k| {
-                    if (!k.pressed) continue;
-                    if (k.code == window.KEY_ESC) return null;
-                    if (k.code == window.KEY_ENTER and pending == null) {
-                        pending = try portal.beginScreenshot(gpa, conn, false);
-                        status = "Waiting for the system dialog...";
-                    }
-                },
-                .close => return null,
-                else => {},
-            };
-        }
-        if (fds[1].revents != 0 or conn.hasPending()) {
-            var msg = conn.nextMessage() catch |err| {
-                if (dbus.isFatal(err)) return err;
-                continue;
-            };
-            // without an in-flight request, unrelated bus traffic is drained
-            // and discarded so poll() never spins on an unread socket
-            const req = if (pending) |*p| p else {
-                msg.deinit(gpa);
-                continue;
-            };
-            const kept = req.handle(gpa, &msg) catch false;
-            if (!kept) msg.deinit(gpa);
-            const outcome = req.outcome orelse continue;
-            switch (outcome) {
-                .granted => {
-                    uri = try gpa.dupe(u8, try portal.screenshotUri(req));
-                    break :outer;
-                },
-                .cancelled => return null,
-                .unavailable, .timeout => return error.NoScreenshotPortal,
-                .denied => {
-                    // stay open and let the user retry
-                    status = "Denied by the portal - Enter to retry";
-                    if (!hint_logged) {
-                        hint_logged = true;
-                        std.log.warn("portal denied the request; manual grant (plain DBus):", .{});
-                        std.log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot shotlet 1 yes", .{});
-                    }
-                    req.deinit(gpa);
-                    pending = null;
-                    continue :outer;
-                },
-            }
-        }
-    }
-
-    // this capture contains our dialog; discard and retake without it
-    const tainted = try portal.readAndUnlink(gpa, uri.?);
-    gpa.free(tainted);
-    win.closeWindow();
-    // give the compositor a moment to unmap our window
-    var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 400 * std.time.ns_per_ms };
-    _ = std.os.linux.nanosleep(&ts, null);
-    return switch (try portal.screenshot(gpa, conn, false, portal.timeout_dialog_ms)) {
-        .granted => |d| d,
-        .cancelled => null,
-        else => error.NoScreenshotPortal,
     };
 }
 

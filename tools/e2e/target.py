@@ -10,6 +10,8 @@
 #   drag begin|end         a drag of FILE out of it started or ended
 # usage: target.py [MIME...]   types to ask for on drop, best first
 #        target.py --source FILE   offers FILE (text/uri-list) to drag out
+# env: TARGET_SIZE=WxH         an ordinary window of that size instead
+import os
 import sys
 import gi
 
@@ -53,7 +55,14 @@ class Target(Gtk.Application):
         if SOURCE:
             self.add_source(area)
         win.connect("notify::is-active", lambda w, _p: out("active", w.is_active()))
-        win.maximize()
+        # TARGET_SIZE=WxH: a plain (not maximized) window of that size,
+        # for the window capture
+        size = os.environ.get("TARGET_SIZE")
+        if size:
+            w, h = (int(v) for v in size.split("x"))
+            win.set_default_size(w, h)
+        else:
+            win.maximize()
         win.present()
         entry.grab_focus()
 

@@ -12,6 +12,11 @@ const usage =
     \\
     \\usage:
     \\  shotlet             capture + editor (copy/save)
+    \\  shotlet fullscreen|screens|previous|window|scroll [--delay S]
+    \\                      capture modes: the screen under the pointer,
+    \\                      all screens, the last area, a window, a
+    \\                      scrolling capture; --delay: the self-timer
+    \\  shotlet timer [3|5|10]   area capture after a countdown
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
     \\  shotlet text        capture text: select a region, its text (OCR)
     \\                      goes to the clipboard
@@ -82,6 +87,7 @@ pub fn main(init: std.process.Init) !void {
         var t0: ?i64 = null;
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
+        var req: @import("app/modes/mode.zig").Request = .{};
         var i: usize = if (shell_launch) 1 else 2;
         while (i + 1 < args.len) : (i += 2) {
             if (std.mem.eql(u8, args[i], "--from")) {
@@ -95,6 +101,10 @@ pub fn main(init: std.process.Init) !void {
                 shell_monitors = args[i + 1];
             } else if (std.mem.eql(u8, args[i], "--pieces")) {
                 shell_pieces = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--mode")) {
+                req.withModeArg(args[i + 1]);
+            } else if (std.mem.eql(u8, args[i], "--pointer")) {
+                req.withPointerArg(args[i + 1]);
             } else if (std.mem.eql(u8, args[i], "--t0")) {
                 t0 = std.fmt.parseInt(i64, args[i + 1], 10) catch null;
             } else if (std.mem.eql(u8, args[i], "--smoke")) {
@@ -113,7 +123,7 @@ pub fn main(init: std.process.Init) !void {
             fs.pieces = shell_pieces;
             fs.t0_ms = t0;
         }
-        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell }, sel, smoke_ms);
+        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell, .req = req }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
             (std.mem.eql(u8, args[2], "--foreground") or std.mem.eql(u8, args[2], "-f"));
@@ -148,6 +158,8 @@ pub fn main(init: std.process.Init) !void {
         try @import("app/toastwin.zig").run(gpa, env, args[2], if (args.len > 3) args[3] else "");
     } else if (std.mem.eql(u8, cmd, "edit") and args.len == 3) {
         try @import("app/editfile.zig").run(gpa, env, args[2]);
+    } else if (try @import("app/modes/cli.zig").run(gpa, env, cmd, args[2..])) {
+        // a capture mode
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
@@ -201,7 +213,16 @@ test {
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
+    _ = @import("app/accel.zig");
     _ = @import("app/shellcap.zig");
+    _ = @import("app/scroll/stitch.zig");
+    _ = @import("app/modes/mode.zig");
+    _ = @import("app/modes/settings.zig");
+    _ = @import("app/modes/geom.zig");
+    _ = @import("app/modes/last_area.zig");
+    _ = @import("app/modes/window_frame.zig");
+    _ = @import("app/modes/cli.zig");
+    _ = @import("app/scroll/capture.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/clipimg.zig");
@@ -210,8 +231,10 @@ test {
     _ = @import("app/editor_prefs.zig");
     _ = @import("ui/beautify.zig");
     _ = @import("ui/drag.zig");
-    _ = @import("ui/script_keys.zig");
     _ = @import("ui/help.zig");
+    _ = @import("ui/rect_list.zig");
+    _ = @import("ui/caret.zig");
+    _ = @import("ui/scroll_steps.zig");
     _ = @import("ui/transfer.zig");
     _ = @import("app/editfile.zig");
     _ = @import("app/toastwin.zig");
@@ -230,6 +253,9 @@ test {
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");
+    _ = @import("ui/tall_view.zig");
+    _ = @import("ui/script_input.zig");
+    _ = @import("ui/hsv.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/jpeg.zig");
@@ -238,6 +264,7 @@ test {
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");
+    _ = @import("app/direct_kwin.zig");
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");
@@ -249,6 +276,8 @@ test {
     _ = @import("ui/keyboard.zig");
     _ = @import("ui/window.zig");
     _ = @import("ui/settings.zig");
+    _ = @import("ui/settings_modes.zig");
+    _ = @import("ui/settings_steps.zig");
     _ = @import("ui/theme.zig");
     _ = @import("ui/motion.zig");
     _ = @import("ui/icons.zig");

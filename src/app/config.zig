@@ -301,7 +301,7 @@ fn readInto(alloc: std.mem.Allocator, dir: []const u8, cfg: *Config) void {
     }
 }
 
-fn parseLine(line: []const u8) ?struct { key: []const u8, value: []const u8 } {
+pub fn parseLine(line: []const u8) ?struct { key: []const u8, value: []const u8 } {
     const trimmed = std.mem.trim(u8, line, " \t\r");
     if (trimmed.len == 0 or trimmed[0] == '#') return null;
     const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse return null;

@@ -19,6 +19,11 @@ const sys = @import("../platform/sys.zig");
 const shapes_mod = @import("shapes.zig");
 const doc_mod = @import("doc.zig");
 const view_mod = @import("view.zig");
+const tall_view = @import("tall_view.zig");
+const script_input = @import("script_input.zig");
+const parseKey = script_input.parseKey;
+const parsePoint = script_input.parsePoint;
+const parseInts = script_input.parseInts;
 const textedit = @import("textedit.zig");
 const textbox = @import("textbox.zig");
 const ui = @import("editor_ui.zig");
@@ -26,10 +31,8 @@ const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
 const dbus = @import("../platform/dbus.zig");
 const tools = @import("tools/mod.zig");
-const script_keys = @import("script_keys.zig");
-const parseInts = script_keys.parseInts;
-const parsePoint = script_keys.parsePoint;
-const parseKey = script_keys.parseKey;
+const caretAt = @import("caret.zig").caretAt;
+pub const scrollSteps = @import("scroll_steps.zig").scrollSteps;
 
 const Window = window.Window;
 const Canvas = render.Canvas;
@@ -47,6 +50,8 @@ pub const Action = enum {
     save,
     /// save to a path the user picks (the caller shows the dialog)
     save_as,
+    /// close and start another capture: `next_capture` names the command
+    new_capture,
 };
 
 pub const CopyNotice = enum { none, copying, copied, failed };
@@ -96,34 +101,7 @@ const TextState = struct {
     goal_x: ?i32 = null,
 };
 
-/// A small set of dirty rectangles; overflows merge into one bounding box.
-pub const RectList = struct {
-    items: [64]Rect = undefined,
-    len: usize = 0,
-
-    pub fn add(self: *RectList, r: Rect) void {
-        if (r.isEmpty()) return;
-        if (self.len == self.items.len) {
-            var u = self.items[0];
-            for (self.items[1..self.len]) |x| u = Rect.unite(u, x);
-            self.items[0] = u;
-            self.len = 1;
-        }
-        self.items[self.len] = r;
-        self.len += 1;
-    }
-    pub fn addAll(self: *RectList, other: *const RectList) void {
-        for (other.items[0..other.len]) |r| self.add(r);
-    }
-    pub fn slice(self: *const RectList) []const Rect {
-        return self.items[0..self.len];
-    }
-    pub fn area(self: *const RectList) i64 {
-        var a: i64 = 0;
-        for (self.slice()) |r| a += @as(i64, r.w) * r.h;
-        return a;
-    }
-};
+pub const RectList = @import("rect_list.zig").RectList;
 
 // evdev key codes
 const KEY_1 = 2;
@@ -311,6 +289,12 @@ pub const Editor = struct {
     copy_notice: CopyNotice = .none,
     copy_notice_hide_at_ms: i64 = 0,
     preset_sel: ?[4]i32 = null,
+    /// the image has see-through pixels worth keeping (a window capture)
+    keep_alpha: bool = false,
+    /// how far a tall image is scrolled (ui/tall_view.zig), buffer pixels
+    tall_scroll: i32 = 0,
+    /// the capture mode to start after .new_capture (a shotlet command)
+    next_capture: [:0]const u8 = "",
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -505,6 +489,9 @@ pub const Editor = struct {
             if (mon == null and idx < self.monitors.len) mon = self.monitors[idx];
             if (mon) |m| return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, sf.width, sf.height);
         }
+        // a tall image (a scrolling capture) fits the width and scrolls
+        if (tall_view.isTall(self.img.width, self.img.height, self.screenRect()))
+            return tall_view.view(self.img.width, self.img.height, self.screenRect(), self.tall_scroll);
         return View.fit(self.img.width, self.img.height, self.screenRect(), 1.0);
     }
 
@@ -788,7 +775,16 @@ pub const Editor = struct {
     fn onScroll(self: *Editor, value: f64, value120: ?i32) !void {
         // exact notches when the wheel reports them (8 units = 1/15 notch)
         const steps = if (value120) |v| scrollSteps(&self.scroll_acc, @as(f64, @floatFromInt(v)) / 8.0) else scrollSteps(&self.scroll_acc, value);
+        if (steps != 0 and !self.win.ctrl and tall_view.isTall(self.img.width, self.img.height, self.screenRect())) return self.scrollTall(-steps);
         if (steps != 0) try self.setThickness(self.thickness + steps);
+    }
+
+    /// Scroll a tall image by wheel notches: lay every pane out again.
+    fn scrollTall(self: *Editor, notches: i32) !void {
+        const before = self.tall_scroll;
+        self.tall_scroll = tall_view.clampScroll(self.img.width, self.img.height, self.screenRect(), self.tall_scroll + notches * self.sc(80));
+        if (self.tall_scroll == before) return;
+        for (self.panes[0..self.n_panes], 0..) |p, i| if (p.alive) try self.onResize(@intCast(i), p.width, p.height);
     }
 
     pub fn setThickness(self: *Editor, t: i32) !void {
@@ -1733,6 +1729,15 @@ pub const Editor = struct {
                 self.closePopover();
                 self.finish(.save_as);
             },
+            .capture_window, .capture_scroll, .capture_timer => {
+                self.closePopover();
+                self.next_capture = switch (kind) {
+                    .capture_window => "window",
+                    .capture_scroll => "scroll",
+                    else => "timer",
+                };
+                self.finish(.new_capture);
+            },
             .help => {
                 self.closePopover();
                 self.help_open = !self.help_open;
@@ -2357,7 +2362,7 @@ pub const Editor = struct {
         // RGBA only for a transparent beautify background; everything else
         // stays RGB as before
         const see_through = self.beautify.enabled and self.beautify.background().transparent();
-        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
+        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through or self.keep_alpha) .auto else .never });
     }
 
     // --- dev hooks: scripted input and frame dumps ---
@@ -2564,87 +2569,7 @@ pub const Editor = struct {
     }
 };
 
-/// Thickness steps for a scroll of `value` surface units: one per wheel
-/// notch (15 units; v120 wheels report 120 per notch as 15). Touchpads
-/// send many small values, which accumulate in `acc` instead of each
-/// stepping. Scrolling up (negative) makes strokes thicker.
-pub fn scrollSteps(acc: *f64, value: f64) i32 {
-    const notch = 15.0;
-    if (value == 0) return 0;
-    if ((value > 0) != (acc.* > 0) and acc.* != 0) acc.* = 0;
-    acc.* += value;
-    var steps: i32 = 0;
-    while (acc.* >= notch) : (acc.* -= notch) steps -= 1;
-    while (acc.* <= -notch) : (acc.* += notch) steps += 1;
-    return steps;
-}
-
 fn getenv(name: [*:0]const u8) ?[]const u8 {
     const v = std.c.getenv(name) orelse return null;
     return std.mem.span(v);
-}
-
-/// Caret in text shape `s` nearest to image point `p` (bidi-aware and
-/// across wrapped lines).
-pub fn caretAt(s: *const Shape, p: Point) textbox.Hit {
-    var buf: [8192]u8 = undefined;
-    var bfa: std.heap.BufferFirstAllocator = .init(&buf, std.heap.page_allocator);
-    const a = bfa.allocator();
-    var lay = textbox.Layout.init(a, s.str.items, s.fontPx(), s.box_w) catch return .{ .off = s.str.items.len };
-    defer lay.deinit(a);
-    return lay.hit(s.str.items, p.x - s.p0.x, p.y - s.p0.y);
-}
-
-test "caret lands on the nearest character" {
-    const alloc = std.testing.allocator;
-    var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "abc\ndefgh");
-    try std.testing.expectEqual(@as(usize, 0), caretAt(&s, .{ .x = 0, .y = 0 }).off);
-    try std.testing.expectEqual(@as(usize, 3), caretAt(&s, .{ .x = 10000, .y = 100 }).off);
-    const lh = text_mod.height(s.fontPx());
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100000 }).off);
-    try std.testing.expectEqual(@as(usize, 4), caretAt(&s, .{ .x = 100, .y = 100 + lh + 1 }).off);
-}
-
-test "dirty rect list merges on overflow" {
-    var l: RectList = .{};
-    for (0..70) |i| l.add(.{ .x = @intCast(i), .y = 0, .w = 1, .h = 1 });
-    try std.testing.expect(l.len <= 64);
-    var u = Rect.empty;
-    for (l.slice()) |r| u = Rect.unite(u, r);
-    try std.testing.expect(u.eql(.{ .x = 0, .y = 0, .w = 70, .h = 1 }));
-    l.add(Rect.empty);
-    try std.testing.expect(l.len <= 64);
-}
-
-test "scroll accumulates touchpad deltas and steps once per notch" {
-    var acc: f64 = 0;
-    try std.testing.expectEqual(@as(i32, -1), scrollSteps(&acc, 15));
-    try std.testing.expectEqual(@as(i32, 2), scrollSteps(&acc, -30));
-    var small: i32 = 0;
-    for (0..30) |_| small += scrollSteps(&acc, 1.0);
-    try std.testing.expectEqual(@as(i32, -2), small);
-    // a direction change drops the leftover
-    _ = scrollSteps(&acc, 14);
-    try std.testing.expectEqual(@as(i32, 0), scrollSteps(&acc, -14));
-    try std.testing.expectEqual(@as(i32, 1), scrollSteps(&acc, -1));
-}
-
-test "caret across wrapped lines of a fixed-width text" {
-    const alloc = std.testing.allocator;
-    text_mod.init(alloc);
-    defer text_mod.deinit();
-    var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "alpha beta gamma");
-    const fs = s.fontPx();
-    s.box_w = text_mod.width(fs, "alpha beta") + 2;
-    const lh = text_mod.height(fs);
-    // second visual line starts at "gamma"
-    try std.testing.expectEqual(@as(usize, 11), caretAt(&s, .{ .x = 0, .y = 100 + lh + 1 }).off);
-    try std.testing.expectEqual(@as(usize, 16), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
-    // right of the first line: before its hanging space
-    try std.testing.expectEqual(@as(usize, 10), caretAt(&s, .{ .x = 10000, .y = 101 }).off);
 }

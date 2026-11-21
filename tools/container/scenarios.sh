@@ -487,6 +487,7 @@ run_scenario() {
         timeout 5 wl-copy -- "something else"
         wait_exit 5
         ;;
+    modes) . /opt/shotlet/ctr/modes.sh ;;
     *) echo "unknown scenario $1" >&2; return 2 ;;
     esac
     pkill -f "shotlet (quick|history|pin)" 2>/dev/null

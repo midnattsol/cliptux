@@ -89,11 +89,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
                     .unavailable;
                 if (how == .unavailable) spawnChild(env, "shot");
             },
-            .capture_text => spawnChild(env, "text"),
             .history => spawnChild(env, "history"),
             .settings => spawnChild(env, "settings"),
             .quit => return,
             .none => {},
+            else => if (action.modeCommand()) |cmd| spawnChild(env, cmd),
         }
     }
 }

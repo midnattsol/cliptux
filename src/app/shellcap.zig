@@ -94,7 +94,7 @@ fn checkDir(runtime_dir: []const u8) !void {
 
 /// Read one piece and delete it. Refuses a symlink, anything but a
 /// regular file, and a file that is not ours or that others may read.
-fn readAndRemove(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
+pub fn readAndRemove(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     const linux = std.os.linux;
     var z: [4096]u8 = undefined;
     if (path.len >= z.len) return error.PathTooLong;

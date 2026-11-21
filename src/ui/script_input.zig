@@ -1,13 +1,13 @@
-//! Key names for the editor's scripted input (SHOTLET_EDITOR_SCRIPT):
-//! "ctrl+shift+s", "alt+left", "esc", "?", and number lists.
+//! The editor's scripted input (SHOTLET_EDITOR_SCRIPT, for tests): key
+//! names like "ctrl+shift+s" and "x,y" points.
 
 const std = @import("std");
 const window = @import("window.zig");
 const Point = @import("shapes.zig").Point;
 
 const KEY_TAB = 15;
-const KEY_RIGHTBRACE = 27;
 const KEY_S = 31;
+const KEY_RIGHTBRACE = 27;
 const KEY_SLASH = 53;
 const KEY_F1 = 59;
 const KEY_HOME = 102;
