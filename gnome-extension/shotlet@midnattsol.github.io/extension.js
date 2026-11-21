@@ -50,6 +50,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Recorder} from './recorder.js';
 
 const APP_ID = 'io.github.midnattsol.Shotlet';
 const BUS_NAME = 'dev.shotlet.Shell1';
@@ -62,6 +63,12 @@ const IFACE = `<node>
     <method name="Capture">
       <arg type="b" name="started" direction="out"/>
     </method>
+    <method name="StartRecording">
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="node" direction="out"/>
+    </method>
+    <method name="StopRecording"/>
+    <signal name="RecordingStopRequested"/>
     <method name="Place">
       <arg type="s" name="title" direction="in"/>
       <arg type="i" name="x" direction="in"/>
@@ -165,9 +172,12 @@ export default class ShotletExtension extends Extension {
         this._dbus.export(Gio.DBus.session, OBJECT_PATH);
         this._nameId = Gio.bus_own_name_on_connection(Gio.DBus.session,
             BUS_NAME, Gio.BusNameOwnerFlags.NONE, null, null);
+        this._recorder = new Recorder(this);
     }
 
     disable() {
+        this._recorder.destroy();
+        this._recorder = null;
         this._unbindShortcut();
         for (const id of this._settingsIds.slice(0, 1))
             this._settings.disconnect(id);
@@ -200,7 +210,16 @@ export default class ShotletExtension extends Extension {
     }
 
     get Version() {
-        return 2;
+        return 3;
+    }
+
+    // recordings (recorder.js)
+    StartRecordingAsync(params, invocation) {
+        this._recorder.startCall(params, invocation);
+    }
+
+    StopRecordingAsync(params, invocation) {
+        this._recorder.stopCall(params, invocation);
     }
 
     get Shortcuts() {
@@ -346,7 +365,7 @@ export default class ShotletExtension extends Extension {
     }
 
     // Take the screenshot and start shotlet on it.
-    async _capture(t0, fromBus) {
+    async _capture(t0, fromBus, extra = []) {
         if (this._busy)
             throw new CaptureError('Busy', 'a capture is under way');
         if (Main.sessionMode.isLocked)
@@ -389,7 +408,7 @@ export default class ShotletExtension extends Extension {
             await Promise.all(shots);
             const t1 = monotonicMs();
             Util.trySpawn([exe, '--from-shell', id, '--monitors', plan.monitors,
-                '--pieces', plan.piecesArg, '--t0', `${t0}`]);
+                '--pieces', plan.piecesArg, '--t0', `${t0}`, ...extra]);
             console.log(`Shotlet: captured ${plan.pieces.length} areas in ${t1 - t0} ms, started shotlet`);
             files.length = 0;
         } finally {

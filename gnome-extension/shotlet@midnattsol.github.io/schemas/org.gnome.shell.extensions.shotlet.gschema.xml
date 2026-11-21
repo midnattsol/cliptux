@@ -6,6 +6,11 @@
       <summary>Take a screenshot with Shotlet</summary>
       <description>Captures every monitor inside GNOME Shell and opens Shotlet's editor, without any prompt. Left unbound while GNOME's own screenshot shortcuts use the same key.</description>
     </key>
+    <key name="record-shortcut" type="as">
+      <default><![CDATA[['<Shift><Super>r']]]></default>
+      <summary>Record the screen with Shotlet</summary>
+      <description>Opens Shotlet's area picker to record a video or GIF, without any prompt; during a recording, stops it.</description>
+    </key>
     <key name="shotlet-path" type="s">
       <default>''</default>
       <summary>The shotlet program</summary>

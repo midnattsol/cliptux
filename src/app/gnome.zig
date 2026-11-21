@@ -30,8 +30,8 @@ pub const uuid = "shotlet@midnattsol.github.io";
 /// owned by the extension while it is active
 pub const bus_name = "dev.shotlet.Shell1";
 
-const ext_js = @embedFile("gnome_ext_js");
-const ext_metadata = @embedFile("gnome_ext_metadata");
+const ext_js = @import("gnome_bundle.zig").js;
+const ext_metadata = @import("gnome_bundle.zig").metadata;
 const ext_schema = @embedFile("gnome_ext_schema");
 const ext_schema_compiled = @embedFile("gnome_ext_schema_compiled");
 const schema_file = "org.gnome.shell.extensions.shotlet.gschema.xml";
@@ -121,8 +121,7 @@ pub fn writeBundled(home: []const u8) ![]const u8 {
     const dir = try extensionDir(&S.dir_buf, home);
     sys.mkdirAll(dir, 0o755);
     var p: [1100]u8 = undefined;
-    try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/extension.js", .{dir}), ext_js);
-    try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/metadata.json", .{dir}), ext_metadata);
+    for (@import("gnome_bundle.zig").files) |f| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, f.name }), f.data);
     const schemas = try std.fmt.bufPrint(&p, "{s}/schemas", .{dir});
     sys.mkdirAll(schemas, 0o755);
     var q: [1200]u8 = undefined;

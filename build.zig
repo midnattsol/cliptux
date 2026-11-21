@@ -121,6 +121,7 @@ pub fn build(b: *std.Build) void {
 fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
     const dir = "gnome-extension/shotlet@midnattsol.github.io/";
     m.addAnonymousImport("gnome_ext_js", .{ .root_source_file = b.path(dir ++ "extension.js") });
+    m.addAnonymousImport("gnome_ext_recorder_js", .{ .root_source_file = b.path(dir ++ "recorder.js") });
     m.addAnonymousImport("gnome_ext_metadata", .{ .root_source_file = b.path(dir ++ "metadata.json") });
     m.addAnonymousImport("gnome_ext_schema", .{ .root_source_file = b.path(dir ++ "schemas/org.gnome.shell.extensions.shotlet.gschema.xml") });
     // compiled with glib-compile-schemas and committed: the extension
