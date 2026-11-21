@@ -238,13 +238,19 @@ pub const Db = struct {
         return null;
     }
 
-    /// The user's configured face for `q` (fontconfig), else the first
+    /// The UI faces, best first; fontconfig falls back to the user's
+    /// sans-serif when none is installed. (Not Cantarell: distributions
+    /// ship it as a CFF2 variable font, which the loader cannot read, and
+    /// failing over from it costs a third of a second at startup.)
+    const ui_families = "Inter,SF Pro Text,SF Pro Display,Adwaita Sans,Noto Sans,sans-serif";
+
+    /// The preferred UI face for `q` (fontconfig), else the first
     /// well-known family found on disk.
     pub fn match(self: *Db, q: Query) ?Face {
         if (self.fontconfig()) |fc| {
             const pat: [*:0]const u8 = switch (q) {
-                .sans => "sans-serif",
-                .sans_bold => "sans-serif:bold",
+                .sans => ui_families,
+                .sans_bold => ui_families ++ ":bold",
                 .mono => "monospace",
             };
             if (fc.match(self.alloc, pat, null)) |f| return f;

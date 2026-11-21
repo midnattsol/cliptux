@@ -154,6 +154,16 @@ if [ "${1:-}" = "--inner" ]; then
         echo "  no dialog button on monitor $1" >&2
         return 1
     }
+    # wait_chooser MON: the editor's Copy button wears the accent too, so
+    # first let the editor close, then wait for the dialog's button
+    wait_chooser() {
+        local i
+        for i in $(seq 1 25); do
+            drv find "$1" "$accent" 24 40 2>/dev/null || break
+            sleep 0.2
+        done
+        wait_button "$@"
+    }
     # press_button MON: click the button until its dialog goes away
     press_button() {
         local try
@@ -521,9 +531,9 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 0.3
         shot 0 sel0
         shot 1 sel1
-        # the "400 × 200" pill (ui_fg text) only next to the toolbar
-        check "size label shown on the toolbar's monitor" drv find 0 e9ecef 3
-        check "  ... and not repeated on the other" no_find_exact 1 e9ecef 3
+        # the "400 × 200" pill (its #f5f5f7 text) only next to the toolbar
+        check "size label shown on the toolbar's monitor" drv find 0 f5f5f7 3
+        check "  ... and not repeated on the other" no_find_exact 1 f5f5f7 3
         drv key enter
         sleep 1
         check "selection across both monitors is copied whole" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
@@ -572,18 +582,19 @@ if [ "${1:-}" = "--inner" ]; then
         check "selection maps 1:1 to physical pixels" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 1200x600
         check "buffer covers the panel exactly" eq "$(png_size "$OUT/hidpi-frame.png")" 2560x1440
         check "the 1x monitor keeps a 1x buffer" eq "$(png_size "$OUT/hidpi-frame-1.png")" 1280x720
-        # the toolbar's close button, found by its colour, closes on click
+        # the toolbar's Copy button (the accent-coloured one, wider than
+        # the active tool's) copies on click
         run_shotlet close
         wait_editor 5
         drag 0 300 300 0 1500 900
         sleep 0.3
         shot 0 toolbar
         cx=
-        drv find 0 ff6b6b 8 && read -r cx cy _ <<<"$VAL"
-        check "toolbar close button found" test -n "$cx"
+        drv find 0 "$accent" 24 40 && read -r cx cy _ <<<"$VAL"
+        check "toolbar Copy button found" test -n "$cx"
         click 0 "$cx" "$cy"
-        check "a click on a toolbar button hits it" wait_exit 5
-        check "  ... with status 0" eq "$RC" 0
+        sleep 1
+        check "a click on a toolbar button hits it" eq "$(clip_png "$OUT/clip2.png" && png_size "$OUT/clip2.png")" 1200x600
         ;;
     keyboard)
         # Spanish layout (HL_LAYOUT=es): ñ is the key right of L, ´ a dead
@@ -610,8 +621,8 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 0.3
         shot 0 held
         # text past the selection (x >= 702) is dimmed, as it will be cut
-        check "live text inside the selection is bright" drv find 0 e03131 30 1 400 230 700 290
-        check "  ... and dimmed past its edge (not exported)" no_find_exact 0 e03131 30 1 703 230 1600 290
+        check "live text inside the selection is bright" drv find 0 ff453a 30 1 400 230 700 290
+        check "  ... and dimmed past its edge (not exported)" no_find_exact 0 ff453a 30 1 703 230 1600 290
         keys ctrl+a ctrl+c
         sleep 0.3
         n=$(timeout 5 wl-paste -n | grep -o l | wc -l)
@@ -626,7 +637,7 @@ if [ "${1:-}" = "--inner" ]; then
         # Ctrl+Z removes the text, Ctrl+Shift+Z brings it back: the first
         # red blob in reading order is the text (y ~260) when it is there,
         # else the toolbar's red swatch below the selection
-        red_y() { drv find 0 e03131 40 && read -r _ y _ <<<"$VAL" && echo "$y"; }
+        red_y() { drv find 0 ff453a 40 && read -r _ y _ <<<"$VAL" && echo "$y"; }
         check "text is drawn" test "$(red_y)" -lt 400
         keys ctrl+z
         sleep 0.3
@@ -742,7 +753,7 @@ if [ "${1:-}" = "--inner" ]; then
         drag 0 300 300 0 500 450
         keys ctrl+shift+s
         # the GTK file chooser: its Save button is the accent-coloured blob
-        check "Ctrl+Shift+S opens the file chooser" wait_button 0 15
+        check "Ctrl+Shift+S opens the file chooser" wait_chooser 0 15
         sleep 0.5
         shot 0 chooser
         # the proposed name is selected, minus the extension
@@ -755,16 +766,16 @@ if [ "${1:-}" = "--inner" ]; then
         wait_editor 5
         drag 0 300 300 0 500 450
         keys ctrl+shift+s
-        wait_button 0 15
+        wait_chooser 0 15
         sleep 0.5
         keys esc
         sleep 1
         shot 0 cancelled
         check "cancelling the chooser writes nothing" eq "$(ls "$HOME/Pictures" | wc -l)" 1
         if alive; then
-            check "  ... and returns to the editor" test "$(drv find 0 e03131 40 && echo found)" = found
+            check "  ... and returns to the editor" test "$(drv find 0 ff453a 40 && echo found)" = found
             keys ctrl+shift+s
-            wait_button 0 15
+            wait_chooser 0 15
             sleep 0.5
             keys a g a i n enter
             check "  ... which can still save" wait_exit 10

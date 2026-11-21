@@ -90,7 +90,7 @@ pub fn main(init: std.process.Init) !void {
             std.fmt.parseInt(i64, args[3], 10) catch 0
         else
             0;
-        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
+        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, env.bus_addr, smoke);
     } else if (std.mem.eql(u8, cmd, "quick") and args.len > 3) {
         try @import("app/quick.zig").run(gpa, env, args[2], args[3]);
     } else if (std.mem.eql(u8, cmd, "history")) {
@@ -190,4 +190,8 @@ test {
     _ = @import("ui/keyboard.zig");
     _ = @import("ui/window.zig");
     _ = @import("ui/settings.zig");
+    _ = @import("ui/theme.zig");
+    _ = @import("ui/motion.zig");
+    _ = @import("ui/icons.zig");
+    _ = @import("gfx/path.zig");
 }
