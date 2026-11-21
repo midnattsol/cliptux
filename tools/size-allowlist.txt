@@ -1,6 +1,4 @@
 # Files over the 600-line limit, with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.
-1979 src/ui/editor_ui.zig
-867 src/ui/shapes.zig
 782 tools/container/wldrive.zig
 1270 tools/e2e.sh
