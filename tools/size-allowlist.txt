@@ -1,11 +1,8 @@
 # Files over the 600-line limit, with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.
-693 src/app/history_ui.zig
-906 src/app/quick.zig
 1120 src/platform/portal.zig
 734 src/platform/pw.zig
 1979 src/ui/editor_ui.zig
-1092 src/ui/settings.zig
 867 src/ui/shapes.zig
 2597 src/ui/window.zig
 782 tools/container/wldrive.zig
