@@ -1,5 +1,5 @@
 //! Annotation shape model and rendering: geometry, tools, palette, the
-//! shape painter, hit testing, handles and the text-input keymap.
+//! shape painter, hit testing and handles.
 //!
 //! Shapes live in image pixels. `drawShape` paints one through an `Xform`
 //! (image -> canvas), so the same code renders the native-resolution
@@ -657,48 +657,6 @@ pub fn resizeWithHandle(orig: Rect, handle: u3, m: Point) Rect {
     return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
 }
 
-// --- keyboard text input (US-ish layout approximation) ---
-
-/// Fallback keymap the window uses until it reads the real layout.
-pub fn evdevToChar(code: u32, shift: bool) ?u8 {
-    const lower = "1234567890";
-    const upper = "!@#$%^&*()";
-    if (code >= 2 and code <= 11) {
-        const i = code - 2;
-        return if (shift) upper[i] else lower[i];
-    }
-    const row1 = "qwertyuiop";
-    if (code >= 16 and code <= 25) {
-        const c = row1[code - 16];
-        return if (shift) c - 32 else c;
-    }
-    const row2 = "asdfghjkl";
-    if (code >= 30 and code <= 38) {
-        const c = row2[code - 30];
-        return if (shift) c - 32 else c;
-    }
-    const row3 = "zxcvbnm";
-    if (code >= 44 and code <= 50) {
-        const c = row3[code - 44];
-        return if (shift) c - 32 else c;
-    }
-    return switch (code) {
-        57 => ' ',
-        12 => if (shift) @as(u8, '_') else '-',
-        13 => if (shift) @as(u8, '+') else '=',
-        26 => if (shift) @as(u8, '{') else '[',
-        27 => if (shift) @as(u8, '}') else ']',
-        39 => if (shift) @as(u8, ':') else ';',
-        40 => if (shift) @as(u8, '"') else '\'',
-        41 => if (shift) @as(u8, '~') else '`',
-        43 => if (shift) @as(u8, '|') else '\\',
-        51 => if (shift) @as(u8, '<') else ',',
-        52 => if (shift) @as(u8, '>') else '.',
-        53 => if (shift) @as(u8, '?') else '/',
-        else => null,
-    };
-}
-
 test "rect normalization" {
     const r = (Rect{ .x = 100, .y = 50, .w = -30, .h = -20 }).normalized();
     try std.testing.expectEqual(@as(i32, 70), r.x);
@@ -717,15 +675,6 @@ test "rect intersect and unite" {
     try std.testing.expect(Rect.unite(a, b).eql(.{ .x = 0, .y = -5, .w = 15, .h = 15 }));
     try std.testing.expect(Rect.unite(Rect.empty, b).eql(b));
     try std.testing.expectEqual(@as(?Rect, null), Rect.intersect(a, .{ .x = 10, .y = 0, .w = 5, .h = 5 }));
-}
-
-test "evdev to char mapping" {
-    try std.testing.expectEqual(@as(?u8, 'a'), evdevToChar(30, false));
-    try std.testing.expectEqual(@as(?u8, 'A'), evdevToChar(30, true));
-    try std.testing.expectEqual(@as(?u8, '1'), evdevToChar(2, false));
-    try std.testing.expectEqual(@as(?u8, '!'), evdevToChar(2, true));
-    try std.testing.expectEqual(@as(?u8, ' '), evdevToChar(57, false));
-    try std.testing.expectEqual(@as(?u8, null), evdevToChar(1, false)); // Esc
 }
 
 test "selection handle resolution" {

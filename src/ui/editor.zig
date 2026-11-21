@@ -214,7 +214,8 @@ pub const Editor = struct {
     }
 
     pub fn deinit(self: *Editor) void {
-        self.endText() catch {};
+        if (self.text) |t| self.alloc.free(t.orig);
+        self.text = null;
         if (self.cur) |*s| s.deinit(self.alloc);
         if (self.drag == .resizing_shape) self.drag.resizing_shape.orig.deinit(self.alloc);
         self.doc.deinit();
@@ -477,7 +478,8 @@ pub const Editor = struct {
 
     pub fn handle(self: *Editor, ev: window.InputEvent) !void {
         switch (ev) {
-            .resize => try self.onResize(),
+            // other surfaces are the integrator's (one view per monitor)
+            .resize => |r| if (r.surface == 0 and r.w > 0) try self.onResize(),
             .frame_done => {
                 if (self.needs_render) {
                     try self.renderFrame();
@@ -488,7 +490,7 @@ pub const Editor = struct {
                 self.action = .cancel;
                 self.running = false;
             },
-            .pointer_motion => |m| {
+            .pointer_motion => |m| if (m.surface == 0) {
                 self.mouse = .{ .x = @intFromFloat(@round(m.x)), .y = @intFromFloat(@round(m.y)) };
                 try self.onMotion();
             },
@@ -515,14 +517,7 @@ pub const Editor = struct {
     }
 
     fn onScroll(self: *Editor, value: f64) !void {
-        // one wheel notch is ~15 units (v120 wheels report 120/8); touchpads
-        // send many small values, so accumulate instead of stepping per event
-        const notch = 15.0;
-        if ((value > 0) != (self.scroll_acc > 0)) self.scroll_acc = 0;
-        self.scroll_acc += value;
-        var steps: i32 = 0;
-        while (self.scroll_acc >= notch) : (self.scroll_acc -= notch) steps -= 1;
-        while (self.scroll_acc <= -notch) : (self.scroll_acc += notch) steps += 1;
+        const steps = scrollSteps(&self.scroll_acc, value);
         if (steps != 0) try self.setThickness(self.thickness + steps);
     }
 
@@ -1343,6 +1338,7 @@ pub const Editor = struct {
     }
 
     fn deleteSelected(self: *Editor) !void {
+        try self.settle();
         const i = self.selected orelse return;
         self.selected = null;
         try self.doc.checkpoint();
@@ -1352,6 +1348,7 @@ pub const Editor = struct {
     }
 
     fn duplicateSelected(self: *Editor) !void {
+        try self.settle();
         const i = self.selected orelse return;
         try self.doc.checkpoint();
         const off: i32 = @max(4, @as(i32, @intFromFloat(@round(self.view.lenToImg(@floatFromInt(self.sc(14)))))));
@@ -1361,6 +1358,7 @@ pub const Editor = struct {
     }
 
     fn bringSelectedToFront(self: *Editor) !void {
+        try self.settle();
         const i = self.selected orelse return;
         if (i + 1 == self.doc.shapes.items.len) return;
         try self.doc.checkpoint();
@@ -1630,6 +1628,24 @@ pub const Editor = struct {
             }
             try self.handle(.{ .pointer_motion = .{ .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
             try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = false, .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
+        } else if (eql(u8, op, "scribble")) {
+            // scribble cx,cy,r,n: a long freehand stroke, rendering a frame
+            // per motion, and log the time per frame
+            const v = try parseInts(4, arg);
+            const t0 = nowMs();
+            const n: usize = @intCast(v[3]);
+            for (0..n + 1) |i| {
+                const a = @as(f64, @floatFromInt(i)) * 0.05;
+                const rr = @as(f64, @floatFromInt(v[2])) * (0.3 + 0.7 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n)));
+                const x = @as(f64, @floatFromInt(v[0])) + @cos(a) * rr;
+                const y = @as(f64, @floatFromInt(v[1])) + @sin(a) * rr;
+                try self.handle(.{ .pointer_motion = .{ .x = x, .y = y } });
+                if (i == 0) try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = true, .x = x, .y = y } });
+                try self.renderFrame();
+            }
+            const t1 = nowMs();
+            try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = false, .x = 0, .y = 0 } });
+            std.log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, nowMs() - t1 });
         } else if (eql(u8, op, "scroll")) {
             try self.handle(.{ .pointer_axis = .{ .value = try std.fmt.parseFloat(f64, arg) } });
         } else if (eql(u8, op, "key")) {
@@ -1683,6 +1699,61 @@ pub const Editor = struct {
     }
 };
 
+/// US-layout key -> character, only to turn script key names into codes.
+fn usKeyChar(code: u32, shift: bool) ?u8 {
+    const lower = "1234567890";
+    const upper = "!@#$%^&*()";
+    if (code >= 2 and code <= 11) {
+        const i = code - 2;
+        return if (shift) upper[i] else lower[i];
+    }
+    const row1 = "qwertyuiop";
+    if (code >= 16 and code <= 25) {
+        const c = row1[code - 16];
+        return if (shift) c - 32 else c;
+    }
+    const row2 = "asdfghjkl";
+    if (code >= 30 and code <= 38) {
+        const c = row2[code - 30];
+        return if (shift) c - 32 else c;
+    }
+    const row3 = "zxcvbnm";
+    if (code >= 44 and code <= 50) {
+        const c = row3[code - 44];
+        return if (shift) c - 32 else c;
+    }
+    return switch (code) {
+        57 => ' ',
+        12 => if (shift) @as(u8, '_') else '-',
+        13 => if (shift) @as(u8, '+') else '=',
+        26 => if (shift) @as(u8, '{') else '[',
+        27 => if (shift) @as(u8, '}') else ']',
+        39 => if (shift) @as(u8, ':') else ';',
+        40 => if (shift) @as(u8, '"') else '\'',
+        41 => if (shift) @as(u8, '~') else '`',
+        43 => if (shift) @as(u8, '|') else '\\',
+        51 => if (shift) @as(u8, '<') else ',',
+        52 => if (shift) @as(u8, '>') else '.',
+        53 => if (shift) @as(u8, '?') else '/',
+        else => null,
+    };
+}
+
+/// Thickness steps for a scroll of `value` surface units: one per wheel
+/// notch (15 units; v120 wheels report 120 per notch as 15). Touchpads
+/// send many small values, which accumulate in `acc` instead of each
+/// stepping. Scrolling up (negative) makes strokes thicker.
+pub fn scrollSteps(acc: *f64, value: f64) i32 {
+    const notch = 15.0;
+    if (value == 0) return 0;
+    if ((value > 0) != (acc.* > 0) and acc.* != 0) acc.* = 0;
+    acc.* += value;
+    var steps: i32 = 0;
+    while (acc.* >= notch) : (acc.* -= notch) steps -= 1;
+    while (acc.* <= -notch) : (acc.* += notch) steps += 1;
+    return steps;
+}
+
 fn getenv(name: [*:0]const u8) ?[]const u8 {
     const v = std.c.getenv(name) orelse return null;
     return std.mem.span(v);
@@ -1722,14 +1793,14 @@ fn parseKey(spec: []const u8) !window.Key {
     if (k.code == 0 and name.len == 1) {
         var code: u32 = 1;
         while (code < 60) : (code += 1) {
-            if (shapes_mod.evdevToChar(code, false) == name[0]) {
+            if (usKeyChar(code, false) == name[0]) {
                 k.code = code;
                 break;
             }
         }
     }
     if (k.code == 0) return error.BadKey;
-    if (!k.ctrl) if (shapes_mod.evdevToChar(k.code, k.shift)) |c| {
+    if (!k.ctrl) if (usKeyChar(k.code, k.shift)) |c| {
         k.text_buf[0] = c;
         k.text_len = 1;
     };
@@ -1792,6 +1863,19 @@ test "dirty rect list merges on overflow" {
     try std.testing.expect(u.eql(.{ .x = 0, .y = 0, .w = 70, .h = 1 }));
     l.add(Rect.empty);
     try std.testing.expect(l.len <= 64);
+}
+
+test "scroll accumulates touchpad deltas and steps once per notch" {
+    var acc: f64 = 0;
+    try std.testing.expectEqual(@as(i32, -1), scrollSteps(&acc, 15));
+    try std.testing.expectEqual(@as(i32, 2), scrollSteps(&acc, -30));
+    var small: i32 = 0;
+    for (0..30) |_| small += scrollSteps(&acc, 1.0);
+    try std.testing.expectEqual(@as(i32, -2), small);
+    // a direction change drops the leftover
+    _ = scrollSteps(&acc, 14);
+    try std.testing.expectEqual(@as(i32, 0), scrollSteps(&acc, -14));
+    try std.testing.expectEqual(@as(i32, 1), scrollSteps(&acc, -1));
 }
 
 test "scripted keys parse" {
