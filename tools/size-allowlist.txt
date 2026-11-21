@@ -1,4 +1,2 @@
 # Files over the 600-line limit, with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.
-782 tools/container/wldrive.zig
-1270 tools/e2e.sh
