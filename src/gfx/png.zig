@@ -6,6 +6,9 @@
 //!
 //! The decoder treats its input as untrusted: chunk lengths, IHDR fields
 //! and the decompressed size are all bounded before anything is allocated.
+//! The encoder picks a filter per row (minimum sum of absolute
+//! differences) and, for large images, deflates bands of rows on several
+//! threads, joining them into one zlib stream.
 
 const std = @import("std");
 const flate = std.compress.flate;
@@ -273,15 +276,289 @@ fn paeth(a: u8, b: u8, c: u8) u8 {
     return c;
 }
 
+// --- encoder ---
+
+pub const EncodeOptions = struct {
+    /// worker threads for large images; 0 = one per CPU (capped)
+    threads: u32 = 0,
+    /// adaptive per-row filters; false writes filter 0 everywhere
+    filter: bool = true,
+};
+
 /// Encode opaque 8-bit RGB PNG from 0xAARRGGBB pixels (alpha ignored).
 pub fn encode(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32) ![]u8 {
-    std.debug.assert(pixels.len == @as(usize, width) * height);
+    return encodeWith(alloc, pixels, width, height, .{});
+}
+
+const enc_bpp = 3;
+/// rows are filtered with this many zero bytes in front, so the "left"
+/// neighbour of the first pixel needs no special case
+const pad = 32;
+const V = @Vector(32, u8);
+const VI = @Vector(32, i16);
+
+/// Filter one row (RGB bytes in `cur`/`prev`, both with `pad` leading
+/// zeros) into `out` (filter byte + data), choosing the filter with the
+/// minimum sum of absolute differences.
+fn filterRow(cur: []const u8, prev: []const u8, out: []u8, adaptive: bool) void {
+    const n = cur.len - pad;
+    if (!adaptive) {
+        out[0] = 0;
+        @memcpy(out[1..], cur[pad..]);
+        return;
+    }
+    var sums: [5]u64 = @splat(0);
+    var i: usize = 0;
+    while (i + 32 <= n) : (i += 32) {
+        const x: V = cur[pad + i ..][0..32].*;
+        const a: V = cur[pad + i - enc_bpp ..][0..32].*;
+        const b: V = prev[pad + i ..][0..32].*;
+        const c: V = prev[pad + i - enc_bpp ..][0..32].*;
+        const f = predict(x, a, b, c);
+        inline for (0..5) |k| {
+            const s: @Vector(32, i8) = @bitCast(f[k]);
+            sums[k] += @reduce(.Add, @as(@Vector(32, u16), @abs(s)));
+        }
+    }
+    while (i < n) : (i += 1) {
+        const x = cur[pad + i];
+        const a = cur[pad + i - enc_bpp];
+        const b = prev[pad + i];
+        const c = prev[pad + i - enc_bpp];
+        const f = [5]u8{ x, x -% a, x -% b, x -% avg(a, b), x -% paeth(a, b, c) };
+        for (f, 0..) |v, k| sums[k] += @abs(@as(i8, @bitCast(v)));
+    }
+    var best: u8 = 0;
+    for (sums, 0..) |sum, k| {
+        if (sum < sums[best]) best = @intCast(k);
+    }
+    out[0] = best;
+    const dst = out[1..];
+    i = 0;
+    while (i + 32 <= n) : (i += 32) {
+        const x: V = cur[pad + i ..][0..32].*;
+        const a: V = cur[pad + i - enc_bpp ..][0..32].*;
+        const b: V = prev[pad + i ..][0..32].*;
+        const c: V = prev[pad + i - enc_bpp ..][0..32].*;
+        dst[i..][0..32].* = predict(x, a, b, c)[best];
+    }
+    while (i < n) : (i += 1) {
+        const x = cur[pad + i];
+        const a = cur[pad + i - enc_bpp];
+        const b = prev[pad + i];
+        const c = prev[pad + i - enc_bpp];
+        dst[i] = switch (best) {
+            0 => x,
+            1 => x -% a,
+            2 => x -% b,
+            3 => x -% avg(a, b),
+            else => x -% paeth(a, b, c),
+        };
+    }
+}
+
+fn avg(a: u8, b: u8) u8 {
+    return @intCast((@as(u16, a) + b) / 2);
+}
+
+/// All five filtered versions of 32 bytes.
+inline fn predict(x: V, a: V, b: V, c: V) [5]V {
+    const ai: VI = a;
+    const bi: VI = b;
+    const ci: VI = c;
+    const av: V = @intCast((ai + bi) >> @splat(1));
+    const pa = @abs(bi - ci);
+    const pb = @abs(ai - ci);
+    const pc = @abs(ai + bi - ci - ci);
+    const use_a = (pa <= pb) & (pa <= pc);
+    const use_b = pb <= pc;
+    const pred: V = @select(u8, use_a, a, @select(u8, use_b, b, c));
+    return .{ x, x -% a, x -% b, x -% av, x -% pred };
+}
+
+/// One band of rows compressed into a raw deflate fragment.
+const Band = struct {
+    pixels: []const u32,
+    width: u32,
+    y0: u32,
+    y1: u32,
+    last: bool,
+    filter: bool,
+    alloc: std.mem.Allocator,
+    out: std.Io.Writer.Allocating,
+    adler: u32 = 1,
+    len: u64 = 0,
+    err: ?anyerror = null,
+
+    fn run(self: *Band) void {
+        self.compress() catch |e| {
+            self.err = e;
+        };
+    }
+
+    fn compress(self: *Band) !void {
+        const alloc = self.alloc;
+        const w: usize = self.width;
+        const row_len = w * enc_bpp;
+        const bufs = try alloc.alloc(u8, 2 * (pad + row_len) + 1 + row_len);
+        defer alloc.free(bufs);
+        var cur = bufs[0 .. pad + row_len];
+        var prev = bufs[pad + row_len ..][0 .. pad + row_len];
+        const filtered = bufs[2 * (pad + row_len) ..];
+        @memset(cur[0..pad], 0);
+        @memset(prev, 0);
+        if (self.y0 > 0) toRgb(self.pixels[(self.y0 - 1) * w ..][0..w], prev[pad..]);
+
+        const window = try alloc.alloc(u8, flate.max_window_len);
+        defer alloc.free(window);
+        const comp = try alloc.create(flate.Compress);
+        defer alloc.destroy(comp);
+        const raw_len = @as(usize, self.y1 - self.y0) * (row_len + 1);
+        try self.out.ensureUnusedCapacity(raw_len / 8 + 1024);
+        // the probe reuses the window before the real compressor starts
+        // writing, so each needs its own
+        const probe_window = try alloc.alloc(u8, flate.max_window_len);
+        defer alloc.free(probe_window);
+        comp.* = try flate.Compress.init(&self.out.writer, window, .raw, .level_6);
+
+        // probe state for choosing None vs adaptive filters per segment
+        var probe: ?*flate.Compress = null;
+        defer if (probe) |p| alloc.destroy(p);
+        var probe_bufs: []u8 = &.{};
+        defer alloc.free(probe_bufs);
+        if (self.filter) {
+            probe = try alloc.create(flate.Compress);
+            probe_bufs = try alloc.alloc(u8, 2 * (pad + row_len) + 1 + row_len + 64);
+        }
+
+        var adler: std.hash.Adler32 = .{};
+        var adaptive = self.filter;
+        var y = self.y0;
+        while (y < self.y1) : (y += 1) {
+            if (self.filter and (y - self.y0) % segment_rows == 0) {
+                adaptive = try self.probeAdaptive(probe.?, probe_window, probe_bufs, y, @min(self.y1, y + segment_rows));
+            }
+            toRgb(self.pixels[y * w ..][0..w], cur[pad..]);
+            filterRow(cur, prev, filtered, adaptive);
+            adler.update(filtered);
+            try comp.writer.writeAll(filtered);
+            std.mem.swap([]u8, &cur, &prev);
+        }
+        // a non-final band ends byte-aligned with no BFINAL block, so the
+        // next band's independent deflate stream can follow it directly
+        if (self.last) try comp.finish() else try comp.writer.flush();
+        self.adler = adler.adler;
+        self.len = raw_len;
+    }
+
+    /// Whether adaptive filtering beats filter None on rows [ys, ye): MSAD
+    /// wins on photos and gradients but often loses on UI, where it breaks
+    /// the exact repeats (glyphs, borders) LZ77 finds in unfiltered rows.
+    /// Decided by fast-compressing a few sample rows both ways.
+    fn probeAdaptive(self: *Band, probe: *flate.Compress, window: []u8, bufs: []u8, ys: u32, ye: u32) !bool {
+        const w: usize = self.width;
+        const row_len = w * enc_bpp;
+        var cur = bufs[0 .. pad + row_len];
+        var prev = bufs[pad + row_len ..][0 .. pad + row_len];
+        const filtered = bufs[2 * (pad + row_len) ..][0 .. 1 + row_len];
+        const sink_buf = bufs[2 * (pad + row_len) + 1 + row_len ..];
+        const mid = ys + (ye - ys) / 2;
+        const groups = [2][2]u32{ .{ ys, @min(ye, ys + probe_rows) }, .{ mid, @min(ye, mid + probe_rows) } };
+        var sizes: [2]u64 = undefined;
+        for (0..2) |mode| {
+            var sink: std.Io.Writer.Discarding = .init(sink_buf);
+            probe.* = try flate.Compress.init(&sink.writer, window, .raw, .level_6);
+            for (groups, 0..) |g, gi| {
+                if (gi == 1 and g[0] < groups[0][1]) break; // overlapping: short segment
+                @memset(cur[0..pad], 0);
+                @memset(prev, 0);
+                if (g[0] > 0) toRgb(self.pixels[(g[0] - 1) * w ..][0..w], prev[pad..]);
+                var y = g[0];
+                while (y < g[1]) : (y += 1) {
+                    toRgb(self.pixels[y * w ..][0..w], cur[pad..]);
+                    filterRow(cur, prev, filtered, mode == 1);
+                    try probe.writer.writeAll(filtered);
+                    std.mem.swap([]u8, &cur, &prev);
+                }
+            }
+            try probe.finish();
+            sizes[mode] = sink.fullCount();
+        }
+        return sizes[1] < sizes[0];
+    }
+};
+
+/// rows per filter-strategy decision, and sample rows per probe group
+const segment_rows = 64;
+const probe_rows = 4;
+
+fn toRgb(src: []const u32, dst: []u8) void {
+    for (src, 0..) |p, x| {
+        dst[x * 3] = @truncate(p >> 16);
+        dst[x * 3 + 1] = @truncate(p >> 8);
+        dst[x * 3 + 2] = @truncate(p);
+    }
+}
+
+/// adler32 of A ++ B from adler32(A), adler32(B) and len(B) (zlib's
+/// adler32_combine).
+fn adlerCombine(a1: u32, a2: u32, len2: u64) u32 {
+    const base: u64 = 65521;
+    const rem = len2 % base;
+    var sum1: u64 = a1 & 0xFFFF;
+    var sum2: u64 = (rem * sum1) % base;
+    sum1 += (a2 & 0xFFFF) + base - 1;
+    sum2 += (a1 >> 16) + (a2 >> 16) + base - rem;
+    if (sum1 >= base) sum1 -= base;
+    if (sum1 >= base) sum1 -= base;
+    if (sum2 >= base * 2) sum2 -= base * 2;
+    if (sum2 >= base) sum2 -= base;
+    return @intCast(sum1 | (sum2 << 16));
+}
+
+pub fn encodeWith(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, opts: EncodeOptions) ![]u8 {
+    if (width == 0 or height == 0 or width > 0x7FFFFFFF / 4 or height > 0x7FFFFFFF) return error.BadDimensions;
+    if (pixels.len != @as(u64, width) * height) return error.BadDimensions;
+
+    // bands of at least ~1 MB of raw data each, one per worker
+    const raw_total: u64 = @as(u64, height) * (@as(u64, width) * enc_bpp + 1);
+    const cpus: u32 = if (opts.threads != 0) opts.threads else @intCast(@min(16, std.Thread.getCpuCount() catch 1));
+    const by_size: u32 = @intCast(@max(1, @min(64, raw_total / (256 << 10))));
+    const n_bands: u32 = @max(1, @min(@min(cpus, by_size), height));
+    const rows_per = (height + n_bands - 1) / n_bands;
+
+    const bands = try alloc.alloc(Band, n_bands);
+    defer alloc.free(bands);
+    var n_init: usize = 0;
+    defer for (bands[0..n_init]) |*b| b.out.deinit();
+    for (bands, 0..) |*b, i| {
+        const y0: u32 = @intCast(@min(height, i * rows_per));
+        const y1: u32 = @intCast(@min(height, (i + 1) * rows_per));
+        b.* = .{ .pixels = pixels, .width = width, .y0 = y0, .y1 = y1, .last = i + 1 == n_bands, .filter = opts.filter, .alloc = alloc, .out = .init(alloc) };
+        n_init += 1;
+    }
+
+    var threads: [64]?std.Thread = @splat(null);
+    for (bands[1..], 1..) |*b, i| {
+        threads[i] = std.Thread.spawn(.{}, Band.run, .{b}) catch null;
+        if (threads[i] == null) b.run(); // no thread: do it here
+    }
+    bands[0].run();
+    for (threads[1..n_bands]) |t| if (t) |th| th.join();
+    for (bands) |*b| if (b.err) |e| return e;
+
+    var adler: u32 = bands[0].adler;
+    var deflate_len: usize = 0;
+    for (bands, 0..) |*b, i| {
+        if (i > 0) adler = adlerCombine(adler, b.adler, b.len);
+        deflate_len += b.out.written().len;
+    }
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
-    try out.appendSlice(alloc, &signature);
+    try out.ensureTotalCapacity(alloc, deflate_len + 128);
+    out.appendSliceAssumeCapacity(&signature);
 
-    // IHDR
     var ihdr: [13]u8 = undefined;
     std.mem.writeInt(u32, ihdr[0..4], width, .big);
     std.mem.writeInt(u32, ihdr[4..8], height, .big);
@@ -292,32 +569,29 @@ pub fn encode(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height:
     ihdr[12] = 0; // no interlace
     try writeChunk(alloc, &out, "IHDR", &ihdr);
 
-    // IDAT: zlib-compressed scanlines, filter 0
-    var compressed: std.Io.Writer.Allocating = .init(alloc);
-    defer compressed.deinit();
-    try compressed.ensureUnusedCapacity(1024);
-    {
-        const window = try alloc.alloc(u8, flate.max_window_len);
-        defer alloc.free(window);
-        var comp = try flate.Compress.init(&compressed.writer, window, .zlib, .default);
-
-        const row_buf = try alloc.alloc(u8, 1 + width * 3);
-        defer alloc.free(row_buf);
-        var y: u32 = 0;
-        while (y < height) : (y += 1) {
-            row_buf[0] = 0; // filter: none
-            var x: u32 = 0;
-            while (x < width) : (x += 1) {
-                const px = pixels[y * width + x];
-                row_buf[1 + x * 3] = @truncate(px >> 16);
-                row_buf[1 + x * 3 + 1] = @truncate(px >> 8);
-                row_buf[1 + x * 3 + 2] = @truncate(px);
-            }
-            try comp.writer.writeAll(row_buf);
-        }
-        try comp.finish();
+    // IDAT: zlib header, the bands' deflate fragments, adler32
+    const zlib_header = [2]u8{ 0x78, 0x5E };
+    var adler_be: [4]u8 = undefined;
+    std.mem.writeInt(u32, &adler_be, adler, .big);
+    const idat_len = 2 + deflate_len + 4;
+    if (idat_len > 0x7FFFFFFF) return error.TooLarge;
+    var len_buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &len_buf, @intCast(idat_len), .big);
+    try out.appendSlice(alloc, &len_buf);
+    var crc = std.hash.Crc32.init();
+    crc.update("IDAT");
+    try out.appendSlice(alloc, "IDAT");
+    crc.update(&zlib_header);
+    try out.appendSlice(alloc, &zlib_header);
+    for (bands) |*b| {
+        crc.update(b.out.written());
+        try out.appendSlice(alloc, b.out.written());
     }
-    try writeChunk(alloc, &out, "IDAT", compressed.written());
+    crc.update(&adler_be);
+    try out.appendSlice(alloc, &adler_be);
+    var crc_buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &crc_buf, crc.final(), .big);
+    try out.appendSlice(alloc, &crc_buf);
 
     try writeChunk(alloc, &out, "IEND", "");
     return out.toOwnedSlice(alloc);
@@ -373,6 +647,36 @@ test "png roundtrip" {
     for (pixels, img.pixels) |expected, got| {
         try std.testing.expectEqual(expected, got);
     }
+}
+
+test "png parallel bands roundtrip, every filter, odd sizes" {
+    const alloc = std.testing.allocator;
+    const sizes = [_][2]u32{ .{ 1, 1 }, .{ 1, 300 }, .{ 300, 1 }, .{ 11, 7 }, .{ 640, 480 }, .{ 1023, 517 } };
+    for (sizes, 0..) |sz, k| {
+        const w = sz[0];
+        const h = sz[1];
+        const px = try alloc.alloc(u32, w * h);
+        defer alloc.free(px);
+        testImage(px, w, k);
+        for ([_]u32{ 1, 3, 8 }) |threads| {
+            for ([_]bool{ true, false }) |filter| {
+                const enc = try encodeWith(alloc, px, w, h, .{ .threads = threads, .filter = filter });
+                defer alloc.free(enc);
+                var img = try decode(alloc, enc);
+                defer img.deinit(alloc);
+                try std.testing.expectEqualSlices(u32, px, img.pixels);
+            }
+        }
+    }
+    try std.testing.expectError(error.BadDimensions, encode(alloc, &.{}, 0, 0));
+    try std.testing.expectError(error.BadDimensions, encode(alloc, &.{0}, 2, 1));
+}
+
+test "adler32 combine" {
+    const a = "hello, ";
+    const b = "world and more bytes";
+    const whole = std.hash.Adler32.hash(a ++ b);
+    try std.testing.expectEqual(whole, adlerCombine(std.hash.Adler32.hash(a), std.hash.Adler32.hash(b), b.len));
 }
 
 fn readTestFile(alloc: std.mem.Allocator, path: [:0]const u8) ![]u8 {
