@@ -12,6 +12,8 @@ const effects = @import("../gfx/effects.zig");
 const bidi = @import("../gfx/bidi.zig");
 const utf8 = @import("../gfx/utf8.zig");
 const textbox = @import("textbox.zig");
+const ruler = @import("tools/ruler.zig");
+const spotlight = @import("tools/spotlight.zig");
 
 const Canvas = render.Canvas;
 
@@ -28,6 +30,10 @@ pub const Tool = enum {
     redact,
     counter,
     text,
+    /// everything around it dimmed (tools/spotlight.zig)
+    spotlight,
+    /// a measurement (tools/ruler.zig)
+    ruler,
 
     /// Tools that hide what is under them.
     pub fn isRedaction(self: Tool) bool {
@@ -252,6 +258,8 @@ pub const Shape = struct {
             .rect, .ellipse => f.expand(2),
             .counter => f.expand(3),
             .text => f.expand(2),
+            .ruler => ruler.bounds(self),
+            .spotlight => spotlight.bounds(),
             .blur, .pixelate, .redact, .select => f,
         };
     }
@@ -280,7 +288,8 @@ pub const Shape = struct {
                 }
                 return false;
             },
-            .line, .arrow => return segDist(p, self.p0, self.p1) <= half + tol,
+            .line, .arrow, .ruler => return segDist(p, self.p0, self.p1) <= half + tol,
+            .spotlight => return spotlight.hitTest(self, p, tol),
             .rect => {
                 const r = self.frame();
                 const t: i32 = @intFromFloat(@ceil(tol));
@@ -320,7 +329,7 @@ pub const Shape = struct {
 
     pub fn handleKind(self: *const Shape) HandleKind {
         return switch (self.tool) {
-            .line, .arrow => .endpoints,
+            .line, .arrow, .ruler => .endpoints,
             .counter, .text, .select => .none,
             else => .box,
         };
@@ -461,6 +470,8 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
             );
         },
         .text => drawText(canvas, alloc, s, xf, cursor),
+        .ruler => ruler.draw(canvas, s, xf),
+        .spotlight => spotlight.draw(canvas, s, xf),
         .select => {},
     }
 }

@@ -27,6 +27,14 @@ pub const Action = enum {
     save_as,
     beautify,
     style,
+    // the editor's extra tools (src/ui/tools/)
+    eyedropper,
+    ruler,
+    spotlight,
+    crop,
+    copy_text,
+    redact_sensitive,
+    pin,
 
     pub fn label(self: Action) []const u8 {
         return switch (self) {
@@ -47,6 +55,13 @@ pub const Action = enum {
             .save_as => "Save as...",
             .beautify => "Beautify frame",
             .style => "Fill / rounded / text background",
+            .eyedropper => "Colour picker",
+            .ruler => "Ruler",
+            .spotlight => "Spotlight",
+            .crop => "Crop",
+            .copy_text => "Copy text (OCR)",
+            .redact_sensitive => "Redact sensitive data",
+            .pin => "Pin to screen",
         };
     }
 };
@@ -81,6 +96,13 @@ pub const default_binds = [n_actions]Bind{
     .{ .code = 31, .ctrl = true, .shift = true }, // Ctrl+Shift+S save as
     .{ .code = 48 }, // B beautify (CleanShot X's background tool)
     .{ .code = 33 }, // F fill style (CleanShot X: filled rectangle)
+    .{ .code = 23 }, // I colour picker (eyedropper)
+    .{ .code = 22 }, // U ruler
+    .{ .code = 31 }, // S spotlight
+    .{ .code = 46 }, // C crop (CleanShot X)
+    .{ .code = 46, .ctrl = true, .shift = true }, // Ctrl+Shift+C copy text
+    .{ .code = 19, .ctrl = true, .shift = true }, // Ctrl+Shift+R redact sensitive data
+    .{ .code = 25, .ctrl = true }, // Ctrl+P pin
 };
 
 /// Human-readable name for an evdev key code (US-position based).

@@ -25,6 +25,7 @@ const ui = @import("editor_ui.zig");
 const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
 const dbus = @import("../platform/dbus.zig");
+const tools = @import("tools/mod.zig");
 
 const Window = window.Window;
 const Canvas = render.Canvas;
@@ -232,6 +233,8 @@ pub const Editor = struct {
     /// per tool, so the rectangle's fill doesn't leak into text
     styles: std.EnumArray(Tool, u2) = .initFill(0),
     beautify: doc_mod.Beautify = .{},
+    /// the extra tools' state (tools/mod.zig)
+    tools: tools.State = .{},
 
     cur: ?Shape = null,
     selected: ?usize = null,
@@ -796,7 +799,7 @@ pub const Editor = struct {
 
     /// Apply `op(shape, arg)` to the text being edited or the selected
     /// shape, with undo (coalescing repeats of the same `kind`).
-    fn editTarget(self: *Editor, kind: u8, comptime op: anytype, arg: anytype) !void {
+    pub fn editTarget(self: *Editor, kind: u8, comptime op: anytype, arg: anytype) !void {
         if (self.text) |t| {
             op(&self.doc.shapes.items[t.idx], arg);
             self.needs_render = true;
@@ -1184,15 +1187,17 @@ pub const Editor = struct {
                 try self.startText(i, true, ip);
             },
             else => {
+                const at = tools.startPoint(self, self.tool, ip);
                 var s = Shape{
                     .tool = self.tool,
                     .color = self.color(),
                     .thickness = self.imgThickness(),
-                    .p0 = ip,
-                    .p1 = ip,
+                    .p0 = at,
+                    .p1 = at,
                     .filled = (self.styles.get(self.tool) & 1) != 0,
                     .rounded = (self.styles.get(self.tool) & 2) != 0,
                 };
+                tools.initShape(self, &s);
                 errdefer s.deinit(self.alloc);
                 if (self.tool == .pen or self.tool == .highlight) {
                     try s.points.append(self.alloc, ip);
@@ -1200,7 +1205,7 @@ pub const Editor = struct {
                 }
                 self.cur = s;
                 self.drag = .drawing;
-                self.drag_anchor = ip;
+                self.drag_anchor = at;
                 self.space_last = null;
                 self.needs_render = true;
             },
@@ -1209,6 +1214,7 @@ pub const Editor = struct {
 
     fn updateDrawing(self: *Editor, ip: Point) !void {
         const s = &(self.cur orelse return);
+        if (tools.updateDrawing(self, s, ip)) return;
         switch (s.tool) {
             .pen, .highlight => {
                 const last = s.points.items[s.points.items.len - 1];
@@ -1375,7 +1381,7 @@ pub const Editor = struct {
         const min = self.pn().view.lenToImg(3.0);
         const tiny = switch (s.tool) {
             .pen, .highlight => false,
-            .line, .arrow => @abs(s.p1.x - s.p0.x) < @as(i32, @intFromFloat(min)) + 1 and @abs(s.p1.y - s.p0.y) < @as(i32, @intFromFloat(min)) + 1,
+            .line, .arrow, .ruler => @abs(s.p1.x - s.p0.x) < @as(i32, @intFromFloat(min)) + 1 and @abs(s.p1.y - s.p0.y) < @as(i32, @intFromFloat(min)) + 1,
             else => @as(f64, @floatFromInt(f.w)) < min or @as(f64, @floatFromInt(f.h)) < min,
         };
         if (tiny) {
@@ -1388,6 +1394,7 @@ pub const Editor = struct {
             return e;
         };
         const i = try self.doc.add(s);
+        tools.committed(&self.doc.shapes.items[i]);
         try self.paintTop(i);
     }
 
@@ -1720,6 +1727,7 @@ pub const Editor = struct {
                 self.closePopover();
                 self.finish(.cancel);
             },
+            .ext => |e| try tools.onButton(self, e),
         }
     }
 
@@ -1780,6 +1788,7 @@ pub const Editor = struct {
                 const fixed = self.doc.shapes.items[i].box_w > 0;
                 if (fixed != (sg == .width_fixed)) try self.toggleTextWidth();
             },
+            else => try tools.applySeg(self, sg),
         }
         self.needs_render = true;
     }
@@ -1829,7 +1838,7 @@ pub const Editor = struct {
         self.needs_render = true;
     }
 
-    fn setTool(self: *Editor, t: Tool) !void {
+    pub fn setTool(self: *Editor, t: Tool) !void {
         try self.endText();
         self.deselectShape();
         self.tool = t;
@@ -1915,6 +1924,7 @@ pub const Editor = struct {
                     .save_as => self.finish(.save_as),
                     .beautify => try self.onButton(.beautify),
                     .style => try self.cycleStyle(),
+                    else => |a| try tools.onAction(self, a),
                 }
                 return;
             }
@@ -2290,7 +2300,7 @@ pub const Editor = struct {
 
     fn exportPixels(self: *Editor) !doc_mod.Exported {
         try self.settle();
-        return doc_mod.exportImage(self.alloc, self.layer, self.img.width, self.img.height, self.doc.exportRect(), self.beautify);
+        return tools.exportPixels(self);
     }
 
     fn exportPng(self: *Editor) ![]u8 {

@@ -199,6 +199,7 @@ test {
     _ = @import("ui/editor.zig");
     _ = @import("ui/textbox.zig");
     _ = @import("ui/shapes.zig");
+    _ = @import("ui/tools/mod.zig");
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");

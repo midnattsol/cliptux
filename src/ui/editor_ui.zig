@@ -17,6 +17,8 @@ const editor_mod = @import("editor.zig");
 const theme = @import("theme.zig");
 const motion = @import("motion.zig");
 const icons = @import("icons.zig");
+const tools = @import("tools/mod.zig");
+const tui = @import("tools/tui.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -40,6 +42,14 @@ pub const Seg = enum {
     mode_solid,
     width_fit,
     width_fixed,
+    // spotlight and ruler (tools/mod.zig)
+    spot_rect,
+    spot_ellipse,
+    dim_light,
+    dim_medium,
+    dim_strong,
+    measure_show,
+    measure_hide,
 };
 
 pub const ButtonKind = union(enum) {
@@ -68,6 +78,8 @@ pub const ButtonKind = union(enum) {
     more,
     help,
     cancel,
+    /// the extra tools' controls (tools/mod.zig)
+    ext: tools.Ext,
 };
 
 /// Which floating surface a control sits on.
@@ -120,14 +132,15 @@ pub const Backdrop = struct {
 pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice };
 pub const n_slots = @typeInfo(Slot).@"enum".field_names.len;
 
-/// The ten tool buttons; Blur stands for blur, pixelate and solid.
-pub const tool_list = [_]Tool{ .select, .pen, .arrow, .rect, .ellipse, .line, .highlight, .blur, .counter, .text };
+/// The tool buttons; Blur stands for blur, pixelate and solid.
+pub const tool_list = [_]Tool{ .select, .pen, .arrow, .rect, .ellipse, .line, .highlight, .blur, .spotlight, .counter, .text, .ruler };
 
 pub fn buttonName(kind: ButtonKind) []const u8 {
     return switch (kind) {
         .tool => |t| @tagName(t),
         .color => |c| shapes_mod.palette_names[c],
         .seg => |s| @tagName(s),
+        .ext => |e| tui.name(e),
         else => @tagName(kind),
     };
 }
@@ -139,10 +152,10 @@ pub fn nameLayer(name: []const u8) ?Layer {
     inline for (@typeInfo(Seg).@"enum".field_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "custom_color", "thickness" }) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "save_as", "help", "cancel", "beautify" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
-    return null;
+    return tui.nameLayer(name);
 }
 
-const Label = struct { name: []const u8, key: []const u8 = "" };
+pub const Label = struct { name: []const u8, key: []const u8 = "" };
 
 /// A control's name and its shortcut, for tooltips and menu rows.
 fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
@@ -158,6 +171,8 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
             .blur, .pixelate, .redact => .{ "Blur, pixelate, redact", .pixelate, "" },
             .counter => .{ "Counter", .counter, "" },
             .text => .{ "Text", .text, "" },
+            .spotlight => .{ "Spotlight", .spotlight, "" },
+            .ruler => .{ "Ruler", .ruler, "" },
         },
         .color => |c| return .{ .name = shapes_mod.palette_labels[c], .key = if (c < 8) (std.fmt.bufPrint(kb, "{d}", .{@as(u8, c) + 1}) catch "") else "" },
         .custom_color => .{ "Custom colour", null, "9" },
@@ -174,6 +189,7 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
             .mode_solid => "Solid",
             .width_fit => "Fit text",
             .width_fixed => "Wrap",
+            else => tools.segLabel(s),
         }, null, "" },
         .style => .{ "Fill / rounded / text background", .style, "" },
         .text_width => .{ "Text width", null, "Alt+W" },
@@ -195,6 +211,7 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
         .more => .{ "More", null, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
+        .ext => |e| return tui.label(self, e, kb),
     };
     const key = if (action) |a| config.bindName(self.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = name, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
@@ -473,7 +490,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
             out[n] = .{ .mode_blur, .mode_pixelate, .mode_solid };
             n += 1;
         },
-        else => {},
+        else => |t| n += tools.segRows(self, t, out[n..]),
     }
     if (self.textHandleShape() != null) {
         out[n] = .{ .width_fit, .width_fixed, null };
@@ -1255,6 +1272,8 @@ fn toolIcon(self: *const Editor, t: Tool) Icon {
         },
         .counter => .counter,
         .text => .text,
+        .spotlight => .spotlight,
+        .ruler => .ruler,
     };
 }
 
@@ -1274,6 +1293,7 @@ fn kindIcon(self: *const Editor, kind: ButtonKind) ?Icon {
         .padding => .padding,
         .corners => .corners,
         .shadow => .shadow,
+        .ext => |e| tui.icon(e),
         else => null,
     };
 }
@@ -1388,6 +1408,7 @@ fn segOn(self: *const Editor, s: Seg) bool {
         .mode_solid => mode == .redact,
         .width_fit => !fixed,
         .width_fixed => fixed,
+        else => tools.segOn(self, s),
     };
 }
 
@@ -1916,6 +1937,7 @@ const help_lines = [_][2][]const u8{
     .{ "V P L A R E M", "Select, pen, line, arrow, rect, ellipse, marker" },
     .{ "X (again)", "Blur, then pixelate, then solid redaction" },
     .{ "N  T", "Counter badge, text" },
+    .{ "S  U", "Spotlight (dims the rest); ruler (snaps to edges, Alt: free)" },
     .{ "F", "Fill / rounded corners / text background" },
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },
