@@ -7,7 +7,9 @@
 #   click X Y              a primary click on the window
 #   drop texture W H       an image was dropped (read as image/png)
 #   drop files PATH...     files were dropped (text/uri-list)
+#   drag begin|end         a drag of FILE out of it started or ended
 # usage: target.py [MIME...]   types to ask for on drop, best first
+#        target.py --source FILE   offers FILE (text/uri-list) to drag out
 import sys
 import gi
 
@@ -15,7 +17,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-PREFER = sys.argv[1:] or ["image/png", "text/uri-list"]
+SOURCE = sys.argv[2] if sys.argv[1:2] == ["--source"] else None
+PREFER = [] if SOURCE else sys.argv[1:] or ["image/png", "text/uri-list"]
 
 
 def out(*parts):
@@ -47,10 +50,20 @@ class Target(Gtk.Application):
         drop.connect("drop", self.on_drop)
         win.add_controller(drop)
 
+        if SOURCE:
+            self.add_source(area)
         win.connect("notify::is-active", lambda w, _p: out("active", w.is_active()))
         win.maximize()
         win.present()
         entry.grab_focus()
+
+    def add_source(self, widget):
+        files = Gdk.FileList.new_from_list([Gio.File.new_for_path(SOURCE)])
+        src = Gtk.DragSource(actions=Gdk.DragAction.COPY)
+        src.set_content(Gdk.ContentProvider.new_for_value(files))
+        src.connect("drag-begin", lambda *_: out("drag begin"))
+        src.connect("drag-end", lambda *_: out("drag end"))
+        widget.add_controller(src)
 
     def on_click(self, gesture, _n, x, y, win):
         # translate to window coordinates (the window is maximized)
