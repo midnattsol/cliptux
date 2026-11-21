@@ -660,6 +660,10 @@ done
 
 passed=$(grep -c '^PASS' "$E2E_OUT/results.txt" 2>/dev/null)
 failed=$(grep -c '^FAIL' "$E2E_OUT/results.txt" 2>/dev/null)
-echo "e2e: ${passed:-0} passed, ${failed:-0} failed (logs: $E2E_OUT)"
-if [ "$total_fail" = 0 ] && [ -z "$keep" ]; then rm -rf "$E2E_OUT"; fi
+if [ "$total_fail" = 0 ] && [ -z "$keep" ]; then
+    rm -rf "$E2E_OUT"
+    echo "e2e: ${passed:-0} passed, ${failed:-0} failed"
+else
+    echo "e2e: ${passed:-0} passed, ${failed:-0} failed (logs: $E2E_OUT)"
+fi
 exit $total_fail

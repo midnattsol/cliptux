@@ -96,6 +96,29 @@ the editor for the full list.
 The settings file is plain `key=value`. Shotlet only rewrites the keys it
 changes, so editing it by hand while Shotlet runs is safe.
 
+## Tests
+
+```sh
+zig build test --summary all   # unit tests (+ a portal test on a private dbus-daemon)
+zig build e2e                  # end-to-end suite, see below
+zig build e2e -- keyboard ime  # only some scenarios
+```
+
+The end-to-end suite runs the real binary against real portal dialogs,
+PipeWire and the clipboard, inside a private, invisible GNOME session
+(`tools/e2e/session.sh`: its own `HOME`, session bus, PipeWire and
+`gnome-shell --headless` with virtual monitors). Nothing reaches the desktop
+you are logged into. `shotlet-drive` (`tools/e2e/drive.zig`) holds a Mutter
+RemoteDesktop session for a virtual keyboard and pointer, and ScreenCast
+streams to aim the pointer and screenshot each monitor. `tools/e2e.sh`
+prints PASS/FAIL per check and skips when the session cannot run.
+
+Needs `gnome-shell`, `xdg-desktop-portal-gnome`, `pipewire`, `wireplumber`,
+`wl-clipboard`, `python3` and `gdbus`; the IME scenario also uses
+`ibus-hangul` (skipped without it). On Debian/Ubuntu:
+`apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul`.
+`E2E_OUT=dir` keeps the logs and screenshots of a run.
+
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).
