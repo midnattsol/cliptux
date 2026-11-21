@@ -24,7 +24,7 @@ if [ -z "${CTR_INNER:-}" ]; then
     unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS
     # the e2e helpers (droptarget) refuse to run outside a private session
     export HL_INNER=1 CTR_INNER=1
-    exec dbus-run-session -- "$0" "$@" 2> >(grep -v '^dbus-daemon\[' >&2)
+    exec dbus-run-session -- "$0" "$@" 2> >(grep --line-buffered -v '^dbus-daemon\[' >&2)
 fi
 
 # ------------------------------------------------------------- the session
@@ -35,9 +35,16 @@ cleanup() {
     wait 2>/dev/null
 }
 trap cleanup EXIT
+# who stops a scenario early leaves a trace
+trap 'echo "inner.sh: SIGTERM at $(date +%T)" >&2; ps -eo pid,ppid,stat,etime,comm >&2; exit 143' TERM
 
 # a stuck scenario leaves a process list behind (run.sh stops it at 300 s)
-( sleep 270; ps -eo pid,ppid,stat,wchan:24,etime,args >"$OUT/stuck-ps.txt" ) &
+# (process names first: reading another process's command line can block
+# when it is stuck in the kernel)
+( sleep 270
+  ps -eo pid,ppid,stat,wchan:32,etime,comm >"$OUT/stuck-ps.txt" 2>&1
+  for p in /proc/[0-9]*; do echo "${p#/proc/} $(cat "$p/wchan" 2>/dev/null) $(cat "$p/comm" 2>/dev/null)"; done >>"$OUT/stuck-ps.txt"
+  timeout 5 ps -eo pid,args >>"$OUT/stuck-ps.txt" 2>&1 ) &
 pids+=($!)
 
 failed=0
@@ -53,10 +60,38 @@ pipewire >"$OUT/pipewire.log" 2>&1 & pids+=($!)
 for i in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
 wireplumber >"$OUT/wireplumber.log" 2>&1 & pids+=($!)
 
+# as a Plasma session does: KService (which KWin asks which .desktop file
+# an executable belongs to) only lists applications found through a menu
+[ "$COMP" = kwin ] && export XDG_MENU_PREFIX=plasma-
+
+# Shotlet installed as a person would (install.sh into ~/.local), so KWin
+# finds its .desktop file; the KWin `portal` scenario leaves it out to see
+# the portal take over when KWin refuses direct capture
+if [ "$COMP:$SCEN" = kwin:portal ]; then
+    export SHOTLET_BIN=$BINDIR/shotlet
+else
+    PREFIX=$HOME/.local /opt/shotlet/pkg/install.sh --no-gnome-extension >"$OUT/install.log" 2>&1 ||
+        { fail "install.sh"; exit 1; }
+    export SHOTLET_BIN=$HOME/.local/bin/shotlet
+fi
+# the test driver asks KWin the same way for its input and screenshots
+mkdir -p "$XDG_DATA_HOME/applications"
+cat >"$XDG_DATA_HOME/applications/shotlet-wldrive.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Shotlet test driver
+Exec=$BINDIR/shotlet-wldrive
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
+X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input
+EOF
+command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1
+
 # MONITORS="WxH[@SCALE] ...": the outputs a scenario wants (default one)
 MONITORS=${MONITORS:-1600x900}
 case $SCEN in
     multimon) MONITORS="1600x900 1280x720@2" ;;
+    rotated) MONITORS=${CTR_ROTATED:-"1600x900/90 1280x720/flipped-180"} ;;
+    portal) [ "$COMP" = kwin ] || export SHOTLET_NO_DIRECT=1 ;;
 esac
 set -- $MONITORS
 NMON=$#
@@ -66,14 +101,19 @@ xkbcli compile-keymap --layout us >"$HOME/keymap.xkb"
 export WLDRIVE_KEYMAP=$HOME/keymap.xkb
 
 # wlr-randr: size, place and scale the headless outputs left to right
+# (WxH[@SCALE][/TRANSFORM], e.g. 1600x900/90)
 layout_wlr() {
-    local x=0 i=1 m mode scale name
+    local x=0 i=1 m mode scale name tr w
     for m in $MONITORS; do
+        tr=normal
+        case $m in */*) tr=${m#*/}; m=${m%/*} ;; esac
         mode=${m%@*} scale=1
         [ "$m" != "$mode" ] && scale=${m#*@}
         name=HEADLESS-$i
-        wlr-randr --output "$name" --custom-mode "$mode" --pos "$x,0" --scale "$scale" >>"$OUT/compositor.log" 2>&1 || return 1
-        x=$((x + ${mode%x*} / scale))
+        wlr-randr --output "$name" --custom-mode "$mode" --pos "$x,0" --scale "$scale" --transform "$tr" >>"$OUT/compositor.log" 2>&1 || return 1
+        w=${mode%x*}
+        case $tr in 90 | 270 | flipped-90 | flipped-270) w=${mode#*x} ;; esac
+        x=$((x + w / scale))
         i=$((i + 1))
     done
 }
@@ -138,14 +178,14 @@ EOF
     kwin)
         # (not KDE_FULL_SESSION: kwin_wayland crashes on start with it)
         export XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6
-        # fake input and screenshots for the driver
-        export KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1
+        # no KWIN_*_NO_PERMISSION_CHECKS: Shotlet and the driver are
+        # authorized by their .desktop files, as on a real desktop
         # OpenGL on the render node when there is one (screenshots and
         # screencasts need it), else QPainter
         [ -n "${CTR_RENDER_NODE:-}" ] || export KWIN_COMPOSE=Q
         export QT_QPA_PLATFORM=wayland
         mode=${1%@*}
-        kwin_wayland --virtual --no-lockscreen --socket wayland-kw --output-count "$NMON" \
+        QT_LOGGING_RULES="${CTR_KWIN_LOG:-}" kwin_wayland --virtual --no-lockscreen --socket wayland-kw --output-count "$NMON" \
             --width "${mode%x*}" --height "${mode#*x}" >"$OUT/compositor.log" 2>&1 & pids+=($!)
         for i in $(seq 1 100); do [ -S "$XDG_RUNTIME_DIR/wayland-kw" ] && break; sleep 0.1; done
         [ -S "$XDG_RUNTIME_DIR/wayland-kw" ] || { fail "kwin did not start"; tail "$OUT/compositor.log" >&2; exit 1; }
@@ -177,7 +217,7 @@ export XDG_DESKTOP_PORTAL_TEST_APP_ID=${CTR_PORTAL_APP_ID:-shotlet}
 vars=()
 for v in HOME XDG_RUNTIME_DIR XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME \
     XDG_CACHE_HOME XDG_CURRENT_DESKTOP XDG_SESSION_TYPE WAYLAND_DISPLAY LANG \
-    QT_QPA_PLATFORM XDG_DESKTOP_PORTAL_TEST_APP_ID SWAYSOCK KDE_SESSION_VERSION; do
+    QT_QPA_PLATFORM XDG_DESKTOP_PORTAL_TEST_APP_ID SWAYSOCK KDE_SESSION_VERSION XDG_MENU_PREFIX; do
     [ -n "${!v:-}" ] && vars+=("$v")
 done
 dbus-update-activation-environment "${vars[@]}"
