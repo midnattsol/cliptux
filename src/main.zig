@@ -127,6 +127,7 @@ test "default bus address escapes the runtime dir" {
 test {
     _ = @import("platform/dbus.zig");
     _ = @import("platform/portal.zig");
+    _ = @import("platform/pw.zig");
     _ = @import("app/config.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
