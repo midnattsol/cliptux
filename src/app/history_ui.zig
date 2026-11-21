@@ -14,6 +14,7 @@ const clock = @import("clock.zig");
 const shot = @import("shot.zig");
 const dbus = @import("../platform/dbus.zig");
 const ocr = @import("../platform/ocr.zig");
+const portal = @import("../platform/portal.zig");
 const sys = @import("../platform/sys.zig");
 const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
@@ -307,7 +308,7 @@ const Panel = struct {
     // --- actions ---
 
     fn bus_(self: *Panel) ?*dbus.Connection {
-        if (self.bus == null) self.bus = dbus.Connection.connectSession(self.gpa, self.env.bus_addr) catch return null;
+        if (self.bus == null) self.bus = portal.connectApp(self.gpa, self.env.bus_addr) catch return null;
         return &self.bus.?;
     }
 

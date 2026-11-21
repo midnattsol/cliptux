@@ -254,7 +254,7 @@ const Quick = struct {
     }
 
     fn bus_(self: *Quick) ?*dbus.Connection {
-        if (self.bus == null) self.bus = dbus.Connection.connectSession(self.gpa, self.env.bus_addr) catch return null;
+        if (self.bus == null) self.bus = portal.connectApp(self.gpa, self.env.bus_addr) catch return null;
         return &self.bus.?;
     }
 

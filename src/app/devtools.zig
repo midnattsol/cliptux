@@ -51,7 +51,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         var cfg = @import("config.zig").load(gpa, env.home);
         var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
         defer conn.deinit();
-        portal.ensureAppScope(gpa, &conn);
+        portal.registerApp(gpa, &conn);
         const t0 = nowMs();
         var sc = switch (try portal.openScreenCast(gpa, &conn, cfg.scToken())) {
             .granted => |s| s,

@@ -42,7 +42,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
     const t_dbus = nowMs();
-    portal.ensureAppScope(gpa, &conn);
+    portal.registerApp(gpa, &conn);
     const t_scope = nowMs();
 
     var cfg = config.load(gpa, env.home);
@@ -202,7 +202,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     };
     defer cap.deinit(gpa);
 
-    var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var conn = try portal.connectApp(gpa, env.bus_addr);
     defer conn.deinit();
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
@@ -374,7 +374,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
             const title = "Shotlet needs screenshot permission";
             canvas.text(@divTrunc(w - render.Canvas.textWidth(2, title), 2), 42, 2, 0xFFE9ECEF, title);
             canvas.text(@divTrunc(w - render.Canvas.textWidth(2, status), 2), 96, 2, 0xFF74B3F2, status);
-            const hint = "GNOME remembers this choice    Esc: cancel";
+            const hint = "GNOME remembers it (once more after an update)   Esc: cancel";
             canvas.text(@divTrunc(w - render.Canvas.textWidth(1, hint), 2), 156, 1, 0xFF868E96, hint);
             try win.present();
         }

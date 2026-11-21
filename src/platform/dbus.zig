@@ -933,6 +933,22 @@ pub const Connection = struct {
         return self.waitReplyTimeout(serial, default_reply_timeout_ms);
     }
 
+    /// Like waitReplyTimeout, but an error reply is returned as is (type
+    /// .@"error", error_name set) for callers that tell errors apart.
+    pub fn waitReplyOrError(self: *Connection, serial: u32, timeout_ms: i64) !Message {
+        const deadline = sys.monoMs() + timeout_ms;
+        while (true) {
+            var msg = (self.readMessageDeadline(deadline) catch |err| {
+                if (isFatal(err)) return err;
+                continue;
+            }) orelse return error.Timeout;
+            if (msg.reply_serial == serial) return msg;
+            self.pending.append(self.alloc, msg) catch {
+                msg.deinit(self.alloc);
+            };
+        }
+    }
+
     pub fn waitReplyTimeout(self: *Connection, serial: u32, timeout_ms: i64) !Message {
         const deadline = sys.monoMs() + timeout_ms;
         while (true) {

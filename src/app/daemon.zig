@@ -1,6 +1,7 @@
 //! Tray daemon: owns the StatusNotifierItem and spawns capture children.
 //! Detaches from the terminal (double fork + setsid) unless asked to stay
-//! in the foreground; only one instance can own org.midnattsol.shotlet.
+//! in the foreground; only one instance can own the bus name
+//! io.github.midnattsol.Shotlet (its app id).
 
 const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
@@ -35,11 +36,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     defer conn.deinit();
 
     // single instance: lose the name race -> another daemon already runs
-    if (!(conn.requestName("org.midnattsol.shotlet") catch true)) {
+    if (!(conn.requestName(@import("../app_id.zig").app_id) catch true)) {
         std.log.warn("shotlet daemon is already running", .{});
         return;
     }
-    portal.ensureAppScope(gpa, &conn);
+    portal.registerApp(gpa, &conn);
 
     const icon22 = try tray_mod.drawIcon(gpa, 22);
     defer gpa.free(icon22);
