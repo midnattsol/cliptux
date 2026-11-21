@@ -51,7 +51,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     };
     var tray = try tray_mod.Tray.init(gpa, &conn, &icons);
 
-    std.log.info("shotlet daemon running (tray icon registered)", .{});
+    std.log.info("shotlet daemon running", .{});
     var log = LogFile.init(env, foreground);
     while (true) {
         // wake up now and then to keep the log bounded: children write to
