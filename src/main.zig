@@ -85,7 +85,7 @@ pub fn main(init: std.process.Init) !void {
             std.fmt.parseInt(i64, args[3], 10) catch 0
         else
             0;
-        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, smoke);
+        try @import("ui/settings.zig").run(gpa, env.runtime_dir, env.wayland_display, env.home, env.bus_addr, smoke);
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
