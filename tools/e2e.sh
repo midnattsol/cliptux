@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-keys"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -1222,6 +1222,10 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 1
         check "  ... and the annotated image is copied" clip_png "$OUT/ime.png"
         ;;
+    modes-*)
+        # the capture modes (tools/e2e/modes.sh)
+        . "$ROOT/tools/e2e/modes.sh"
+        ;;
     *)
         skip "unknown scenario"
         ;;
@@ -1293,7 +1297,7 @@ for s in $want; do
     # monitors and keyboard layout
     mons="1600x900" layout=""
     case $s in
-        multimon) mons="1600x900 1280x720" ;;
+        multimon | modes-screen) mons="1600x900 1280x720" ;;
         mixed | fractional | integer | shell-mixed) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
@@ -1303,7 +1307,7 @@ for s in $want; do
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
     case $s in
-        quick | annotate | history | shell*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
+        quick | annotate | history | shell* | modes-*) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
     esac
     HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \

@@ -18,6 +18,7 @@
 //! to the extension's shortcut (uninstall puts them back).
 //!
 //!     shotlet gnome-integration shortcut [ACCEL... | none]
+//!     shotlet gnome-integration shortcut MODE [ACCEL... | none]
 
 const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
@@ -773,6 +774,9 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const [
     } else if (std.mem.eql(u8, sub, "shortcut")) {
         var sd_buf: [1100]u8 = undefined;
         const sd = try schemaDir(gpa, env, &bus, &sd_buf);
+        // a capture mode's own key (app/modes/gnome_keys.zig)
+        if (rest.len > 0 and @import("modes/mode.zig").shortcutNamed(rest[0]) != null)
+            return @import("modes/gnome_keys.zig").cli(gpa, env, sd, rest);
         if (rest.len > 0) {
             var arena_state = std.heap.ArenaAllocator.init(gpa);
             defer arena_state.deinit();
@@ -789,6 +793,10 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const [
             defer if (cur.len > 0) gpa.free(cur);
             out("capture-shortcut: {s}(the GNOME integration is not active)\n", .{cur});
         } else printShortcut(&info);
+        if (rest.len == 0) {
+            out("Capture modes (shotlet gnome-integration shortcut MODE KEY):\n", .{});
+            try @import("modes/gnome_keys.zig").list(gpa, env, sd, null);
+        }
     } else {
         const active = extensionActive(&bus);
         const state = shellState(gpa, &bus);

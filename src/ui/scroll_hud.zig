@@ -16,7 +16,7 @@ const Rect = @import("../app/modes/geom.zig").Rect;
 pub const title = "shotlet:scroll";
 /// logical size
 pub const width = 232;
-pub const height = 340;
+pub const height = 376;
 const pad = 14;
 const radius = 18;
 const preview_h = 220;

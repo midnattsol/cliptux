@@ -19,6 +19,7 @@ const sys = @import("../platform/sys.zig");
 const shapes_mod = @import("shapes.zig");
 const doc_mod = @import("doc.zig");
 const view_mod = @import("view.zig");
+const tall_view = @import("tall_view.zig");
 const textedit = @import("textedit.zig");
 const textbox = @import("textbox.zig");
 const ui = @import("editor_ui.zig");
@@ -306,6 +307,8 @@ pub const Editor = struct {
     preset_sel: ?[4]i32 = null,
     /// the image has see-through pixels worth keeping (a window capture)
     keep_alpha: bool = false,
+    /// how far a tall image is scrolled (ui/tall_view.zig), buffer pixels
+    tall_scroll: i32 = 0,
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -498,6 +501,9 @@ pub const Editor = struct {
             if (mon == null and idx < self.monitors.len) mon = self.monitors[idx];
             if (mon) |m| return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, sf.width, sf.height);
         }
+        // a tall image (a scrolling capture) fits the width and scrolls
+        if (tall_view.isTall(self.img.width, self.img.height, self.screenRect()))
+            return tall_view.view(self.img.width, self.img.height, self.screenRect(), self.tall_scroll);
         return View.fit(self.img.width, self.img.height, self.screenRect(), 1.0);
     }
 
@@ -780,7 +786,16 @@ pub const Editor = struct {
     fn onScroll(self: *Editor, value: f64, value120: ?i32) !void {
         // exact notches when the wheel reports them (8 units = 1/15 notch)
         const steps = if (value120) |v| scrollSteps(&self.scroll_acc, @as(f64, @floatFromInt(v)) / 8.0) else scrollSteps(&self.scroll_acc, value);
+        if (steps != 0 and !self.win.ctrl and tall_view.isTall(self.img.width, self.img.height, self.screenRect())) return self.scrollTall(-steps);
         if (steps != 0) try self.setThickness(self.thickness + steps);
+    }
+
+    /// Scroll a tall image by wheel notches: lay every pane out again.
+    fn scrollTall(self: *Editor, notches: i32) !void {
+        const before = self.tall_scroll;
+        self.tall_scroll = tall_view.clampScroll(self.img.width, self.img.height, self.screenRect(), self.tall_scroll + notches * self.sc(80));
+        if (self.tall_scroll == before) return;
+        for (self.panes[0..self.n_panes], 0..) |p, i| if (p.alive) try self.onResize(@intCast(i), p.width, p.height);
     }
 
     pub fn setThickness(self: *Editor, t: i32) !void {

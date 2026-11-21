@@ -23,6 +23,8 @@
 //!                         (at least MINW wide)
 //!   png PATH              answer the image size, WxH
 //!   pixel PATH X Y        answer one pixel as AARRGGBB hex
+//!   runs PATH X RRGGBB [TOL]  how many vertical runs of that colour
+//!                         column X of the PNG has
 //!   sni-watcher MS        own org.kde.StatusNotifierWatcher; answer the
 //!                         first RegisterStatusNotifierItem within MS
 //!   sleep MS
@@ -264,6 +266,26 @@ const Driver = struct {
             const box = try findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol, min_w);
             return std.fmt.bufPrint(&self.out, "{d} {d} {d} {d}", .{ (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, box[2] - box[0] + 1, box[3] - box[1] + 1 });
         }
+        if (eql(cmd, "runs")) {
+            // runs PATH X RRGGBB [TOL]: vertical runs of that colour in column X
+            const path = it.next() orelse return error.MissingArg;
+            const data = try sys.readFileAlloc(self.gpa, path, 256 * 1024 * 1024);
+            defer self.gpa.free(data);
+            var img = try kit.png.decode(self.gpa, data);
+            defer img.deinit(self.gpa);
+            const x = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
+            const want = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 16);
+            const tol = try std.fmt.parseInt(u32, it.next() orelse "8", 10);
+            if (x >= img.width) return error.OutOfImage;
+            var runs: u32 = 0;
+            var inside = false;
+            for (0..img.height) |y| {
+                const hit = near(img.pixels[y * img.width + x], want, tol);
+                if (hit and !inside) runs += 1;
+                inside = hit;
+            }
+            return std.fmt.bufPrint(&self.out, "{d}", .{runs});
+        }
         if (eql(cmd, "png") or eql(cmd, "pixel")) {
             const path = it.next() orelse return error.MissingArg;
             const data = try sys.readFileAlloc(self.gpa, path, 256 * 1024 * 1024);
@@ -359,20 +381,20 @@ const Driver = struct {
     }
 };
 
+/// Within `t` per channel of `c`.
+fn near(p: u32, c: u32, t: u32) bool {
+    inline for (.{ 0, 8, 16 }) |sh| {
+        const a: i32 = @intCast((p >> sh) & 0xFF);
+        const b: i32 = @intCast((c >> sh) & 0xFF);
+        if (@abs(a - b) > t) return false;
+    }
+    return true;
+}
+
 /// Bounding box (x0, y0, x1, y1) of the first blob, in reading order, at
 /// least `min_w` wide, of pixels within `tol` (per channel) of `rgb`: e.g.
 /// a dialog's accent coloured default button.
 fn findBlob(gpa: std.mem.Allocator, px: []const u32, w: u32, h: u32, rgb: u32, tol: u32, min_w: u32) ![4]u32 {
-    const near = struct {
-        fn f(p: u32, c: u32, t: u32) bool {
-            inline for (.{ 0, 8, 16 }) |sh| {
-                const a: i32 = @intCast((p >> sh) & 0xFF);
-                const b: i32 = @intCast((c >> sh) & 0xFF);
-                if (@abs(a - b) > t) return false;
-            }
-            return true;
-        }
-    }.f;
     var seen = try gpa.alloc(bool, px.len);
     defer gpa.free(seen);
     @memset(seen, false);

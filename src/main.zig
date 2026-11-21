@@ -222,6 +222,7 @@ test {
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");
+    _ = @import("ui/tall_view.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");

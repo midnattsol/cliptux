@@ -26,6 +26,7 @@ fn sleepMs(ms: u64) void {
 
 /// Null when cancelled.
 pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png.Image {
+    std.log.info("scrolling capture: pick a region", .{});
     const region = switch (try region_pick.pick(c.gpa, c.win, cap, .{ .region = .{ .label = "Start scrolling capture" } })) {
         .region => |r| r,
         else => return null,

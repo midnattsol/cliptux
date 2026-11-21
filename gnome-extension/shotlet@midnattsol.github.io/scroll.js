@@ -24,6 +24,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import System from 'system';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const IDLE_MS = 30 * 1000;
@@ -166,7 +167,9 @@ export class ScrollSessions {
         if (s.dev) {
             if (s.pointer)
                 s.dev.notify_absolute_motion(GLib.get_monotonic_time(), ...s.pointer);
-            s.dev.run_dispose();
+            // the last reference: the device goes when it is collected
+            s.dev = null;
+            System.gc();
         }
         console.log(`Shotlet: scrolling capture ended after ${s.n} frames`);
     }
