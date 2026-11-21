@@ -146,6 +146,10 @@ const Api = struct {
     stream_dequeue_buffer: *const fn (?*anyopaque) callconv(.c) ?*PwBuffer,
     stream_queue_buffer: *const fn (?*anyopaque, *PwBuffer) callconv(.c) c_int,
     stream_update_params: *const fn (?*anyopaque, [*]const [*]const u8, u32) callconv(.c) c_int,
+    // continuous capture (pwstream.zig)
+    context_connect: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
+    properties_new_string: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
+    stream_set_active: *const fn (?*anyopaque, bool) callconv(.c) c_int,
 };
 
 var lib: ?std.DynLib = null;
@@ -190,7 +194,7 @@ const PodWriter = struct {
     pos: usize = 0,
     overflow: bool = false,
 
-    fn put(self: *PodWriter, v: u32) void {
+    pub fn put(self: *PodWriter, v: u32) void {
         if (self.pos + 4 > self.buf.len) {
             self.overflow = true;
             return;
@@ -200,7 +204,7 @@ const PodWriter = struct {
     }
 
     /// Patch the leading pod size and return the pod, or null on overflow.
-    fn finish(self: *PodWriter) ?[]const u8 {
+    pub fn finish(self: *PodWriter) ?[]const u8 {
         if (self.overflow or self.pos < 8) return null;
         std.mem.writeInt(u32, self.buf[0..4], @intCast(self.pos - 8), .little);
         return self.buf[0..self.pos];
@@ -730,5 +734,50 @@ test "truncated or garbage pods are walked safely" {
         prng.random().bytes(&junk);
         std.mem.writeInt(u32, junk[4..8], SPA_TYPE_Object, .little);
         forEachProp(&junk, &ctx, visitFormat);
+    }
+}
+
+/// The ABI mirrors and helpers above, for the recorder's continuous
+/// streams (pwstream.zig).
+pub const abi = struct {
+    pub const SpaHook_ = SpaHook;
+    pub const StreamEvents_ = StreamEvents;
+    pub const PwBuffer_ = PwBuffer;
+    pub const SpaBuffer_ = SpaBuffer;
+    pub const SpaMetaRegion_ = SpaMetaRegion;
+    pub const PodWriter_ = PodWriter;
+    pub const flag_autoconnect = PW_STREAM_FLAG_AUTOCONNECT;
+    pub const flag_map_buffers = PW_STREAM_FLAG_MAP_BUFFERS;
+    pub const direction_input = PW_DIRECTION_INPUT;
+    pub const state_error = PW_STREAM_STATE_ERROR;
+    pub const param_format = SPA_PARAM_Format;
+    pub const chunk_corrupted = SPA_CHUNK_FLAG_CORRUPTED;
+    pub const buildVideoFormatPod = buildFormatPod;
+    pub const buildCropMeta = buildCropMetaPod;
+    pub const crop = cropRegion;
+    pub const visitVideoFormat = visitFormatInto;
+
+    pub fn lib() *const Api {
+        return &api;
+    }
+
+    pub fn props(pod: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, u32, []const u8) void) void {
+        forEachProp(pod, ctx, visit);
+    }
+
+    /// Release a connection (and its streams).
+    pub fn teardownPre(pre: *Pre, streams: []const ?*anyopaque) void {
+        teardown(pre, streams);
+    }
+};
+
+/// The negotiated video format and size, out of a Format pod.
+fn visitFormatInto(out: *[3]u32, key: u32, vt: u32, val: []const u8) void {
+    var c: Ctx = .{};
+    visitFormat(&c, key, vt, val);
+    if (c.format != 0) out[0] = c.format;
+    if (c.width != 0) {
+        out[1] = c.width;
+        out[2] = c.height;
     }
 }

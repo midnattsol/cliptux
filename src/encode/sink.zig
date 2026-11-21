@@ -103,6 +103,17 @@ pub const Sink = struct {
         }
     }
 
+    /// Whether every frame must be written, unchanged ones too (the
+    /// ffmpeg pipe has no timestamps); else unchanged pictures are skipped.
+    pub fn needsEveryFrame(self: *const Sink) bool {
+        return self.backend == .ffmpeg or self.backend == .ffmpeg_vaapi;
+    }
+
+    /// The previous frame again (needsEveryFrame sinks).
+    pub fn repeat(self: *Sink) !void {
+        if (self.ff) |*f| try f.repeat();
+    }
+
     /// Interleaved 16-bit stereo at 48 kHz (only when has_audio).
     pub fn audio(self: *Sink, samples: []const i16) !void {
         if (!self.has_audio) return;

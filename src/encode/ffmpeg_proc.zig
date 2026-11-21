@@ -57,6 +57,13 @@ pub const Proc = struct {
         self.frames += 1;
     }
 
+    /// The previous frame once more (or black before the first).
+    pub fn repeat(self: *Proc) !void {
+        if (self.frames == 0) @memset(self.frame, 16);
+        try sys.writeAllBlocking(self.child.stdin orelse return error.Closed, self.frame);
+        self.frames += 1;
+    }
+
     /// Interleaved stereo samples (any thread but the video one).
     pub fn addAudio(self: *Proc, samples: []const i16) !void {
         const fd = self.child.fd3 orelse return;
