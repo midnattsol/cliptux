@@ -215,6 +215,38 @@ checks the fallback without it. On Debian/Ubuntu:
 `E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
 nightly and on demand (`.github/workflows/e2e.yml`), never on pull requests.
 
+```sh
+zig build e2e-container                 # sway, labwc and KWin, in containers
+zig build e2e-container -- labwc        # one compositor
+zig build e2e-container -- kwin:pin     # one scenario
+```
+
+The container suite (`tools/container/`) covers what GNOME cannot: the
+layer-shell thumbnail, pins and history panel on wlroots (sway, labwc) and
+KWin, capture through `xdg-desktop-portal-wlr` and `xdg-desktop-portal-kde`
+with restore tokens, two outputs at mixed scales, and the text search with
+Tesseract (English and Spanish). Each scenario runs in a throwaway
+container (Debian trixie, `--rm`, no network) with its own session bus,
+PipeWire and a headless compositor; nothing is installed on the host and
+nothing reaches its display, bus or PipeWire. The image
+(`shotlet-e2e:trixie`, about 1.5 GB) is built from
+`tools/container/Containerfile` on first use; `docker rmi
+shotlet-e2e:trixie` removes it. Docker or Podman is needed (without
+either the suite skips).
+
+`shotlet-wldrive` (`tools/container/wldrive.zig`) is the input driver:
+wlroots' virtual pointer and keyboard plus screencopy, or KWin's fake input
+plus its ScreenShot2 D-Bus interface. The wlroots portal's output chooser
+is a script that answers without a dialog and logs each call; the KDE
+portal's dialog is clicked through. Screen capture needs a GPU render node
+(`/dev/dri/renderD*`, passed to the container when the host has one, never
+a display node; `CTR_GPU=0` to not pass it): `xdg-desktop-portal-wlr`
+wants dmabuf-capable screencopy, which wlroots' software renderer lacks,
+and KWin offers screenshots and screencasts only when compositing with
+OpenGL. Without one, the capture scenarios and KWin skip and the rest runs
+on software rendering. CI runs it nightly and on demand
+(`.github/workflows/e2e-container.yml`).
+
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).

@@ -1,0 +1,25 @@
+# Headless wlroots (sway, labwc) and KDE (KWin) sessions for Shotlet's
+# container e2e suite (tools/container/run.sh). Nothing here talks to the
+# host's display: every session is started inside the container.
+FROM debian:trixie
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dbus dbus-bin dbus-daemon libglib2.0-bin procps psmisc ca-certificates \
+        pipewire pipewire-bin wireplumber libpipewire-0.3-0t64 \
+        xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-kde \
+        plasma-workspace \
+        sway labwc kwin-wayland kwin-common qt6-wayland \
+        wl-clipboard grim wayland-utils wlr-randr foot libxkbcommon-tools \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa libtesseract5 \
+        fonts-dejavu-core fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# kwin_wayland carries file capabilities (cap_sys_nice) outside a
+# container's bounding set, so exec fails with EPERM: drop them by copying
+RUN cp /usr/bin/kwin_wayland /tmp/kwin_wayland && mv /tmp/kwin_wayland /usr/bin/kwin_wayland
+
+# an unprivileged user: compositors and PipeWire refuse or misbehave as root
+RUN useradd -m -u 1000 -s /bin/bash tester
+USER tester
+WORKDIR /home/tester

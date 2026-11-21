@@ -1,0 +1,59 @@
+name: E2E (containers)
+
+# The container suite runs shotlet on sway, labwc and KWin, each scenario
+# in a throwaway Debian container (tools/container/run.sh). Slow and
+# dependent on Debian's packages, so it never gates pull requests: it runs
+# nightly and on demand. Runners have no GPU, so screen capture and KWin
+# skip there (see the README's "Tests").
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "Compositors or compositor:scenario (space separated; empty: all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "47 3 * * *"
+
+concurrency:
+  group: e2e-container-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-container:
+    name: End-to-end (sway, labwc, KWin in containers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # actions are pinned to commit SHAs (tags can be moved)
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Build
+        # the binaries run inside Debian trixie: an older glibc target
+        # keeps them loadable whatever the runner's is
+        run: zig build e2e-driver -Dtarget=x86_64-linux-gnu.2.36
+
+      - name: Build the image
+        run: docker build -t shotlet-e2e:trixie -f tools/container/Containerfile tools/container
+
+      - name: Run the container suite
+        env:
+          E2E_OUT: ${{ runner.temp }}/e2e-container-out
+        run: tools/container/run.sh ${{ github.event.inputs.targets }}
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-container-out
+          path: ${{ runner.temp }}/e2e-container-out
+          if-no-files-found: ignore
+          retention-days: 14

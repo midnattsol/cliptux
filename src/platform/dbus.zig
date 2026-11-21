@@ -601,6 +601,30 @@ pub const Connection = struct {
         return serial;
     }
 
+    /// callMethod attaching file descriptors ('h' args are indexes into
+    /// fds); the bus must have agreed to pass them (AGREE_UNIX_FD).
+    pub fn callMethodFds(
+        self: *Connection,
+        destination: []const u8,
+        path: []const u8,
+        interface: []const u8,
+        member: []const u8,
+        signature: []const u8,
+        body: []const u8,
+        fds: []const sys.fd_t,
+    ) !u32 {
+        if (fds.len > 0 and !self.unix_fd_ok) return error.NoFdPassing;
+        const serial = self.nextSerial();
+        try self.sendMessageFds(.method_call, serial, .{
+            .path = path,
+            .interface = interface,
+            .member = member,
+            .destination = destination,
+            .signature = signature,
+        }, body, null, fds);
+        return serial;
+    }
+
     pub fn emitSignal(
         self: *Connection,
         path: []const u8,

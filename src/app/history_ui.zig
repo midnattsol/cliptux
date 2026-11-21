@@ -85,6 +85,8 @@ const Ocr = struct {
     /// ids whose text was just written to their meta
     done: std.ArrayList(history.Id) = .empty,
     finished: bool = false,
+    /// the panel said how many were read (once finished)
+    reported: bool = false,
     thread: ?std.Thread = null,
     stop: bool = false,
 
@@ -110,6 +112,7 @@ const Ocr = struct {
         defer img.deinit(gpa);
         const t = ocr.recognize(gpa, img.pixels, img.width, img.height) orelse "";
         defer if (t.len > 0) gpa.free(t);
+        std.log.debug("history: text of {s}: {s}", .{ id, t[0..@min(t.len, 80)] });
         var meta = try history.readMeta(gpa, root, id);
         defer meta.deinit(gpa);
         if (meta.ocr) |o| gpa.free(o);
@@ -202,6 +205,7 @@ const Panel = struct {
             }
             self.shown.append(self.gpa, i) catch {};
         }
+        if (self.search.items.len > 0) std.log.info("history: search '{s}': {d} shown", .{ self.search.items, self.shown.items.len });
         if (self.selected) |s| if (std.mem.indexOfScalar(usize, self.shown.items, s) == null) {
             self.selected = null;
         };
@@ -228,6 +232,16 @@ const Panel = struct {
     fn pollOcr(self: *Panel) void {
         self.ocr_state.mutex.lock();
         defer self.ocr_state.mutex.unlock();
+        if (self.ocr_state.finished and !self.ocr_state.reported and self.ocr_state.done.items.len == 0) {
+            self.ocr_state.reported = true;
+            var n: usize = 0;
+            for (self.items.items) |it| {
+                if (it.entry.meta.ocr) |t| if (t.len > 0) {
+                    n += 1;
+                };
+            }
+            std.log.info("history: read the text of {d} captures", .{n});
+        }
         if (self.ocr_state.done.items.len == 0) return;
         for (self.ocr_state.done.items) |id| {
             for (self.items.items) |*it| {

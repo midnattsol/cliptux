@@ -69,9 +69,26 @@ pub fn build(b: *std.Build) void {
             }) }},
         }),
     });
+    // the container suite's input driver (wlroots and KWin)
+    const wldrive = b.addExecutable(.{
+        .name = "shotlet-wldrive",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/container/wldrive.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
+                .root_source_file = b.path("src/testkit.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }) }},
+        }),
+    });
     // compiled with the tests so they cannot rot unnoticed
     test_step.dependOn(&drive.step);
     test_step.dependOn(&droptarget.step);
+    test_step.dependOn(&wldrive.step);
     const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});
     run_e2e.addArtifactArg(exe);
     run_e2e.addArtifactArg(drive);
@@ -80,9 +97,22 @@ pub fn build(b: *std.Build) void {
     run_e2e.has_side_effects = true;
     const e2e_step = b.step("e2e", "Run the end-to-end suite (private headless GNOME session)");
     e2e_step.dependOn(&run_e2e.step);
+    // the same kind of suite on wlroots (sway, labwc) and KWin, each in a
+    // throwaway container (tools/container/run.sh skips without docker or
+    // podman)
+    const run_ctr = b.addSystemCommand(&.{"tools/container/run.sh"});
+    run_ctr.addArg("--bins");
+    run_ctr.addArtifactArg(exe);
+    run_ctr.addArtifactArg(wldrive);
+    run_ctr.addArtifactArg(droptarget);
+    run_ctr.addPassthruArgs();
+    run_ctr.has_side_effects = true;
+    const ctr_step = b.step("e2e-container", "Run the end-to-end suite on sway, labwc and KWin in containers");
+    ctr_step.dependOn(&run_ctr.step);
     const drive_step = b.step("e2e-driver", "Install the e2e input driver (zig-out/bin/shotlet-drive)");
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
+    drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
 }
 
 /// The GNOME Shell extension ships inside the binary, for

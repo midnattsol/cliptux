@@ -61,6 +61,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
     const layer = win.hasLayerShell();
+    // a layer surface is moved by hand: follow the pointer's own motion
+    win.track_relative = layer;
     var margin: [4]i32 = .{ 120, 0, 0, 120 };
     // first guess at scale 1; corrected once the real scale is known
     var lw: u32 = img.width + 2 * pad;
@@ -98,8 +100,12 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     var hover_close = false;
     var dirty = true;
     var scroll_acc: f64 = 0;
-    // layer shell: a drag in progress, from this pointer position
+    // layer shell: a drag in progress, from this pointer position (only
+    // without relative pointer events), and the margins (top, left) it
+    // has moved the pin to, unrounded
     var drag_from: ?[2]f64 = null;
+    var drag_at: [2]f64 = .{ 0, 0 };
+    var drag_rel = false;
     const born = sys.monoMs();
     var last_f: f64 = 0;
 
@@ -220,17 +226,44 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
                 if (inside != hover or hc != hover_close) dirty = true;
                 hover = inside;
                 hover_close = hc;
-                if (drag_from) |from| if (inside) {
-                    // layer shell: follow the pointer by moving the margins
-                    margin[0] += @intFromFloat((m.y - from[1]) / k);
-                    margin[3] += @intFromFloat((m.x - from[0]) / k);
-                    try win.setLayerPlacement(0, lw, lh, margin);
-                };
+                // layer shell: follow the pointer by moving the margins.
+                // Positions on the pin cannot say how far the pointer went:
+                // the pin moves under it with a delay, and compositors
+                // differ on which place a held button's motion is relative
+                // to (sway: where the press happened). Relative pointer
+                // motion is the pointer's own.
+                if (drag_from) |from| {
+                    const rel = win.takeRelative() orelse .{ 0, 0 };
+                    // absolute devices (tablets; KWin's fake input) may
+                    // move the pointer without relative motion: then go by
+                    // positions, which KWin gives relative to where the
+                    // pin is now
+                    if (rel[0] != 0 or rel[1] != 0) drag_rel = true;
+                    if (drag_rel) {
+                        drag_at[0] += rel[1];
+                        drag_at[1] += rel[0];
+                    } else if (inside) {
+                        drag_at[0] += (m.y - from[1]) / k;
+                        drag_at[1] += (m.x - from[0]) / k;
+                    }
+                    const top: i32 = @intFromFloat(@round(drag_at[0]));
+                    const left: i32 = @intFromFloat(@round(drag_at[1]));
+                    if (top != margin[0] or left != margin[3]) {
+                        margin[0] = top;
+                        margin[3] = left;
+                        try win.setLayerPlacement(0, lw, lh, margin);
+                    }
+                }
             },
             .pointer_button => |b| {
                 if (b.button == window.BTN_LEFT and b.pressed) {
                     if (hover_close) break;
-                    if (layer) drag_from = .{ b.x, b.y } else try win.startMoveOf(0);
+                    if (layer) {
+                        drag_from = .{ b.x, b.y };
+                        drag_at = .{ @floatFromInt(margin[0]), @floatFromInt(margin[3]) };
+                        drag_rel = false;
+                        _ = win.takeRelative();
+                    } else try win.startMoveOf(0);
                 } else if (b.button == window.BTN_LEFT) {
                     drag_from = null;
                 } else if (b.button == window.BTN_RIGHT and b.pressed) {

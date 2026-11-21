@@ -2,7 +2,8 @@
 //! tests (tools/e2e.sh). Accepts the MIME types given on the command line,
 //! best first (default image/png, then text/uri-list), and prints one line
 //! per drop on stdout: `drop MIME BYTES HEAD`, HEAD being the first 4 bytes
-//! in hex for image/png, else the text (first line).
+//! in hex for image/png, else the text (first line). Typed keys print
+//! `text CHARS`, clicks `click X Y`.
 //! Refuses to run outside the private session of tools/e2e/session.sh.
 
 const std = @import("std");
@@ -44,6 +45,8 @@ pub fn main(init: std.process.Init) !void {
             .close => break,
             .resize => dirty = true,
             .pointer_button => |b| if (b.pressed) try say("click {d} {d}", .{ @as(i32, @intFromFloat(b.x)), @as(i32, @intFromFloat(b.y)) }),
+            // what a focused app would type (focus checks of the floating windows)
+            .key => |k| if (k.pressed and k.text().len > 0) try say("text {s}", .{k.text()}),
             else => {},
         }
         try report(&win);
