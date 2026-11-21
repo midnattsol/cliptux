@@ -367,16 +367,28 @@ fn segDist(p: Point, a: Point, b: Point) f64 {
     return @sqrt(dx * dx + dy * dy);
 }
 
-pub const palette = [8]u32{
-    0xFFE03131, // red
-    0xFFFF922B, // orange
-    0xFFFFD43B, // yellow
-    0xFF51CF66, // green
-    0xFF339AF0, // blue
-    0xFFCC5DE8, // magenta
+/// Annotation colours. The first eight are the 1-8 keys (and the config's
+/// default_color), in their historical order; the rest only show in the
+/// colour popover.
+pub const palette = [11]u32{
+    0xFFFF453A, // red
+    0xFFFF9F0A, // orange
+    0xFFFFD60A, // yellow
+    0xFF30D158, // green
+    0xFF0A84FF, // blue
+    0xFFBF5AF2, // magenta (purple)
     0xFFFFFFFF, // white
-    0xFF1A1A1A, // black
+    0xFF1C1C1E, // black
+    0xFFFF375F, // pink
+    0xFF64D2FF, // cyan
+    0xFF8E8E93, // grey
 };
+
+pub const palette_names = [palette.len][]const u8{ "red", "orange", "yellow", "green", "blue", "magenta", "white", "black", "pink", "cyan", "grey" };
+pub const palette_labels = [palette.len][]const u8{ "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "White", "Black", "Pink", "Cyan", "Grey" };
+
+/// The popover's grid order: colours first, then the neutrals.
+pub const swatch_order = [palette.len]u4{ 0, 1, 2, 3, 4, 5, 8, 9, 6, 10, 7 };
 
 // --- shape drawing ---
 

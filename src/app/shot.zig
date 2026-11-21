@@ -80,6 +80,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     });
     var ed = editor_mod.Editor.init(gpa, &win, &cap.image);
     ed.monitors = cap.monitors;
+    // the desktop's light/dark preference, accent and reduced motion
+    const theme = @import("../ui/theme.zig");
+    ed.setPrefs(theme.readPrefs(&conn, 1500));
+    theme.watch(&conn) catch {};
+    ed.bus = &conn;
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;

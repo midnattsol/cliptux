@@ -510,6 +510,69 @@ pub fn saveFile(alloc: std.mem.Allocator, conn: *dbus.Connection, opts: SaveFile
     return .{ .granted = try percentDecode(alloc, uri["file://".len..]) };
 }
 
+pub const FolderOptions = struct {
+    title: []const u8 = "Save Screenshots To",
+    current_folder: ?[]const u8 = null,
+};
+
+/// Start asking for a folder (FileChooser OpenFile with directory=true)
+/// without blocking: feed bus messages to the Request's handle() while
+/// the window stays responsive, then read the answer with chosenPath().
+pub fn beginChooseFolder(alloc: std.mem.Allocator, conn: *dbus.Connection, opts: FolderOptions) !Request {
+    var tok_buf: [64]u8 = undefined;
+    const token = try makeToken(&tok_buf, "shotlet_d");
+    var m = dbus.Marshal.init(alloc);
+    defer m.deinit();
+    try m.putString(""); // parent_window
+    try m.putString(opts.title);
+    const arr = try m.beginArray(8);
+    {
+        try m.beginStruct();
+        try m.putString("handle_token");
+        try m.putVariantString(token);
+
+        try m.beginStruct();
+        try m.putString("modal");
+        try m.putVariantBool(true);
+
+        try m.beginStruct();
+        try m.putString("directory");
+        try m.putVariantBool(true);
+
+        try m.beginStruct();
+        try m.putString("accept_label");
+        try m.putVariantString("Select");
+
+        if (opts.current_folder) |dir| {
+            try m.beginStruct();
+            try m.putString("current_folder");
+            try m.putSignature("ay");
+            const bytes = try m.beginArray(1);
+            try m.buf.appendSlice(m.alloc, dir);
+            try m.putByte(0);
+            m.endArray(bytes);
+        }
+    }
+    m.endArray(arr);
+    return Request.start(alloc, conn, "org.freedesktop.portal.FileChooser", "OpenFile", "ssa{sv}", m.buf.items, token);
+}
+
+/// The local path a granted FileChooser request chose (owned).
+pub fn chosenPath(alloc: std.mem.Allocator, req: *const Request) ![]u8 {
+    const uri = try firstUri(req);
+    if (!std.mem.startsWith(u8, uri, "file://")) return error.BadUri;
+    return percentDecode(alloc, uri["file://".len..]);
+}
+
+/// beginChooseFolder + wait: blocks until the dialog is answered.
+pub fn chooseFolder(alloc: std.mem.Allocator, conn: *dbus.Connection, opts: FolderOptions) !Result([]u8) {
+    var req = try beginChooseFolder(alloc, conn, opts);
+    defer req.deinit(alloc);
+    try req.wait(alloc, conn, timeout_file_chooser_ms);
+    if (req.outcome.? != .granted) return notGranted([]u8, req.outcome.?);
+    return .{ .granted = try chosenPath(alloc, &req) };
+}
+
 fn putPngFilter(m: *dbus.Marshal) !void {
     try m.beginStruct();
     try m.putString("PNG image");
