@@ -131,7 +131,7 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     // the session bus: appearance (and its changes) and the folder chooser
     var bus: ?dbus.Connection = portal.connectApp(alloc, env.bus_addr) catch null;
     defer if (bus) |*b| b.deinit();
-    var st: State = .{};
+    var st: State = .{ .direct = @import("../app/direct.zig").lastPath(home) == .direct };
     if (bus) |*b| {
         st.prefs = theme_mod.readPrefs(b, 1500);
         theme_mod.watch(b) catch {};
@@ -327,6 +327,9 @@ const State = struct {
     hover_idx: i32 = -1,
     /// keyboard focus (Tab / Shift+Tab); null until the first Tab
     focus: ?Hit = null,
+    /// the last capture went through the desktop's own interface, not
+    /// the portal (app/direct.zig)
+    direct: bool = false,
     pending_focus: ?usize = null,
     /// scroll the focused control into view after the next draw
     reveal_focus: bool = false,
@@ -595,8 +598,13 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             {
                 const r = rowBegin(&ui, &card, ui.sc(theme_mod.row_h));
                 const remembered = cfg.scToken() != null;
-                rowTitle(&ui, r, "Monitors", if (remembered) "Your choice is remembered" else "Asks on the next capture");
-                if (remembered) try chipButton(&ui, r, .forget_monitors, null, "Choose again", true);
+                if (st.direct) {
+                    // the desktop lets Shotlet capture every monitor itself
+                    rowTitle(&ui, r, "Monitors", "All of them, captured directly (no prompts)");
+                } else {
+                    rowTitle(&ui, r, "Monitors", if (remembered) "Your choice is remembered" else "Asks on the next capture");
+                    if (remembered) try chipButton(&ui, r, .forget_monitors, null, "Choose again", true);
+                }
             }
             y = endCard(&card) + ui.sc(26);
 
