@@ -190,6 +190,7 @@ test {
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
     _ = @import("app/shellcap.zig");
+    _ = @import("app/scroll/stitch.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/history_ui.zig");
