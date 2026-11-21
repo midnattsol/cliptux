@@ -445,7 +445,7 @@ fn keyCode(name: []const u8) ?u32 {
         .{ "rctrl", 97 },    .{ "altgr", 100 },    .{ "home", 102 },      .{ "up", 103 },
         .{ "pageup", 104 },  .{ "left", 105 },     .{ "right", 106 },     .{ "end", 107 },
         .{ "down", 108 },    .{ "pagedown", 109 }, .{ "insert", 110 },    .{ "delete", 111 },
-        .{ "super", 125 },
+        .{ "super", 125 },   .{ "print", 99 },
     };
     for (table) |e| if (eql(e[0], name)) return e[1];
     return null;
