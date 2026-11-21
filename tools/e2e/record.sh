@@ -64,10 +64,11 @@ rec-shell)
     check "  ... as its uri" eval 'timeout 5 wl-paste -n -t text/uri-list | tr -d "\\r" | grep -qx "file://$f"'
     check "  ... and its bytes" eval 'timeout 5 wl-paste -n -t video/mp4 | cmp -s - "$f"'
     # clicks are drawn inside the area, and recorded
-    run_shotlet clicks record --region "200,150,480,320" --seconds 3 --no-countdown --clicks
+    run_shotlet clicks record --region "200,150,480,320" --seconds 4 --no-countdown --no-control --clicks --keys
     wait_log 15 "record: recording" && drv sleep 800
     click 0 440 310
-    drv sleep 80
+    drv sleep 1500
+    keys x
     wait_exit 20
     f=$(saved_file)
     found=0
@@ -80,6 +81,22 @@ rec-shell)
         if [ $((b - r)) -gt 120 ] || [ $((bb - rb)) -gt 120 ]; then found=1; break; fi
     done
     check "a click is recorded as a ripple" test "$found" = 1
+    found=0
+    for t in 2.4 2.6 2.8 3.0 3.2; do
+        frame "$f" "$t" "$OUT/key.png"
+        drv pixel "$OUT/key.png" 240 258 && v=$VAL
+        [ $((16#${v:6:2})) -lt 90 ] && { found=1; break; }
+    done
+    # keystrokes: mutter hands keys for apps to them before the stage's
+    # captured-event, so the label is not drawn for those (known gap)
+    [ "$found" = 1 ] && pass "  ... and a keystroke as a label" || skip "keystroke label: keys to apps do not reach the shell's stage"
+    # sound: the microphone and the system sound, mixed (silence here)
+    run_shotlet sound record --region "200,150,480,320" --seconds 3 --no-countdown --no-control --mic --system-audio
+    wait_exit 30
+    f=$(saved_file)
+    check "with sound, the MP4 has an AAC track" eq "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of csv=p=0 "$f")" "aac,48000,2"
+    va=$(ffprobe -v error -show_entries stream=duration -of csv=p=0 "$f" | awk 'NR==1{v=$1} NR==2{a=$1} END{printf "%d", (v-a)*1000}')
+    check "  ... as long as the picture (${va#-} ms apart)" test "${va#-}" -le 120
     # another program asking for a screencast is refused
     gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
         --method dev.shotlet.Shell1.StartRecording "{'x': <0>, 'y': <0>, 'w': <100>, 'h': <100>}" >"$OUT/gdbus.txt" 2>&1
@@ -207,6 +224,35 @@ rec-portal)
     check "a second recording needs no dialog (restore token)" wait_exit 20
     check "  ... and records" grep -q "recording: saved" "$SHOT_LOG"
     check "  ... with the consent stored once" eq "$(perm_apps screencast)" "$APP_ID"
+    ;;
+rec-bench)
+    # not in the default list: CPU time, peak memory and file size of a
+    # 10 s recording of the whole 1600x900 screen, the pointer moving, per
+    # encoder path (zig build e2e -- rec-bench; a release build is fair)
+    drv_start Meta-0 || { fail "driver"; exit 1; }
+    drv key esc
+    bench() { # bench LABEL ENV... -- ARGS...
+        local label=$1; shift
+        local envs=()
+        while [ "$1" != -- ]; do envs+=("$1"); shift; done
+        shift
+        ( for i in $(seq 1 60); do drv move 0 $((200 + (i % 10) * 120)) $((200 + (i % 7) * 70)) >/dev/null; drv sleep 150 >/dev/null; done ) &
+        local mover=$!
+        local out=$OUT/bench-$label.log t0 t
+        t0=$(date +%s%N)
+        { TIMEFORMAT='%U %S'; time env "${envs[@]}" "$BIN" record --full --seconds 10 --no-countdown --no-control "$@" >"$out" 2>&1; } 2>"$OUT/time-$label.txt"
+        t=$(( ($(date +%s%N) - t0) / 1000000 ))
+        wait "$mover" 2>/dev/null
+        local f cpu
+        f=$(grep -o "recording: saved [^ ]*" "$out" | cut -d' ' -f3)
+        cpu=$(awk '{ printf "%.1f", ($1 + $2) * 100 / 10 }' "$OUT/time-$label.txt")
+        echo "  bench $label: $(grep -o "[0-9]*x[0-9]* at [0-9]* fps, .*" "$out" | head -1); cpu ${cpu}% of a core over 10 s; $(stat -c %s "$f" 2>/dev/null) bytes; wall ${t} ms"
+        check "bench $label recorded" test -s "$f"
+    }
+    bench vaapi -- --fps 60
+    bench libav SHOTLET_ENCODER=libav SHOTLET_NO_VAAPI=1 -- --fps 60
+    bench ffmpeg SHOTLET_ENCODER=ffmpeg SHOTLET_NO_VAAPI=1 -- --fps 60
+    bench gif -- --gif --fps 15
     ;;
 *) skip "unknown scenario" ;;
 esac

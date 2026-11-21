@@ -94,6 +94,11 @@ shotlet gnome-integration install     # GNOME: no prompts; thumbnail and pins ab
 shotlet gnome-integration shortcut '<Shift><Super>s'   # its capture key
 ```
 
+```sh
+shotlet record                        # record an area or a screen (again: stop)
+shotlet record --stop | --pause | --resume | --discard
+```
+
 ## After a capture
 
 After Copy or Save the editor closes and a 240×150 thumbnail appears in
@@ -210,6 +215,92 @@ integration, the first capture shows
 a one-time screen-share picker: select every monitor you want captured.
 The choice is remembered. Cancelling the picker just ends the capture.
 
+## Screen recording
+
+`shotlet record` (or the tray's "Record screen", or the GNOME
+integration's record key, `<Shift><Super>r` by default) shows the
+desktop frozen and dimmed: drag an area, move or resize it by its
+handles, or click for the whole monitor. The bar under the area picks
+MP4 or GIF, the microphone, the system sound, and on GNOME (through the
+integration) whether clicks and keystrokes are drawn into the video;
+Record or `Enter` starts, `Esc` cancels. Those choices are remembered.
+
+A 3-2-1 countdown follows (click it to start at once, × to cancel).
+While recording, a small control sits just outside the area (never in the
+picture when there is room for it): the elapsed time, pause/resume, stop
+and discard. On GNOME a red outline marks the area, also outside it, and
+the top bar has a Stop button; a recording of a whole monitor there has no
+floating control at all. Stop with the control, the top bar, the same
+key or `shotlet record` again, `shotlet record --stop`, or the tray.
+
+The file goes to the `record_dir` setting, else your Videos folder
+(`XDG_VIDEOS_DIR`), named like screenshots (`shotlet-YYYYMMDD-HHMMSS.mp4`),
+and is kept in Recent captures. Its thumbnail shows the first picture and
+the length, and plays a filmstrip under the pointer: Copy puts the file on
+the clipboard (`text/uri-list`, and the bytes as `video/mp4` or
+`image/gif`), Save as… copies it elsewhere, dragging drops the file into
+another app, and the scissors open the trim window (drag the start and
+end handles on the filmstrip, play the range, Save trimmed: a new
+`…-trim.mp4` next to the original).
+
+**Formats.** MP4 is H.264 (yuv420p, BT.709, the index at the front) at 30
+fps by default (15–60), AAC sound. It is encoded by, in this order: the
+`ffmpeg` program with VA-API when the GPU offers H.264 encoding (probed
+once, a tenth of a second), FFmpeg's libraries in process (libavcodec /
+libavformat 59–61 loaded with dlopen, libx264 else OpenH264; video only),
+or the `ffmpeg` program with libx264; recordings with sound always go to
+the program (the PCM on a second pipe). Without any of them, record GIFs.
+GIFs use Shotlet's own encoder: each frame stores only the rectangle that
+changed, with its own 255-colour palette (median cut) and ordered
+dithering (stable across frames; Floyd–Steinberg optional), unchanged
+pixels transparent; 15 fps and at most 800 px wide by default.
+
+**How it records.** Pictures arrive from PipeWire: on GNOME with the
+integration, a screencast of exactly the area that the extension asks
+mutter for (no prompt, see below); elsewhere the ScreenCast portal (the
+consent once, then the restore token screenshots use too), cropped to
+the area, with the cursor drawn in. Shotlet keeps only the newest
+picture (three buffers) and an encoder thread writes frames at a constant
+rate, repeating the last picture when nothing moved; sound from the
+default source and the default sink's monitor is mixed and laid on the
+same clock (silence where a source lags, overlap dropped), so picture
+and sound stay in sync and memory stays flat however long it runs.
+Pauses are left out of the file.
+
+**Recording without prompts on GNOME, safely.** `dev.shotlet.Shell1`
+gains `StartRecording(a{sv})`, `StopRecording()`, `RecordSelect()` and
+the `RecordingStopRequested` signal. As with `Capture()`, only a caller
+whose executable is the shotlet binary the extension starts is answered
+(one recording at a time, never on the lock screen); anyone else gets
+AccessDenied. The extension creates the screencast inside the shell
+(`org.gnome.Mutter.ScreenCast` `RecordArea` with `is-recording`, so
+GNOME's own recording indicator shows) and returns only its PipeWire
+node; it stops the screencast when Shotlet asks, when Shotlet leaves the
+bus (crash included), and when the extension is disabled. Click ripples
+and the keystroke label are shell actors drawn inside the area (so they
+are recorded); key presses are looked at only during a recording that
+asked for them. (The keystroke label only sees keys the shell's stage
+receives: on GNOME 48 keys typed into apps do not reach it, so for now it
+mostly shows shell shortcuts.) GNOME's `org.gnome.Shell.Screencast` is not used: it
+writes its own files with GStreamer. (Mutter's ScreenCast interface is
+reachable by any unsandboxed program on the session bus; Shotlet still
+goes through the extension so that installing it stays the consent.)
+
+**Settings** (Settings › Recording, or the file): `record_format=mp4|gif`,
+`record_fps=30`, `record_quality=low|medium|high`, `record_mic`,
+`record_system_audio`, `record_clicks`, `record_keys` (`false`),
+`record_countdown=3`, `record_gif_fps=15`, `record_gif_width=800`,
+`record_gif_dither=ordered|floyd|none`, `record_dir`. `SHOTLET_ENCODER=libav|ffmpeg`
+and `SHOTLET_NO_VAAPI=1` force an encoder path.
+
+Numbers (private headless GNOME, software rendering, 1600×900 whole
+screen at 60 fps for 10 s with the pointer moving, release build):
+ffmpeg with VA-API 27% of one core, 81 KB; the FFmpeg libraries
+(libx264) 82%, 93 KB; the ffmpeg program with libx264 113%, 100 KB; a
+GIF of the same at 800×450 and 15 fps 19%, 80 KB (`zig build e2e --
+rec-bench`; the CPU counts Shotlet and its ffmpeg, not the compositor).
+Mostly still content: busy screens make larger files.
+
 ## Editor shortcuts
 
 Defaults follow CleanShot X and Flameshot where they agree; the tool keys
@@ -245,6 +336,7 @@ the editor for the full list.
 | Screenshots | the `save_dir` setting, else your XDG Pictures folder (`XDG_PICTURES_DIR` / `user-dirs.dirs`), else `~/Pictures` |
 | Recent captures | `$XDG_STATE_HOME/shotlet/history/<id>/`: `image.png`, `thumb.png`, `meta` (time, size, saved path, recognised text), `source.png` + `doc` (to annotate again); private (0700/0600) |
 | Thumbnails with the history off, dragged files | `$XDG_CACHE_HOME/shotlet/` (`quick/`, `drag/`) |
+| Recordings | the `record_dir` setting, else your XDG Videos folder, else `~/Videos`; kept entries add `video` (path, length, size) and `strip.png` (the filmstrip) |
 | GNOME Shell extension | `~/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io` |
 
 The settings file is plain `key=value`. Shotlet only rewrites the keys it
@@ -280,7 +372,15 @@ dialog and nothing in the permission store, the capture files gone and
 no PNG written anywhere else, the pixels, a Capture() from another
 program refused, uninstall restoring GNOME's keys), `shell-owner`
 (a custom shortcut running shotlet on Print, moved and put back),
-`shell-mixed` (two monitors at scales 2
+the recording scenarios `rec-shell` (an MP4 of an area through the
+extension: no dialog, size, codec, rate, length, pictures that change,
+a click ripple in the video, StartRecording() refused to others, the
+thumbnail's Copy, `shotlet record` again stops), `rec-pick` (the picker,
+its bar and the floating control outside the area), `rec-gif` (size,
+length, frames, file size, pause), `rec-trim`, `rec-settings` and
+`rec-portal` (no extension: one consent, then the restore token); they
+need `ffmpeg`/`ffprobe` and skip without; `rec-bench` (not run by
+default) measures the encoder paths. `shell-mixed` (two monitors at scales 2
 and 1, checked across the seam), `shell-tray` (the tray's Activate and
 menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
 and the portal when the extension cannot capture). The portal scenarios
@@ -303,7 +403,8 @@ permission-check overrides), two outputs at mixed scales and rotated or
 flipped outputs; the portal path (`xdg-desktop-portal-wlr` with direct
 capture turned off by `SHOTLET_NO_DIRECT=1`, `xdg-desktop-portal-kde` when
 Shotlet is not installed and KWin refuses it) with restore tokens; and the
-text search with Tesseract (English and Spanish). Scenarios count the
+text search with Tesseract (English and Spanish). On sway, a GIF recording through
+`xdg-desktop-portal-wlr`, one chooser and then none. Scenarios count the
 consent prompts: zero on the direct path. Shotlet is installed in each
 container with `install.sh`. Each scenario runs in a throwaway
 container (Debian trixie, `--rm`, no network) with its own session bus,

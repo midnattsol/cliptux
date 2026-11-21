@@ -288,9 +288,10 @@ export class Recorder {
             reactive: false,
         }));
         rec.keyLabel = label;
-        // bottom centre of the area, once its size is known
-        label.connect('notify::width', () => label.set_position(
-            Math.round(area.x + (area.w - label.width) / 2), area.y + area.h - label.height - 24));
+        // bottom centre of the area
+        const [, w] = label.get_preferred_width(-1);
+        const [, h] = label.get_preferred_height(w);
+        label.set_position(Math.round(area.x + (area.w - w) / 2), area.y + area.h - h - 24);
         label.ease({
             opacity: 0, delay: KEY_HUD_MS, duration: 250, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             onComplete: () => this._drop(rec, label),

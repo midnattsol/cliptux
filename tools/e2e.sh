@@ -1303,7 +1303,7 @@ for s in $want; do
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
     case $s in
-        quick | annotate | history | shell* | rec-shell | rec-pick | rec-gif | rec-trim) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
+        quick | annotate | history | shell* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
     esac
     HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
