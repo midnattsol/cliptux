@@ -26,6 +26,8 @@ const palette = [8]u32{
 const Hit = union(enum) {
     toggle_notify,
     toggle_copy_on_save,
+    /// forget the ScreenCast restore token so the next capture asks again
+    forget_monitors,
     th_minus,
     th_plus,
     color: u3,
@@ -314,6 +316,14 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
     switch (hit) {
         .toggle_notify => cfg.notify = !cfg.notify,
         .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
+        .forget_monitors => {
+            // only this key changes; the next capture shows the picker
+            cfg.setScToken("");
+            config.saveScreencastToken(alloc, home, "") catch |err|
+                std.log.warn("could not save config: {t}", .{err});
+            st.dirty = true;
+            return false;
+        },
         .th_minus => cfg.default_thickness = @max(1, cfg.default_thickness - 1),
         .th_plus => cfg.default_thickness = @min(32, cfg.default_thickness + 1),
         .color => |c| cfg.default_color = c,
@@ -373,13 +383,14 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
 
     // ---- card: General ----
     {
-        const rows = 4;
+        const rows = 5;
         const card_h = ui.sc(16) * 2 + ui.sc(20) + rows * ui.sc(48);
         card(&ui, margin, y, w - margin * 2, card_h, "General");
         var ry = y + ui.sc(16) + ui.sc(26);
 
         ry = toggleRow(&ui, regions, alloc, margin, ry, w, "Notification after saving", cfg.notify, .toggle_notify, mx, my);
         ry = toggleRow(&ui, regions, alloc, margin, ry, w, "Also copy to clipboard when saving", cfg.copy_on_save, .toggle_copy_on_save, mx, my);
+        ry = try buttonRow(&ui, regions, alloc, margin, ry, w, "Monitors to capture", if (cfg.scToken() != null) "Choose monitors again" else "Asks on next capture", cfg.scToken() != null, .forget_monitors, mx, my);
 
         // thickness row
         {
@@ -630,6 +641,29 @@ fn toggleRow(ui: *Ui, regions: *std.ArrayList(Region), alloc: std.mem.Allocator,
     c.fillCircleAA(knob_x, @as(f64, @floatFromInt(ty)) + @as(f64, @floatFromInt(th)) / 2.0, knob_r, 0xFFFFFFFF);
 
     regions.append(alloc, .{ .x = margin, .y = y, .w = w - margin * 2, .h = row_h, .hit = hit }) catch {};
+    return y + row_h;
+}
+
+/// A row with a label and a text button on the right; `enabled` false
+/// shows the button text as a status instead.
+fn buttonRow(ui: *Ui, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, margin: i32, y: i32, w: i32, label: []const u8, button: []const u8, enabled: bool, hit: Hit, mx: i32, my: i32) !i32 {
+    const c = &ui.c;
+    const row_h = ui.sc(48);
+    const body = ui.fs(15);
+    const small = ui.fs(13);
+    text.draw(c, margin + ui.sc(16), y + @divTrunc(row_h - text.height(body), 2), body, ui_fg, label);
+    const bw = text.width(small, button) + ui.sc(28);
+    const bh = ui.sc(30);
+    const bx = w - margin - ui.sc(16) - bw;
+    const by = y + @divTrunc(row_h - bh, 2);
+    if (enabled) {
+        const hovered = mx >= bx and mx < bx + bw and my >= by and my < by + bh;
+        c.fillRoundRectAA(bx, by, bw, bh, 8.0 * ui.f, if (hovered) 0xFF40464D else ui_panel_hi);
+        text.draw(c, bx + ui.sc(14), by + @divTrunc(bh - text.height(small), 2), small, ui_fg, button);
+    } else {
+        text.draw(c, bx + ui.sc(14), by + @divTrunc(bh - text.height(small), 2), small, ui_dim, button);
+    }
+    try regions.append(alloc, .{ .x = bx, .y = by, .w = bw, .h = bh, .hit = hit });
     return y + row_h;
 }
 
