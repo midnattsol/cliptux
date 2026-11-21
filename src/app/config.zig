@@ -167,8 +167,13 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     "default_thickness",
     "default_color",
     "save_dir",
-    "screencast_token",
+    // tokens from before multi-monitor capture ("screencast_token") restore
+    // a single-monitor selection forever, so they are not read any more
+    "screencast_restore_token",
 };
+
+/// Keys that are no longer used and are dropped when the file is written.
+const legacy_keys = [_][]const u8{"screencast_token"};
 
 /// Name of key `k` ("notify", ..., "bind_pen", ...).
 fn keyName(k: usize, buf: []u8) []const u8 {
@@ -225,7 +230,7 @@ fn applyValue(cfg: *Config, key: []const u8, value: []const u8) void {
         const n = @min(value.len, cfg.save_dir.len);
         @memcpy(cfg.save_dir[0..n], value[0..n]);
         cfg.save_dir_len = n;
-    } else if (std.mem.eql(u8, key, "screencast_token")) {
+    } else if (std.mem.eql(u8, key, "screencast_restore_token")) {
         cfg.setScToken(value);
     } else if (std.mem.startsWith(u8, key, "bind_")) {
         const name = key["bind_".len..];
@@ -393,7 +398,7 @@ pub fn update(alloc: std.mem.Allocator, home: []const u8, changes: []const Chang
 
 /// Persist a new ScreenCast restore token without touching other settings.
 pub fn saveScreencastToken(alloc: std.mem.Allocator, home: []const u8, token: []const u8) !void {
-    try update(alloc, home, &.{.{ .key = "screencast_token", .value = token }});
+    try update(alloc, home, &.{.{ .key = "screencast_restore_token", .value = token }});
 }
 
 fn updateDir(alloc: std.mem.Allocator, dir: []const u8, changes: []const Change) !void {
@@ -455,6 +460,7 @@ fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const Chan
     while (lines.next()) |line| {
         if (lines.index == null and line.len == 0) break; // trailing newline
         if (parseLine(line)) |kv| {
+            if (isLegacyKey(kv.key)) continue;
             if (findChange(changes, kv.key)) |ci| {
                 if (!done[ci]) {
                     try appendKv(alloc, &out, changes[ci]);
@@ -470,6 +476,11 @@ fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const Chan
         if (!done[ci] and findChange(changes[0..ci], ch.key) == null) try appendKv(alloc, &out, ch);
     }
     return out.toOwnedSlice(alloc);
+}
+
+fn isLegacyKey(key: []const u8) bool {
+    for (legacy_keys) |k| if (std.mem.eql(u8, k, key)) return true;
+    return false;
 }
 
 fn findChange(changes: []const Change, key: []const u8) ?usize {
@@ -560,7 +571,7 @@ test "saving merges: a stale snapshot never reverts other keys" {
     // the Settings window opens and holds a snapshot
     var settings = loadDir(alloc, dir);
     // meanwhile a capture stores a fresh token
-    try updateDir(alloc, dir, &.{.{ .key = "screencast_token", .value = "new-token" }});
+    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "new-token" }});
     // the user toggles one option; Settings saves its whole snapshot
     settings.notify = false;
     try saveDir(alloc, dir, &settings);
@@ -619,6 +630,18 @@ test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/config", .{old_dir}), "default_thickness=3\n");
     const again = load(alloc, root);
     try std.testing.expectEqual(@as(i32, 11), again.default_thickness);
+}
+
+test "single-monitor restore tokens are dropped" {
+    const alloc = std.testing.allocator;
+    const out = try mergeContent(alloc, "screencast_token=old\nnotify=true\n", &.{
+        .{ .key = "screencast_restore_token", .value = "new" },
+    });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("notify=true\nscreencast_restore_token=new\n", out);
+    var cfg = Config{};
+    applyValue(&cfg, "screencast_token", "old");
+    try std.testing.expect(cfg.scToken() == null);
 }
 
 test "migration copies when the new directory already exists" {
