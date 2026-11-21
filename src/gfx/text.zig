@@ -11,6 +11,7 @@ const fontdb = @import("fontdb.zig");
 const utf8 = @import("utf8.zig");
 const bidi = @import("bidi.zig");
 const otl = @import("otl.zig");
+const wrap_mod = @import("wrap.zig");
 const render = @import("render.zig");
 
 const Canvas = render.Canvas;
@@ -192,6 +193,7 @@ pub fn init(alloc: std.mem.Allocator) void {
 }
 
 pub fn deinit() void {
+    clearWrapCache();
     if (state) |*st| st.deinit();
     state = null;
 }
@@ -766,6 +768,50 @@ pub fn xForOffsetDir(size_px: f64, style: Style, s: []const u8, offset: usize, d
     return @intFromFloat(@round(x));
 }
 
+pub const Line = wrap_mod.Line;
+
+fn measureFor(ctx: struct { f64, Style }, s: []const u8) f64 {
+    return @floatFromInt(widthStyled(ctx[0], ctx[1], s));
+}
+
+const WrapKey = struct { hash: u64, len: usize, size: u64, style: Style, max_w: i32 };
+const WrapEntry = struct { key: WrapKey, lines: []Line };
+var wrap_cache: [8]?WrapEntry = @splat(null);
+var wrap_next: usize = 0;
+var wrap_alloc: ?std.mem.Allocator = null;
+
+fn clearWrapCache() void {
+    const a = wrap_alloc orelse return;
+    for (&wrap_cache) |*e| {
+        if (e.*) |x| a.free(x.lines);
+        e.* = null;
+    }
+}
+
+/// Visual lines of paragraph `s` (no newlines) in a box `max_w` pixels
+/// wide: breaks after spaces and hyphens and around CJK, long words cut
+/// between graphemes (see wrap.zig). Appended to `out`. Recent results are
+/// cached, since boxes are laid out on every frame.
+pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []const u8, max_w: i32, out: *std.ArrayList(Line)) !void {
+    const key: WrapKey = .{ .hash = std.hash.Wyhash.hash(0, s), .len = s.len, .size = @bitCast(size_px), .style = style, .max_w = max_w };
+    const cacheable = state != null;
+    if (cacheable) {
+        for (wrap_cache) |e| {
+            const x = e orelse continue;
+            if (std.meta.eql(x.key, key)) return out.appendSlice(alloc, x.lines);
+        }
+    }
+    const first = out.items.len;
+    try wrap_mod.wrap(alloc, s, @floatFromInt(max_w), .{ size_px, style }, measureFor, out);
+    if (!cacheable) return;
+    const st_alloc = state.?.alloc;
+    const copy = st_alloc.dupe(Line, out.items[first..]) catch return;
+    wrap_alloc = st_alloc;
+    if (wrap_cache[wrap_next]) |old| st_alloc.free(old.lines);
+    wrap_cache[wrap_next] = .{ .key = key, .lines = copy };
+    wrap_next = (wrap_next + 1) % wrap_cache.len;
+}
+
 fn bitmapOffsetForX(size_px: f64, s: []const u8, x: i32) usize {
     const cell = Canvas.textWidth(bitmapScale(size_px), "x");
     var it = utf8.Iterator.init(s);
@@ -988,6 +1034,7 @@ test "complex scripts are shaped with the font: joining, ligatures, marks" {
 }
 
 test {
+    _ = @import("wrap.zig");
     _ = @import("bidi.zig");
     _ = @import("otl.zig");
     _ = @import("ttf.zig");
