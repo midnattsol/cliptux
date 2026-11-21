@@ -1,14 +1,16 @@
 //! System tray icon via StatusNotifierItem (org.kde.StatusNotifierItem) and
-//! com.canonical.dbusmenu, exported over our native DBus connection.
+//! com.canonical.dbusmenu, exported over our native DBus connection. The
+//! menu object lives in tray/menu.zig.
 
 const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
 const render = @import("../gfx/render.zig");
 
 const sni_path = "/StatusNotifierItem";
-const menu_path = "/MenuBar";
 const sni_iface = "org.kde.StatusNotifierItem";
-const menu_iface = "com.canonical.dbusmenu";
+const menu = @import("tray/menu.zig");
+const menu_path = menu.path;
+const menu_iface = menu.iface;
 const props_iface = "org.freedesktop.DBus.Properties";
 
 pub const MenuAction = enum {
@@ -91,82 +93,84 @@ pub const Tray = struct {
     /// Handle one incoming message if it belongs to the tray objects.
     /// Returns an action when the user asked for one.
     pub fn handleMessage(self: *Tray, msg: *const dbus.Message) !MenuAction {
-        const alloc = self.alloc;
-        const conn = self.conn;
-
         if (msg.isSignal("org.freedesktop.DBus", "NameOwnerChanged")) {
-            var r = msg.reader();
-            const name = r.readString() catch return .none;
-            if (std.mem.eql(u8, name, "org.kde.StatusNotifierWatcher")) {
-                _ = r.readString() catch return .none; // old owner
-                const new_owner = r.readString() catch return .none;
-                if (new_owner.len > 0) self.register() catch {};
-            }
+            self.onNameOwnerChanged(msg);
             return .none;
         }
-
         if (msg.type != .method_call) return .none;
         if (msg.isCall("org.freedesktop.DBus.Peer", "Ping")) {
-            try conn.replyTo(msg, "", &.{});
+            try self.conn.replyTo(msg, "", &.{});
             return .none;
         }
         const path = msg.path orelse return .none;
-
-        if (std.mem.eql(u8, path, sni_path)) {
-            if (msg.isCall(sni_iface, "Activate") or msg.isCall(sni_iface, "SecondaryActivate")) {
-                try conn.replyTo(msg, "", &.{});
-                return .capture;
-            }
-            if (msg.isCall(sni_iface, "ContextMenu") or msg.isCall(sni_iface, "Scroll")) {
-                try conn.replyTo(msg, "", &.{});
-                return .none;
-            }
-            if (msg.isCall(props_iface, "Get")) {
-                var r = msg.reader();
-                _ = try r.readString(); // interface
-                const prop = try r.readString();
-                var m = dbus.Marshal.init(alloc);
-                defer m.deinit();
-                self.putProperty(&m, prop) catch |err| switch (err) {
-                    error.UnknownProperty => {
-                        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownProperty", "no such property");
-                        return .none;
-                    },
-                    else => return err,
-                };
-                try conn.replyTo(msg, "v", m.buf.items);
-                return .none;
-            }
-            if (msg.isCall(props_iface, "GetAll")) {
-                var m = dbus.Marshal.init(alloc);
-                defer m.deinit();
-                const arr = try m.beginArray(8);
-                for (sni_props) |p| {
-                    try m.beginStruct();
-                    try m.putString(p);
-                    try self.putProperty(&m, p);
-                }
-                m.endArray(arr);
-                try conn.replyTo(msg, "a{sv}", m.buf.items);
-                return .none;
-            }
-            if (msg.isCall("org.freedesktop.DBus.Introspectable", "Introspect")) {
-                var m = dbus.Marshal.init(alloc);
-                defer m.deinit();
-                try m.putString(sni_introspect_xml);
-                try conn.replyTo(msg, "s", m.buf.items);
-                return .none;
-            }
-            try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
-            return .none;
-        }
-
-        if (std.mem.eql(u8, path, menu_path)) {
-            return self.handleMenuMessage(msg);
-        }
+        if (std.mem.eql(u8, path, sni_path)) return self.handleItemMessage(msg);
+        if (std.mem.eql(u8, path, menu_path)) return menu.handle(self.alloc, self.conn, msg);
         // callers block until they get an answer: never leave one hanging
-        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownObject", "no such object");
+        try self.conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownObject", "no such object");
         return .none;
+    }
+
+    /// A new StatusNotifierWatcher (the host restarted): register again.
+    fn onNameOwnerChanged(self: *Tray, msg: *const dbus.Message) void {
+        var r = msg.reader();
+        const name = r.readString() catch return;
+        if (!std.mem.eql(u8, name, "org.kde.StatusNotifierWatcher")) return;
+        _ = r.readString() catch return; // old owner
+        const new_owner = r.readString() catch return;
+        if (new_owner.len > 0) self.register() catch {};
+    }
+
+    /// A call on the StatusNotifierItem object.
+    fn handleItemMessage(self: *Tray, msg: *const dbus.Message) !MenuAction {
+        const conn = self.conn;
+        if (msg.isCall(sni_iface, "Activate") or msg.isCall(sni_iface, "SecondaryActivate")) {
+            try conn.replyTo(msg, "", &.{});
+            return .capture;
+        }
+        if (msg.isCall(sni_iface, "ContextMenu") or msg.isCall(sni_iface, "Scroll")) {
+            try conn.replyTo(msg, "", &.{});
+        } else if (msg.isCall(props_iface, "Get")) {
+            try self.getProperty(msg);
+        } else if (msg.isCall(props_iface, "GetAll")) {
+            try self.getAllProperties(msg);
+        } else if (msg.isCall("org.freedesktop.DBus.Introspectable", "Introspect")) {
+            var m = dbus.Marshal.init(self.alloc);
+            defer m.deinit();
+            try m.putString(sni_introspect_xml);
+            try conn.replyTo(msg, "s", m.buf.items);
+        } else {
+            try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
+        }
+        return .none;
+    }
+
+    fn getProperty(self: *Tray, msg: *const dbus.Message) !void {
+        var r = msg.reader();
+        _ = try r.readString(); // interface
+        const prop = try r.readString();
+        var m = dbus.Marshal.init(self.alloc);
+        defer m.deinit();
+        self.putProperty(&m, prop) catch |err| switch (err) {
+            error.UnknownProperty => {
+                try self.conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownProperty", "no such property");
+                return;
+            },
+            else => return err,
+        };
+        try self.conn.replyTo(msg, "v", m.buf.items);
+    }
+
+    fn getAllProperties(self: *Tray, msg: *const dbus.Message) !void {
+        var m = dbus.Marshal.init(self.alloc);
+        defer m.deinit();
+        const arr = try m.beginArray(8);
+        for (sni_props) |p| {
+            try m.beginStruct();
+            try m.putString(p);
+            try self.putProperty(&m, p);
+        }
+        m.endArray(arr);
+        try self.conn.replyTo(msg, "a{sv}", m.buf.items);
     }
 
     const sni_props = [_][]const u8{
@@ -229,138 +233,7 @@ pub const Tray = struct {
         }
     }
 
-    const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
-        .{ .id = 1, .label = "Take screenshot", .separator = false },
-        .{ .id = 6, .label = "Capture screen", .separator = false },
-        .{ .id = 7, .label = "Capture window", .separator = false },
-        .{ .id = 8, .label = "Scrolling capture", .separator = false },
-        .{ .id = 9, .label = "Timer…", .separator = false },
-        .{ .id = 10, .label = "Capture text", .separator = false },
-        .{ .id = 20, .label = "Record screen / stop recording", .separator = false },
-        .{ .id = 5, .label = "Recent captures…", .separator = false },
-        .{ .id = 2, .label = "Settings", .separator = false },
-        .{ .id = 3, .label = "", .separator = true },
-        .{ .id = 4, .label = "Quit", .separator = false },
-    };
-
-    fn handleMenuMessage(self: *Tray, msg: *const dbus.Message) !MenuAction {
-        const alloc = self.alloc;
-        const conn = self.conn;
-
-        if (msg.isCall(menu_iface, "GetLayout")) {
-            // reply: (u(ia{sv}av))
-            var m = dbus.Marshal.init(alloc);
-            defer m.deinit();
-            try m.putU32(1); // revision
-            try m.beginStruct();
-            try m.putI32(0); // root id
-            const root_props = try m.beginArray(8);
-            try m.beginStruct();
-            try m.putString("children-display");
-            try m.putVariantString("submenu");
-            m.endArray(root_props);
-            const children = try m.beginArray(1); // av: variants align 1
-            for (menu_items) |item| {
-                try m.putSignature("(ia{sv}av)");
-                try m.beginStruct();
-                try m.putI32(item.id);
-                const props = try m.beginArray(8);
-                if (item.separator) {
-                    try m.beginStruct();
-                    try m.putString("type");
-                    try m.putVariantString("separator");
-                } else {
-                    try m.beginStruct();
-                    try m.putString("label");
-                    try m.putVariantString(item.label);
-                }
-                m.endArray(props);
-                const sub = try m.beginArray(1);
-                m.endArray(sub); // no nested children
-            }
-            m.endArray(children);
-            try conn.replyTo(msg, "u(ia{sv}av)", m.buf.items);
-            return .none;
-        }
-        if (msg.isCall(menu_iface, "GetGroupProperties")) {
-            // reply: a(ia{sv})
-            var m = dbus.Marshal.init(alloc);
-            defer m.deinit();
-            const arr = try m.beginArray(8);
-            for (menu_items) |item| {
-                try m.beginStruct();
-                try m.putI32(item.id);
-                const props = try m.beginArray(8);
-                if (item.separator) {
-                    try m.beginStruct();
-                    try m.putString("type");
-                    try m.putVariantString("separator");
-                } else {
-                    try m.beginStruct();
-                    try m.putString("label");
-                    try m.putVariantString(item.label);
-                }
-                m.endArray(props);
-            }
-            m.endArray(arr);
-            try conn.replyTo(msg, "a(ia{sv})", m.buf.items);
-            return .none;
-        }
-        if (msg.isCall(menu_iface, "AboutToShow")) {
-            var m = dbus.Marshal.init(alloc);
-            defer m.deinit();
-            try m.putBool(false);
-            try conn.replyTo(msg, "b", m.buf.items);
-            return .none;
-        }
-        if (msg.isCall(menu_iface, "Event")) {
-            var r = msg.reader();
-            const id = @as(i32, @bitCast(try r.readU32()));
-            const event_type = try r.readString();
-            try conn.replyTo(msg, "", &.{});
-            if (std.mem.eql(u8, event_type, "clicked")) {
-                return switch (id) {
-                    1 => .capture,
-                    10 => .capture_text,
-                    20 => .record,
-                    5 => .history,
-                    2 => .settings,
-                    4 => .quit,
-                    6 => .capture_screen,
-                    7 => .capture_window,
-                    8 => .capture_scroll,
-                    9 => .capture_timer,
-                    else => .none,
-                };
-            }
-            return .none;
-        }
-        if (msg.isCall(props_iface, "Get") or msg.isCall(props_iface, "GetAll")) {
-            // dbusmenu properties: Version (u) and Status (s)
-            var m = dbus.Marshal.init(alloc);
-            defer m.deinit();
-            if (msg.isCall(props_iface, "GetAll")) {
-                const arr = try m.beginArray(8);
-                try m.beginStruct();
-                try m.putString("Version");
-                try m.putVariantU32(3);
-                try m.beginStruct();
-                try m.putString("Status");
-                try m.putVariantString("normal");
-                m.endArray(arr);
-                try conn.replyTo(msg, "a{sv}", m.buf.items);
-            } else {
-                var r = msg.reader();
-                _ = try r.readString();
-                const prop = try r.readString();
-                if (std.mem.eql(u8, prop, "Version")) try m.putVariantU32(3) else try m.putVariantString("normal");
-                try conn.replyTo(msg, "v", m.buf.items);
-            }
-            return .none;
-        }
-        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
-        return .none;
-    }
+    const menu_items = menu.items;
 };
 
 const sni_introspect_xml =
@@ -432,8 +305,12 @@ pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
     // pivot
     c.fillCircleAA(pivot_x, pivot_y, lw * 0.7, fg);
 
-    // convert 0xAARRGGBB to network-order ARGB bytes
-    const out = try alloc.alloc(u8, n * n * 4);
+    return networkArgb(alloc, px);
+}
+
+/// 0xAARRGGBB pixels as network-order ARGB bytes.
+fn networkArgb(alloc: std.mem.Allocator, px: []const u32) ![]u8 {
+    const out = try alloc.alloc(u8, px.len * 4);
     for (px, 0..) |p, i| {
         out[i * 4] = @truncate(p >> 24);
         out[i * 4 + 1] = @truncate(p >> 16);
