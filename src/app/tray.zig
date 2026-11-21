@@ -11,7 +11,7 @@ const sni_iface = "org.kde.StatusNotifierItem";
 const menu_iface = "com.canonical.dbusmenu";
 const props_iface = "org.freedesktop.DBus.Properties";
 
-pub const MenuAction = enum { capture, history, settings, quit, none };
+pub const MenuAction = enum { capture, record, history, settings, quit, none };
 
 pub const Tray = struct {
     alloc: std.mem.Allocator,
@@ -206,6 +206,7 @@ pub const Tray = struct {
 
     const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
         .{ .id = 1, .label = "Take screenshot", .separator = false },
+        .{ .id = 6, .label = "Record screen / stop recording", .separator = false },
         .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
@@ -290,6 +291,7 @@ pub const Tray = struct {
             if (std.mem.eql(u8, event_type, "clicked")) {
                 return switch (id) {
                     1 => .capture,
+                    6 => .record,
                     5 => .history,
                     2 => .settings,
                     4 => .quit,

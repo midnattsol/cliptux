@@ -23,10 +23,11 @@ const Canvas = render.Canvas;
 const Window = window.Window;
 const Theme = theme_mod.Theme;
 
-const View = enum { general, editor, shortcuts };
+const View = enum { general, editor, shortcuts, recording };
 
-const Hit = union(enum) {
+pub const Hit = union(enum) {
     view: View,
+    rec: u8, // recui/settings_rec.zig
     toggle_notify,
     toggle_copy_on_save,
     /// forget the ScreenCast restore token so the next capture asks again
@@ -63,43 +64,10 @@ fn gnomeState(alloc: std.mem.Allocator, bus: ?*dbus.Connection) GnomeState {
     return if (st == 99) .missing else .installed;
 }
 
-/// Steps of the numeric settings: seconds, captures, MiB.
-pub fn stepSeconds(v: u16, up: bool) u16 {
-    const steps = [_]u16{ 3, 5, 8, 10, 15, 20, 30, 45, 60, 120, 300 };
-    return stepIn(u16, &steps, v, up);
-}
-pub fn stepCount(v: u16, up: bool) u16 {
-    const steps = [_]u16{ 5, 10, 20, 30, 50, 100, 200, 500, 1000 };
-    return stepIn(u16, &steps, v, up);
-}
-pub fn stepMb(v: u32, up: bool) u32 {
-    const steps = [_]u32{ 50, 100, 200, 500, 1000, 2000, 5000 };
-    return stepIn(u32, &steps, v, up);
-}
-
-/// The next value of `steps` above (or below) v; off-list values snap in.
-fn stepIn(comptime T: type, steps: []const T, v: T, up: bool) T {
-    if (up) {
-        for (steps) |x| if (x > v) return x;
-        return steps[steps.len - 1];
-    }
-    var i = steps.len;
-    while (i > 0) {
-        i -= 1;
-        if (steps[i] < v) return steps[i];
-    }
-    return steps[0];
-}
-
-test "numeric settings step along their scales" {
-    try std.testing.expectEqual(@as(u16, 10), stepSeconds(8, true));
-    try std.testing.expectEqual(@as(u16, 5), stepSeconds(8, false));
-    try std.testing.expectEqual(@as(u16, 3), stepSeconds(3, false));
-    try std.testing.expectEqual(@as(u16, 300), stepSeconds(300, true));
-    try std.testing.expectEqual(@as(u16, 50), stepCount(42, true));
-    try std.testing.expectEqual(@as(u16, 30), stepCount(42, false));
-    try std.testing.expectEqual(@as(u32, 1000), stepMb(500, true));
-}
+const steps_mod = @import("settings_steps.zig");
+pub const stepSeconds = steps_mod.stepSeconds;
+pub const stepCount = steps_mod.stepCount;
+pub const stepMb = steps_mod.stepMb;
 
 fn headerHeight(win: *const Window) i32 {
     return @intFromFloat(@round(52.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0));
@@ -443,6 +411,7 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
             st.dirty = true;
             return false;
         },
+        .rec => |r| @import("recui/settings_rec.zig").activate(alloc, home, r),
         .toggle_notify => cfg.notify = !cfg.notify,
         .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
         .forget_monitors => {
@@ -516,7 +485,7 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
     return false;
 }
 
-const Ui = struct {
+pub const Ui = struct {
     win: *Window,
     c: Canvas,
     f: f64, // display scale
@@ -526,7 +495,7 @@ const Ui = struct {
     mx: i32,
     my: i32,
 
-    fn sc(self: *const Ui, v: f64) i32 {
+    pub fn sc(self: *const Ui, v: f64) i32 {
         return @intFromFloat(@round(v * self.f));
     }
     fn fs(self: *const Ui, v: f64) f64 {
@@ -549,7 +518,7 @@ const Ui = struct {
 };
 
 /// Layout of a boxed list: rows stacked inside one card.
-const Card = struct {
+pub const Card = struct {
     x: i32,
     y: i32,
     w: i32,
@@ -702,6 +671,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             }
             y = endCard(&card) + ui.sc(26);
         },
+        .recording => y = try @import("recui/settings_rec.zig").draw(&ui, alloc, cx, y, col_w),
         .shortcuts => {
             y = try groupTitle(&ui, cx, y, col_w, "Editor shortcuts", "Reset to defaults");
             var card = beginCard(&ui, cx, y, col_w, @as(i32, config.n_actions) * ui.sc(48));
@@ -772,6 +742,7 @@ fn drawHeader(ui: *Ui, st: *const State) !void {
         .{ .general, "General", .gear },
         .{ .editor, "Editor", .pen },
         .{ .shortcuts, "Shortcuts", .keyboard },
+        .{ .recording, "Recording", .background },
     };
     const th_h = ui.sc(34);
     const gap = ui.sc(4);
@@ -829,7 +800,7 @@ fn folderLabel(dir: ?[]const u8, buf: []u8) []const u8 {
     return d;
 }
 
-fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const u8) !i32 {
+pub fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const u8) !i32 {
     const h = ui.sc(20);
     ui.label(x + ui.sc(2), y, h, 14, ui.th.text, .bold, title);
     if (link) |l| {
@@ -843,17 +814,17 @@ fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const
 }
 
 /// A boxed list `h` tall: the card is painted first, rows go on top.
-fn beginCard(ui: *Ui, x: i32, y: i32, w: i32, h: i32) Card {
+pub fn beginCard(ui: *Ui, x: i32, y: i32, w: i32, h: i32) Card {
     const rad = theme_mod.card_radius * ui.f;
     ui.c.fillRoundRectAA(x - 1, y - 1, w + 2, h + 2, rad + 1, ui.th.line);
     ui.c.fillRoundRectAA(x, y, w, h, rad, ui.th.card | 0xFF000000);
     return .{ .x = x, .y = y, .w = w };
 }
 
-const Row = struct { x: i32, y: i32, w: i32, h: i32 };
+pub const Row = struct { x: i32, y: i32, w: i32, h: i32 };
 
 /// The next row of `card`, `h` tall, under a separator.
-fn rowBegin(ui: *Ui, card: *Card, h: i32) Row {
+pub fn rowBegin(ui: *Ui, card: *Card, h: i32) Row {
     if (card.n > 0) ui.c.fillRect(card.x, card.y + card.h, card.w, 1, ui.th.line);
     const r = Row{ .x = card.x, .y = card.y + card.h, .w = card.w, .h = h };
     card.n += 1;
@@ -861,11 +832,11 @@ fn rowBegin(ui: *Ui, card: *Card, h: i32) Row {
     return r;
 }
 
-fn endCard(card: *const Card) i32 {
+pub fn endCard(card: *const Card) i32 {
     return card.y + card.h;
 }
 
-fn rowTitle(ui: *Ui, r: Row, title: []const u8, subtitle: ?[]const u8) void {
+pub fn rowTitle(ui: *Ui, r: Row, title: []const u8, subtitle: ?[]const u8) void {
     const x = r.x + ui.sc(16);
     if (subtitle) |s| {
         const t1 = text.height(ui.fs(15));
@@ -876,7 +847,7 @@ fn rowTitle(ui: *Ui, r: Row, title: []const u8, subtitle: ?[]const u8) void {
     } else ui.label(x, r.y, r.h, 15, ui.th.text, .regular, title);
 }
 
-fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8, on: bool, hit: Hit) !void {
+pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8, on: bool, hit: Hit) !void {
     const r = rowBegin(ui, card, ui.sc(theme_mod.row_h));
     const th = ui.th;
     rowTitle(ui, r, title, subtitle);
@@ -989,7 +960,7 @@ fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i32) 
 }
 
 /// - value + on the right of row `r`.
-fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
+pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
     const th = ui.th;
     const bs = ui.sc(34);
     const val_w = @max(ui.sc(64), ui.width(15, .regular, value) + ui.sc(20));

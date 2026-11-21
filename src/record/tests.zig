@@ -31,6 +31,8 @@ test {
     _ = @import("trim.zig");
     _ = @import("../ui/recui/trimui.zig");
     _ = @import("../ui/recui/trim_draw.zig");
+    _ = @import("../ui/recui/settings_rec.zig");
+    _ = @import("../ui/settings_steps.zig");
     _ = @import("../ui/recui/control.zig");
     _ = @import("../ui/recui/control_draw.zig");
     _ = @import("../ui/recui/glyphs.zig");

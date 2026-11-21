@@ -173,6 +173,25 @@ rec-trim)
     keys esc
     check "  ... and Esc closes it" wait_exit 5
     ;;
+rec-settings)
+    # the Recording view; SHOTLET_SETTINGS_FOCUS=n focuses its n-th control
+    drv_start Meta-0 || { fail "driver"; exit 1; }
+    drv key esc
+    cfgf=$HOME/.config/shotlet/config
+    rec_setting() { # rec_setting N KEY...
+        local n=$1; shift
+        SHOTLET_SETTINGS_VIEW=recording SHOTLET_SETTINGS_FOCUS=$n SHOTLET_DUMP_FRAME=$OUT/settings-$n run_shotlet "settings-$n" settings
+        sleep 2
+        keys "$@"
+        sleep 0.5
+        keys esc
+        wait_exit 5
+    }
+    rec_setting 1 enter
+    check "Settings' Recording view switches the format" grep -q "^record_format=gif" "$cfgf"
+    rec_setting 12 space
+    check "  ... and turns the microphone on" grep -q "^record_mic=true" "$cfgf"
+    ;;
 rec-portal)
     drv_start Meta-0 || { fail "driver"; exit 1; }
     drv key esc

@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal rec-shell rec-pick rec-gif rec-trim rec-portal"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then

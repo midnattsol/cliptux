@@ -11,7 +11,7 @@
 631 src/ui/doc.zig
 2048 src/ui/editor_ui.zig
 2688 src/ui/editor.zig
-1109 src/ui/settings.zig
+1080 src/ui/settings.zig
 898 src/ui/shapes.zig
 2653 src/ui/window.zig
 782 tools/container/wldrive.zig

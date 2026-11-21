@@ -89,6 +89,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
                     .unavailable;
                 if (how == .unavailable) spawnChild(env, "shot");
             },
+            // `shotlet record` stops the recording under way, if any
+            .record => spawnChild(env, "record"),
             .history => spawnChild(env, "history"),
             .settings => spawnChild(env, "settings"),
             .quit => return,
