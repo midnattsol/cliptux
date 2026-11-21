@@ -7,17 +7,39 @@ const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
 const render = @import("../gfx/render.zig");
 const png = @import("../gfx/png.zig");
+const shapes = @import("shapes.zig");
 
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64 },
     pointer_button: struct { button: u32, pressed: bool, x: f64, y: f64 },
     /// vertical scroll, positive = down
     pointer_axis: struct { value: f64 },
-    key: struct { code: u32, pressed: bool, ctrl: bool, shift: bool },
+    key: Key,
     /// buffer was (re)created at this pixel size; caller must redraw
     resize: struct { w: u32, h: u32 },
     close,
     frame_done,
+};
+
+pub const Key = struct {
+    /// evdev code: the physical key
+    code: u32,
+    pressed: bool,
+    ctrl: bool,
+    shift: bool,
+    alt: bool = false,
+    /// true for presses synthesized by key repeat
+    repeat: bool = false,
+    /// xkb keysym for the active layout; 0 when unknown
+    keysym: u32 = 0,
+    /// UTF-8 text the key produces in the active layout (after dead keys
+    /// and compose); empty for keys that type nothing or with Ctrl held
+    text_buf: [16]u8 = @splat(0),
+    text_len: u8 = 0,
+
+    pub fn text(self: *const Key) []const u8 {
+        return self.text_buf[0..self.text_len];
+    }
 };
 
 pub const BTN_LEFT: u32 = 0x110;
@@ -592,12 +614,18 @@ pub const Window = struct {
                     KEY_LEFTSHIFT, KEY_RIGHTSHIFT => self.shift = state == 1,
                     else => {},
                 }
-                try self.queue.append(self.alloc, .{ .key = .{
+                var key: Key = .{
                     .code = code,
                     .pressed = state == 1,
                     .ctrl = self.ctrl,
                     .shift = self.shift,
-                } });
+                };
+                // US layout until the keymap is read
+                if (!self.ctrl) if (shapes.evdevToChar(code, self.shift)) |ch| {
+                    key.text_buf[0] = ch;
+                    key.text_len = 1;
+                };
+                try self.queue.append(self.alloc, .{ .key = key });
             },
             wl.wl_keyboard.ev_modifiers => {
                 _ = r.uint(); // serial

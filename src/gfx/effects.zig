@@ -115,6 +115,37 @@ pub fn dropShadow(pixels: []u32, w: u32, h: u32, r: Rect, blur_px: u32, offset_y
     }
 }
 
+/// Copy `src` (sw×sh) into `dst` (dw×dh) at (x, y) with its corners rounded
+/// to `radius`, blending the corner edges over what `dst` already holds.
+pub fn blitRounded(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32, x: i32, y: i32, radius: u32) void {
+    const c = clip(.{ .x = x, .y = y, .w = @intCast(sw), .h = @intCast(sh) }, dw, dh) orelse return;
+    const rad: f32 = @floatFromInt(@min(radius, @min(sw, sh) / 2));
+    const fw: f32 = @floatFromInt(sw);
+    const fh: f32 = @floatFromInt(sh);
+    var dy: i32 = c.y;
+    while (dy < c.y + c.h) : (dy += 1) {
+        var dx: i32 = c.x;
+        while (dx < c.x + c.w) : (dx += 1) {
+            const sx: usize = @intCast(dx - x);
+            const sy: usize = @intCast(dy - y);
+            const p = src[sy * sw + sx];
+            const di = @as(usize, @intCast(dy)) * dw + @as(usize, @intCast(dx));
+            // coverage of this pixel by the rounded rectangle
+            const px = @as(f32, @floatFromInt(sx)) + 0.5;
+            const py = @as(f32, @floatFromInt(sy)) + 0.5;
+            const qx = @max(rad - px, px - (fw - rad), 0);
+            const qy = @max(rad - py, py - (fh - rad), 0);
+            const cov = if (qx == 0 or qy == 0 or rad == 0) 1.0 else std.math.clamp(rad - @sqrt(qx * qx + qy * qy) + 0.5, 0, 1);
+            if (cov >= 1.0) {
+                dst[di] = p;
+            } else if (cov > 0) {
+                const a: u32 = @intFromFloat(@as(f32, @floatFromInt((p >> 24) & 0xFF)) * cov);
+                dst[di] = over(dst[di], (a << 24) | (p & 0xFFFFFF));
+            }
+        }
+    }
+}
+
 fn mix(a: u32, b: u32, t: f32) u32 {
     var out: u32 = 0;
     var shift: u5 = 0;
@@ -157,4 +188,7 @@ test "effects clip to the buffer and leave the outside alone" {
     try std.testing.expectEqual(@as(u32, 0xFF000000), px[0]);
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[15]);
     dropShadow(&px, 4, 4, .{ .x = 1, .y = 1, .w = 2, .h = 2 }, 1, 0, 0x80000000);
+    const src: [4]u32 = @splat(0xFFABCDEF);
+    blitRounded(&px, 4, 4, &src, 2, 2, 3, 3, 0);
+    try std.testing.expectEqual(@as(u32, 0xFFABCDEF), px[15]);
 }
