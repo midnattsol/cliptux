@@ -206,11 +206,15 @@ pub const Surface = struct {
     configured: bool = false,
     alive: bool = false,
     maximized: bool = false,
+    /// argb8888 buffers with premultiplied alpha (OpenOptions.transparent)
+    transparent: bool = false,
 
     // --- protocol objects and state ---
     wl_surface: u32 = 0,
     xdg_surf: u32 = 0,
     toplevel: u32 = 0,
+    /// zwlr_layer_surface_v1, used instead of xdg_surf/toplevel
+    layer_surf: u32 = 0,
     viewport: u32 = 0,
     fs_obj: u32 = 0, // wp_fractional_scale_v1
     frame_cb: u32 = 0,
@@ -391,6 +395,79 @@ test "bounded reads stop at EOF, the size limit and the deadline" {
 
 pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
 
+/// A wlr-layer-shell placement (see OpenOptions.layer).
+pub const Layer = struct {
+    layer: u32 = wl.zwlr_layer_shell_v1.layer_overlay,
+    /// zwlr_layer_surface_v1.anchor_* bits
+    anchor: u32 = 0,
+    /// logical size; 0 along an axis anchored on both edges stretches
+    width: u32 = 0,
+    height: u32 = 0,
+    /// top, right, bottom, left (logical pixels)
+    margin: [4]i32 = .{ 0, 0, 0, 0 },
+    keyboard: u32 = wl.zwlr_layer_surface_v1.keyboard_on_demand,
+    namespace: []const u8 = "shotlet",
+};
+
+/// Progress of a drag started with startDrag().
+pub const DragState = enum {
+    none,
+    /// the pointer is carrying the data
+    active,
+    /// dropped on a target that accepted; it may still be reading
+    dropped,
+    /// the target took the data (copy done)
+    finished,
+    /// nobody accepted it, or it was cancelled
+    cancelled,
+};
+
+/// A premultiplied ARGB image to show under the pointer while dragging.
+pub const DragIcon = struct {
+    pixels: []const u32,
+    width: u32,
+    height: u32,
+    /// buffer pixels per logical pixel
+    scale: i32 = 1,
+};
+
+/// MIME types a dragged image offers, best first.
+pub const drag_mimes = [_][]const u8{ "image/png", "text/uri-list" };
+
+/// Which payload answers a request for `mime` (null: not offered).
+pub fn dragPayloadFor(mime: []const u8) ?enum { png, uri_list } {
+    if (std.mem.eql(u8, mime, "image/png")) return .png;
+    if (std.mem.eql(u8, mime, "text/uri-list")) return .uri_list;
+    return null;
+}
+
+/// text/uri-list body for a local file: file:// URI with every byte
+/// outside RFC 3986's unreserved set and '/' percent-encoded, CRLF ended.
+pub fn fileUriList(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    try out.appendSlice(alloc, "file://");
+    for (path) |c| {
+        const plain = std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "-._~/", c) != null;
+        if (plain) try out.append(alloc, c) else try out.print(alloc, "%{X:0>2}", .{c});
+    }
+    try out.appendSlice(alloc, "\r\n");
+    return out.toOwnedSlice(alloc);
+}
+
+test "drag MIME types map to their payloads" {
+    const t = std.testing;
+    try t.expectEqual(.png, dragPayloadFor("image/png").?);
+    try t.expectEqual(.uri_list, dragPayloadFor("text/uri-list").?);
+    try t.expect(dragPayloadFor("text/plain") == null);
+    try t.expect(dragPayloadFor("image/png;x") == null);
+    try t.expect(dragPayloadFor("") == null);
+    for (drag_mimes) |m| try t.expect(dragPayloadFor(m) != null);
+    const u = try fileUriList(t.allocator, "/home/a b/Imágenes/shot#1.png");
+    defer t.allocator.free(u);
+    try t.expectEqualStrings("file:///home/a%20b/Im%C3%A1genes/shot%231.png\r\n", u);
+}
+
 pub const Window = struct {
     alloc: std.mem.Allocator,
     conn: wl.Connection,
@@ -410,6 +487,9 @@ pub const Window = struct {
     fs_manager: u32 = 0, // wp_fractional_scale_manager_v1
     xdg_output_manager: u32 = 0,
     ti_manager: u32 = 0, // zwp_text_input_manager_v3
+    ddm_version: u32 = 0,
+    layer_shell: u32 = 0, // zwlr_layer_shell_v1
+    layer_shell_version: u32 = 0,
 
     outputs: [max_outputs]Output = @splat(.{}),
 
@@ -430,6 +510,23 @@ pub const Window = struct {
     /// text we offer on the clipboard (text/plain;charset=utf-8, UTF8_STRING)
     clipboard_text: []u8 = &.{},
     clipboard_image: ?*ClipboardImage = null,
+
+    // drag and drop out (startDrag)
+    drag_source: u32 = 0,
+    drag_state: DragState = .none,
+    /// a drop target accepted one of the types (wl_data_source.target)
+    drag_accepted: bool = false,
+    drag_png: []u8 = &.{},
+    drag_uri: []u8 = &.{},
+    drag_icon: u32 = 0,
+    drag_icon_buf: u32 = 0,
+    drag_icon_mem: []align(std.heap.page_size_min) u8 = &.{},
+
+    /// pointer over one of our surfaces / keyboard focus on one
+    pointer_in: bool = false,
+    kb_focus: bool = false,
+    /// queue a pointer_motion to (-1, -1) when the pointer leaves
+    report_leave: bool = false,
 
     // mirrors of surface 0, kept for the single-surface API
     width: u32 = 0, // buffer pixels
@@ -542,7 +639,14 @@ pub const Window = struct {
             self.seat_version = @min(version, 8);
             self.seat = try self.conn.bind(self.registry, name, iface, self.seat_version);
         } else if (eql(u8, iface, "wl_data_device_manager")) {
-            self.ddm = try self.conn.bind(self.registry, name, iface, 1);
+            // v3: drag-and-drop actions (copy) for startDrag
+            self.ddm_version = @min(version, 3);
+            self.ddm = try self.conn.bind(self.registry, name, iface, self.ddm_version);
+        } else if (eql(u8, iface, "zwlr_layer_shell_v1")) {
+            if (std.c.getenv("SHOTLET_NO_LAYER_SHELL") == null) {
+                self.layer_shell_version = @min(version, 4);
+                self.layer_shell = try self.conn.bind(self.registry, name, iface, self.layer_shell_version);
+            }
         } else if (eql(u8, iface, "wp_viewporter")) {
             self.viewporter = try self.conn.bind(self.registry, name, iface, 1);
         } else if (eql(u8, iface, "wp_fractional_scale_manager_v1")) {
@@ -596,6 +700,7 @@ pub const Window = struct {
     pub fn deinit(self: *Window) void {
         self.dumpFrames();
         self.dropClipboardSource();
+        self.endDrag();
         for (&self.surfaces) |*s| destroyPool(&self.conn, s);
         if (self.cursor_pool_mem.len > 0) sys.munmap(self.cursor_pool_mem);
         self.queue.deinit(self.alloc);
@@ -605,17 +710,29 @@ pub const Window = struct {
 
     pub const OpenOptions = struct {
         fullscreen: bool = true,
+        /// ask to be maximized (the work area: panels stay visible)
+        maximized: bool = false,
         /// fallback size when the compositor lets the client decide
         width: u32 = 800,
         height: u32 = 500,
+        /// premultiplied ARGB buffers: see-through where alpha < 255
+        transparent: bool = false,
+        /// a wlr-layer-shell surface when the compositor offers one;
+        /// ignored otherwise (an xdg toplevel as the rest describes)
+        layer: ?Layer = null,
     };
+
+    /// The compositor offers zwlr_layer_shell_v1 (KDE, wlroots; not GNOME).
+    pub fn hasLayerShell(self: *const Window) bool {
+        return self.layer_shell != 0;
+    }
 
     /// Create the toplevel; returns after the first configure, with buffers
     /// allocated (a .resize event will be queued).
     pub fn open(self: *Window, title: []const u8, opts: OpenOptions) !void {
         self.default_w = opts.width;
         self.default_h = opts.height;
-        try self.createSurface(0, title, opts.fullscreen, 0, 0);
+        try self.createSurface(0, title, opts, 0, 0);
         self.n_surfaces = 1;
         try self.finishOpen();
     }
@@ -644,7 +761,7 @@ pub const Window = struct {
         n = @min(n, max_surfaces);
         for (order[0..n], 0..) |slot, i| {
             const o = &self.outputs[slot];
-            try self.createSurface(@intCast(i), title, true, o.id, o.global);
+            try self.createSurface(@intCast(i), title, .{ .fullscreen = true }, o.id, o.global);
             const s = &self.surfaces[i];
             s.int_scale = @max(1, o.scale);
             if (s.fs_obj == 0) s.scale120 = @intCast(s.int_scale * 120);
@@ -662,10 +779,11 @@ pub const Window = struct {
         s.out_h = @intCast(@max(0, r.h));
     }
 
-    fn createSurface(self: *Window, idx: u8, title: []const u8, fullscreen: bool, output_id: u32, output_global: u32) !void {
+    fn createSurface(self: *Window, idx: u8, title: []const u8, opts: OpenOptions, output_id: u32, output_global: u32) !void {
         const c = &self.conn;
         const s = &self.surfaces[idx];
-        s.* = .{ .alive = true, .output = output_global };
+        const fullscreen = opts.fullscreen;
+        s.* = .{ .alive = true, .output = output_global, .transparent = opts.transparent };
         s.wl_surface = c.newId();
         try c.request(self.compositor, wl.wl_compositor.create_surface, &.{.{ .new_id = s.wl_surface }});
         if (self.viewporter != 0 and self.fs_manager != 0) {
@@ -674,6 +792,29 @@ pub const Window = struct {
             s.fs_obj = c.newId();
             try c.request(self.fs_manager, wl.wp_fractional_scale_manager_v1.get_fractional_scale, &.{ .{ .new_id = s.fs_obj }, .{ .object = s.wl_surface } });
         }
+        if (opts.layer) |l| if (self.layer_shell != 0) {
+            const L = wl.zwlr_layer_surface_v1;
+            s.layer_surf = c.newId();
+            try c.request(self.layer_shell, wl.zwlr_layer_shell_v1.get_layer_surface, &.{
+                .{ .new_id = s.layer_surf }, .{ .object = s.wl_surface }, .{ .object = output_id },
+                .{ .uint = l.layer },        .{ .string = l.namespace },
+            });
+            try c.request(s.layer_surf, L.set_size, &.{ .{ .uint = l.width }, .{ .uint = l.height } });
+            try c.request(s.layer_surf, L.set_anchor, &.{.{ .uint = l.anchor }});
+            try c.request(s.layer_surf, L.set_margin, &.{
+                .{ .int = l.margin[0] }, .{ .int = l.margin[1] }, .{ .int = l.margin[2] }, .{ .int = l.margin[3] },
+            });
+            try c.request(s.layer_surf, L.set_exclusive_zone, &.{.{ .int = 0 }});
+            // on-demand focus is v4; before it the only choice that does
+            // not grab every key press is none
+            var kb = l.keyboard;
+            if (kb == L.keyboard_on_demand and self.layer_shell_version < 4) kb = L.keyboard_none;
+            try c.request(s.layer_surf, L.set_keyboard_interactivity, &.{.{ .uint = kb }});
+            s.pending_w = l.width;
+            s.pending_h = l.height;
+            try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
+            return;
+        };
         s.xdg_surf = c.newId();
         try c.request(self.wm_base, wl.xdg_wm_base.get_xdg_surface, &.{ .{ .new_id = s.xdg_surf }, .{ .object = s.wl_surface } });
         s.toplevel = c.newId();
@@ -682,6 +823,8 @@ pub const Window = struct {
         try c.request(s.toplevel, wl.xdg_toplevel.set_title, &.{.{ .string = title }});
         if (fullscreen) {
             try c.request(s.toplevel, wl.xdg_toplevel.set_fullscreen, &.{.{ .object = output_id }});
+        } else if (opts.maximized) {
+            try c.request(s.toplevel, wl.xdg_toplevel.set_maximized, &.{});
         }
         try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
     }
@@ -740,6 +883,7 @@ pub const Window = struct {
         if (s.fs_obj != 0) c.request(s.fs_obj, 0, &.{}) catch {}; // wp_fractional_scale_v1.destroy
         if (s.viewport != 0) c.request(s.viewport, wl.wp_viewport.destroy, &.{}) catch {};
         if (s.toplevel != 0) c.request(s.toplevel, wl.xdg_toplevel.destroy, &.{}) catch {};
+        if (s.layer_surf != 0) c.request(s.layer_surf, wl.zwlr_layer_surface_v1.destroy, &.{}) catch {};
         if (s.xdg_surf != 0) c.request(s.xdg_surf, wl.xdg_surface.destroy, &.{}) catch {};
         if (s.wl_surface != 0) c.request(s.wl_surface, wl.wl_surface.destroy, &.{}) catch {};
         s.* = .{};
@@ -776,7 +920,7 @@ pub const Window = struct {
                 .{ .int = @intCast(w) },
                 .{ .int = @intCast(h) },
                 .{ .int = @intCast(stride) },
-                .{ .uint = wl.wl_shm.format_xrgb8888 },
+                .{ .uint = if (s.transparent) wl.wl_shm.format_argb8888 else wl.wl_shm.format_xrgb8888 },
             });
         }
         s.width = w;
@@ -912,6 +1056,14 @@ pub const Window = struct {
 
     /// Attach + commit the current back buffer of surface idx.
     pub fn presentSurface(self: *Window, idx: u8) !void {
+        return self.presentDamaged(idx, null);
+    }
+
+    /// Like presentSurface, telling the compositor only `damage` (buffer
+    /// pixels) changed; null means the whole buffer. The caller must have
+    /// drawn everything else of this back buffer before (both buffers
+    /// alternate).
+    pub fn presentDamaged(self: *Window, idx: u8, damage: ?Rect) !void {
         if (idx >= self.n_surfaces) return error.NoSuchSurface;
         const s = &self.surfaces[idx];
         if (!s.alive or s.pool == 0) return error.NoSuchSurface;
@@ -922,9 +1074,9 @@ pub const Window = struct {
             s.committed_scale = s.int_scale;
         }
         try c.request(s.wl_surface, wl.wl_surface.attach, &.{ .{ .object = b.id }, .{ .int = 0 }, .{ .int = 0 } });
+        const d = damage orelse Rect{ .x = 0, .y = 0, .w = @intCast(s.width), .h = @intCast(s.height) };
         try c.request(s.wl_surface, wl.wl_surface.damage_buffer, &.{
-            .{ .int = 0 },                 .{ .int = 0 },
-            .{ .int = @intCast(s.width) }, .{ .int = @intCast(s.height) },
+            .{ .int = d.x }, .{ .int = d.y }, .{ .int = d.w }, .{ .int = d.h },
         });
         if (!s.frame_pending) {
             s.frame_cb = c.newId();
@@ -1043,13 +1195,13 @@ pub const Window = struct {
         try self.handleEvent(ev);
     }
 
-    const SurfaceObj = enum { wl_surface, xdg_surf, toplevel, fs_obj, frame_cb, buffer0, buffer1 };
+    const SurfaceObj = enum { wl_surface, xdg_surf, toplevel, layer_surf, fs_obj, frame_cb, buffer0, buffer1 };
 
     fn findSurfaceObj(self: *Window, obj: u32) ?struct { idx: u8, kind: SurfaceObj } {
         if (obj == 0) return null;
         for (self.surfaces[0..self.n_surfaces], 0..) |*s, i| {
             if (!s.alive) continue;
-            const kind: SurfaceObj = if (obj == s.wl_surface) .wl_surface else if (obj == s.xdg_surf) .xdg_surf else if (obj == s.toplevel) .toplevel else if (obj == s.fs_obj) .fs_obj else if (obj == s.frame_cb) .frame_cb else if (obj == s.buffers[0].id) .buffer0 else if (obj == s.buffers[1].id) .buffer1 else continue;
+            const kind: SurfaceObj = if (obj == s.wl_surface) .wl_surface else if (obj == s.xdg_surf) .xdg_surf else if (obj == s.toplevel) .toplevel else if (obj == s.layer_surf) .layer_surf else if (obj == s.fs_obj) .fs_obj else if (obj == s.frame_cb) .frame_cb else if (obj == s.buffers[0].id) .buffer0 else if (obj == s.buffers[1].id) .buffer1 else continue;
             return .{ .idx = @intCast(i), .kind = kind };
         }
         return null;
@@ -1119,6 +1271,8 @@ pub const Window = struct {
             }
         } else if (ev.object != 0 and ev.object == self.clipboard_source) {
             try self.handleClipboardSource(ev.opcode, &r);
+        } else if (ev.object != 0 and ev.object == self.drag_source) {
+            try self.handleDragSource(ev.opcode, &r);
         } else if (ev.object != 0 and ev.object == self.seat and ev.opcode == wl.wl_seat.ev_capabilities) {
             self.seat_caps = try r.uint();
             try self.updateSeatDevices();
@@ -1156,6 +1310,23 @@ pub const Window = struct {
                     s.bounds_w = @intCast(@max(0, try r.int()));
                     s.bounds_h = @intCast(@max(0, try r.int()));
                 },
+                else => {},
+            },
+            .layer_surf => switch (opcode) {
+                wl.zwlr_layer_surface_v1.ev_configure => {
+                    const serial = try r.uint();
+                    const w_ = try r.uint();
+                    const h_ = try r.uint();
+                    try c.request(s.layer_surf, wl.zwlr_layer_surface_v1.ack_configure, &.{.{ .uint = serial }});
+                    if (w_ > 0) s.pending_w = w_;
+                    if (h_ > 0) s.pending_h = h_;
+                    s.logical_w = if (s.pending_w > 0) s.pending_w else self.default_w;
+                    s.logical_h = if (s.pending_h > 0) s.pending_h else self.default_h;
+                    try self.applySize(idx);
+                    s.configured = true;
+                    try c.flush();
+                },
+                wl.zwlr_layer_surface_v1.ev_closed => try self.queue.append(self.alloc, .close),
                 else => {},
             },
             .xdg_surf => if (opcode == wl.xdg_surface.ev_configure) {
@@ -1304,7 +1475,12 @@ pub const Window = struct {
 
     fn handlePointer(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
+            wl.wl_pointer.ev_leave => {
+                self.pointer_in = false;
+                if (self.report_leave) try self.queue.append(self.alloc, .{ .pointer_motion = .{ .x = -1, .y = -1, .surface = self.ptr_surface } });
+            },
             wl.wl_pointer.ev_enter => {
+                self.pointer_in = true;
                 self.enter_serial = try r.uint();
                 const surf = try r.uint();
                 self.ptr_surface = self.surfaceIndexOf(surf) orelse 0;
@@ -1450,11 +1626,13 @@ pub const Window = struct {
                 self.kb.repeat.setInfo(rate, delay);
             },
             wl.wl_keyboard.ev_enter => {
+                self.kb_focus = true;
                 self.input_serial = try r.uint();
                 self.key_surface = self.surfaceIndexOf(try r.uint()) orelse 0;
                 std.log.debug("keyboard focus: surface {d}", .{self.key_surface});
             },
             wl.wl_keyboard.ev_leave => {
+                self.kb_focus = false;
                 std.log.debug("keyboard focus lost", .{});
                 self.kb.leave();
             },
@@ -1756,6 +1934,223 @@ pub const Window = struct {
 
     pub fn hasClipboard(self: *const Window) bool {
         return self.clipboard_source != 0;
+    }
+
+    /// The PNG we offer on the clipboard (encoding it first if needed);
+    /// null when we offer none or text.
+    pub fn clipboardPng(self: *Window) ?[]const u8 {
+        if (self.clipboard_source == 0) return null;
+        if (self.clipboard_image) |image| return image.waitPng() catch null;
+        if (self.clipboard_png.len > 0) return self.clipboard_png;
+        return null;
+    }
+
+    // --- surface roles and regions ---
+
+    /// Where surface idx takes pointer input, in its logical coordinates;
+    /// null: everywhere. Elsewhere clicks reach the window below. Applied
+    /// with the next present.
+    pub fn setInputRegion(self: *Window, idx: u8, rects: ?[]const Rect) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive) return error.NoSuchSurface;
+        const c = &self.conn;
+        const rs = rects orelse {
+            try c.request(s.wl_surface, wl.wl_surface.set_input_region, &.{.{ .object = 0 }});
+            return;
+        };
+        const region = c.newId();
+        try c.request(self.compositor, wl.wl_compositor.create_region, &.{.{ .new_id = region }});
+        for (rs) |r| try c.request(region, wl.wl_region.add, &.{ .{ .int = r.x }, .{ .int = r.y }, .{ .int = r.w }, .{ .int = r.h } });
+        try c.request(s.wl_surface, wl.wl_surface.set_input_region, &.{.{ .object = region }});
+        try c.request(region, wl.wl_region.destroy, &.{});
+    }
+
+    /// The part of surface idx that is the window proper (logical
+    /// coordinates), without its drawn shadow. xdg toplevels only.
+    pub fn setWindowGeometry(self: *Window, idx: u8, r: Rect) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.xdg_surf == 0) return;
+        try self.conn.request(s.xdg_surf, wl.xdg_surface.set_window_geometry, &.{ .{ .int = r.x }, .{ .int = r.y }, .{ .int = r.w }, .{ .int = r.h } });
+    }
+
+    /// Change a toplevel's title (window rules key on it).
+    pub fn setTitle(self: *Window, idx: u8, title: []const u8) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.toplevel == 0) return;
+        try self.conn.request(s.toplevel, wl.xdg_toplevel.set_title, &.{.{ .string = title }});
+        try self.conn.flush();
+    }
+
+    /// The compositor's window menu (GNOME: Always on Top, Move, ...) at
+    /// logical x, y of surface idx. Call from a button press.
+    pub fn showWindowMenu(self: *Window, idx: u8, x: i32, y: i32) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.toplevel == 0 or self.seat == 0) return;
+        try self.conn.request(s.toplevel, wl.xdg_toplevel.show_window_menu, &.{
+            .{ .object = self.seat }, .{ .uint = self.input_serial }, .{ .int = x }, .{ .int = y },
+        });
+        try self.conn.flush();
+    }
+
+    /// Move or resize a layer surface (logical pixels; margins are top,
+    /// right, bottom, left). A new size arrives as a .resize event.
+    pub fn setLayerPlacement(self: *Window, idx: u8, width: u32, height: u32, margin: [4]i32) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.layer_surf == 0) return;
+        const c = &self.conn;
+        const L = wl.zwlr_layer_surface_v1;
+        try c.request(s.layer_surf, L.set_size, &.{ .{ .uint = width }, .{ .uint = height } });
+        try c.request(s.layer_surf, L.set_margin, &.{
+            .{ .int = margin[0] }, .{ .int = margin[1] }, .{ .int = margin[2] }, .{ .int = margin[3] },
+        });
+        try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
+        try c.flush();
+    }
+
+    /// Ask an xdg toplevel to become a new size (logical); takes effect at
+    /// the next configure the compositor sends (or our own resize when it
+    /// lets the client decide): used by windows that size themselves.
+    pub fn resizeTo(self: *Window, idx: u8, width: u32, height: u32) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.maximized) return;
+        if (s.logical_w == width and s.logical_h == height) return;
+        s.logical_w = width;
+        s.logical_h = height;
+        s.pending_w = 0;
+        s.pending_h = 0;
+        try self.applySize(idx);
+        try self.conn.flush();
+    }
+
+    /// Begin an interactive move of surface idx (call on a button press).
+    pub fn startMoveOf(self: *Window, idx: u8) !void {
+        const s = &self.surfaces[idx];
+        if (self.seat == 0 or s.toplevel == 0) return;
+        try self.conn.request(s.toplevel, wl.xdg_toplevel.move, &.{ .{ .object = self.seat }, .{ .uint = self.input_serial } });
+        try self.conn.flush();
+    }
+
+    // --- drag and drop out ---
+
+    /// Start dragging an image out of surface idx; call on the button
+    /// press (its serial starts the drag). Offers drag_mimes: `png_data`
+    /// as image/png and `uri_list` as text/uri-list (copy semantics).
+    /// Takes ownership of both on success. Follow drag_state.
+    pub fn startDrag(self: *Window, idx: u8, png_data: []u8, uri_list: []u8, icon: ?DragIcon) !void {
+        if (self.ddm == 0 or self.data_device == 0) return error.NoDataDevice;
+        const s = &self.surfaces[idx];
+        if (!s.alive) return error.NoSuchSurface;
+        self.endDrag();
+        const c = &self.conn;
+        const source = c.newId();
+        try c.request(self.ddm, wl.wl_data_device_manager.create_data_source, &.{.{ .new_id = source }});
+        for (drag_mimes) |m| try c.request(source, wl.wl_data_source.offer, &.{.{ .string = m }});
+        if (self.ddm_version >= 3) try c.request(source, wl.wl_data_source.set_actions, &.{.{ .uint = wl.dnd_action_copy }});
+        var icon_id: u32 = 0;
+        if (icon) |ic| icon_id = self.makeDragIcon(ic) catch 0;
+        try c.request(self.data_device, wl.wl_data_device.start_drag, &.{
+            .{ .object = source }, .{ .object = s.wl_surface }, .{ .object = icon_id }, .{ .uint = self.input_serial },
+        });
+        try c.flush();
+        self.drag_source = source;
+        self.drag_png = png_data;
+        self.drag_uri = uri_list;
+        self.drag_state = .active;
+        self.drag_accepted = false;
+    }
+
+    fn makeDragIcon(self: *Window, ic: DragIcon) !u32 {
+        const c = &self.conn;
+        const size: usize = @as(usize, ic.width) * ic.height * 4;
+        const fd = try sys.memfdCreate("shotlet-dnd", sys.MFD_CLOEXEC);
+        defer sys.close(fd); // flushed below while still open
+        try sys.ftruncate(fd, size);
+        self.drag_icon_mem = try sys.mmapRw(fd, size);
+        @memcpy(@as([*]u32, @ptrCast(@alignCast(self.drag_icon_mem.ptr)))[0 .. size / 4], ic.pixels[0 .. size / 4]);
+        const pool = c.newId();
+        try c.request(self.shm, wl.wl_shm.create_pool, &.{ .{ .new_id = pool }, .{ .fd = fd }, .{ .int = @intCast(size) } });
+        self.drag_icon_buf = c.newId();
+        try c.request(pool, wl.wl_shm_pool.create_buffer, &.{
+            .{ .new_id = self.drag_icon_buf }, .{ .int = 0 },                      .{ .int = @intCast(ic.width) },
+            .{ .int = @intCast(ic.height) },   .{ .int = @intCast(ic.width * 4) }, .{ .uint = wl.wl_shm.format_argb8888 },
+        });
+        try c.request(pool, wl.wl_shm_pool.destroy, &.{});
+        self.drag_icon = c.newId();
+        try c.request(self.compositor, wl.wl_compositor.create_surface, &.{.{ .new_id = self.drag_icon }});
+        const k = @max(1, ic.scale);
+        if (self.compositor_version >= 3 and k > 1) try c.request(self.drag_icon, wl.wl_surface.set_buffer_scale, &.{.{ .int = k }});
+        // the pointer holds the icon a little in from its top-left corner
+        const hx: i32 = -@as(i32, @intCast(@min(ic.width / @as(u32, @intCast(k)) / 2, 40)));
+        const hy: i32 = -@as(i32, @intCast(@min(ic.height / @as(u32, @intCast(k)) / 2, 30)));
+        if (self.compositor_version >= 5) {
+            try c.request(self.drag_icon, wl.wl_surface.attach, &.{ .{ .object = self.drag_icon_buf }, .{ .int = 0 }, .{ .int = 0 } });
+            try c.request(self.drag_icon, wl.wl_surface.offset, &.{ .{ .int = hx }, .{ .int = hy } });
+        } else {
+            try c.request(self.drag_icon, wl.wl_surface.attach, &.{ .{ .object = self.drag_icon_buf }, .{ .int = hx }, .{ .int = hy } });
+        }
+        try c.request(self.drag_icon, wl.wl_surface.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = std.math.maxInt(i32) }, .{ .int = std.math.maxInt(i32) } });
+        try c.request(self.drag_icon, wl.wl_surface.commit, &.{});
+        try c.flush(); // the memfd travels with these bytes
+        return self.drag_icon;
+    }
+
+    fn handleDragSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
+        switch (opcode) {
+            wl.wl_data_source.ev_target => {
+                const mime = r.string() catch "";
+                self.drag_accepted = mime.len > 0;
+            },
+            wl.wl_data_source.ev_send => {
+                const mime = try r.string();
+                const fd = self.conn.takeFd() orelse return;
+                defer sys.close(fd);
+                const data: []const u8 = switch (dragPayloadFor(mime) orelse return) {
+                    .png => self.drag_png,
+                    .uri_list => self.drag_uri,
+                };
+                sys.writeAllBlocking(fd, data) catch |err| switch (err) {
+                    error.BrokenPipe, error.ConnectionReset => {},
+                    else => std.log.warn("drag send failed: {t}", .{err}),
+                };
+                // before v3 there is no dnd_finished: a read is the drop
+                if (self.ddm_version < 3) self.drag_state = .finished;
+            },
+            wl.wl_data_source.ev_dnd_drop_performed => {
+                if (self.drag_state == .active) self.drag_state = .dropped;
+            },
+            wl.wl_data_source.ev_dnd_finished => {
+                self.drag_state = .finished;
+                self.releaseDragSource();
+            },
+            wl.wl_data_source.ev_cancelled => {
+                if (self.drag_state != .finished) self.drag_state = .cancelled;
+                self.releaseDragSource();
+            },
+            else => {},
+        }
+    }
+
+    fn releaseDragSource(self: *Window) void {
+        const c = &self.conn;
+        if (self.drag_source != 0) c.request(self.drag_source, wl.wl_data_source.destroy, &.{}) catch {};
+        self.drag_source = 0;
+        if (self.drag_icon != 0) c.request(self.drag_icon, wl.wl_surface.destroy, &.{}) catch {};
+        self.drag_icon = 0;
+        if (self.drag_icon_buf != 0) c.request(self.drag_icon_buf, wl.wl_buffer.destroy, &.{}) catch {};
+        self.drag_icon_buf = 0;
+        if (self.drag_icon_mem.len > 0) sys.munmap(self.drag_icon_mem);
+        self.drag_icon_mem = &.{};
+        c.flush() catch {};
+    }
+
+    /// Drop the drag's source and payloads; drag_state becomes .none.
+    pub fn endDrag(self: *Window) void {
+        self.releaseDragSource();
+        if (self.drag_png.len > 0) self.alloc.free(self.drag_png);
+        if (self.drag_uri.len > 0) self.alloc.free(self.drag_uri);
+        self.drag_png = &.{};
+        self.drag_uri = &.{};
+        self.drag_state = .none;
     }
 
     /// Claim the clipboard selection with an already-encoded image/png data
