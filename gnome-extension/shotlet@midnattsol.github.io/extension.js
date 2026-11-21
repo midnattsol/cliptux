@@ -2,7 +2,8 @@
 //
 // Mutter has no layer-shell protocol, and a Wayland client cannot place its
 // own window or keep it above others. This extension does that for
-// Shotlet's floating windows only: toplevels whose app id is "shotlet" and
+// Shotlet's floating windows only: toplevels whose app id is
+// "io.github.midnattsol.Shotlet" and
 // whose title is a role tag.
 //
 //   shotlet:quick       the after-capture thumbnail stack: bottom-left of
@@ -22,6 +23,7 @@ import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+const APP_ID = 'io.github.midnattsol.Shotlet';
 const BUS_NAME = 'dev.shotlet.Shell1';
 const OBJECT_PATH = '/dev/shotlet/Shell1';
 const IFACE = `<node>
@@ -44,7 +46,7 @@ const EDGE = 8;
 const FOCUS_ON_MAP_MS = 1000;
 
 function roleOf(win) {
-    if (!win || win.get_wm_class() !== 'shotlet')
+    if (!win || win.get_wm_class() !== APP_ID)
         return null;
     const title = win.get_title() ?? '';
     if (!title.startsWith('shotlet:'))
@@ -107,7 +109,7 @@ export default class ShotletExtension extends Extension {
     _watch(win) {
         // a new Wayland window has no app id yet: decide once it has one
         const cls = win?.get_wm_class();
-        if (!win || this._windows.has(win) || (cls && cls !== 'shotlet'))
+        if (!win || this._windows.has(win) || (cls && cls !== APP_ID))
             return;
         const st = {
             ids: [],
@@ -120,7 +122,7 @@ export default class ShotletExtension extends Extension {
         // the title can arrive after the window: wait for the tag
         st.ids.push(win.connect('notify::title', () => this._apply(win)));
         st.ids.push(win.connect('notify::wm-class', () => {
-            if (win.get_wm_class() === 'shotlet')
+            if (win.get_wm_class() === APP_ID)
                 this._apply(win);
             else
                 this._forget(win);
@@ -185,7 +187,7 @@ export default class ShotletExtension extends Extension {
         // editor that just closed is Shotlet's too)
         const ws = global.workspace_manager.get_active_workspace();
         const prev = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, ws)
-            .find(w => w !== win && w.get_wm_class() !== 'shotlet');
+            .find(w => w !== win && w.get_wm_class() !== APP_ID);
         if (!prev)
             return;
         if (this._idleId)

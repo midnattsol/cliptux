@@ -131,10 +131,26 @@ if [ "${1:-}" = "--inner" ]; then
     }
     sni() { # sni METHOD ARGS...: call the daemon's StatusNotifierItem
         local m=$1; shift
-        gdbus call --session --dest org.midnattsol.shotlet --object-path /StatusNotifierItem \
+        gdbus call --session --dest io.github.midnattsol.Shotlet --object-path /StatusNotifierItem \
             --method "org.kde.StatusNotifierItem.$m" "$@" >/dev/null
     }
     eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
+    # the identity xdg-desktop-portal stores consent under (no test hook:
+    # shotlet registers it through org.freedesktop.host.portal.Registry)
+    APP_ID=io.github.midnattsol.Shotlet
+    perm() { # perm METHOD ARGS...: call the portal permission store
+        local m=$1; shift
+        gdbus call --session --dest org.freedesktop.impl.portal.PermissionStore \
+            --object-path /org/freedesktop/impl/portal/PermissionStore \
+            --method "org.freedesktop.impl.portal.PermissionStore.$m" "$@" 2>/dev/null
+    }
+    # perm_apps TABLE: every app id with an entry in TABLE, one per line
+    perm_apps() {
+        local id
+        for id in $(perm List "$1" | grep -o "'[^']*'" | tr -d "'"); do
+            perm Lookup "$1" "$id" | tee -a "$OUT/permissions.txt" | grep -o "'[^']*': \[" | sed "s/': \[//; s/^'//"
+        done | sort -u
+    }
 
     # --- portal dialogs (xdg-desktop-portal-gnome), found by colour
     accent=3584e4 # Adwaita's accent: default buttons, checkboxes
@@ -476,6 +492,8 @@ if [ "${1:-}" = "--inner" ]; then
         check "copied PNG has the selection's size" eq "$(png_size "$OUT/clip.png")" 400x300
         check "shotlet keeps serving the clipboard" alive
         check "restore token stored" grep -q screencast_restore_token "$HOME/.config/shotlet/config"
+        check "registered with the portal as $APP_ID" grep -q "portal identity: $APP_ID (registry)" "$SHOT_LOG"
+        check "  ... which keys the screen-cast grant" eq "$(perm_apps screencast)" "$APP_ID"
         first_pid=$SHOT_PID
         t0=$(date +%s%N)
         run_shotlet second
@@ -497,6 +515,16 @@ if [ "${1:-}" = "--inner" ]; then
         check "Ctrl+C copies too" eq "$(clip_png "$OUT/clip3.png" && png_size "$OUT/clip3.png")" 200x100
         SHOT_PID=$prev
         check "previous clipboard server exits when replaced" wait_exit 5
+        # as a GNOME custom shortcut starts it: its own session, no
+        # terminal, no systemd scope; the registered identity alone must
+        # find the stored grant again
+        SHOT_LOG=$OUT/shortcut.log
+        setsid -f env SHOTLET_EDITOR_DUMP="$OUT/shortcut" "$BIN" </dev/null >"$SHOT_LOG" 2>&1
+        check "a shortcut-style launch is silent too" wait_log 8 "startup: capture="
+        sleep 0.8
+        drv key esc
+        sleep 1
+        check "  ... with no new grant (still one, under $APP_ID)" eq "$(perm_apps screencast)" "$APP_ID"
         ;;
     cancel)
         drv_start Meta-0 || { fail "driver"; exit 1; }
@@ -796,7 +824,7 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 2
         check "daemon runs without a StatusNotifierWatcher" alive
         daemon_pid=$SHOT_PID
-        check "  ... owning org.midnattsol.shotlet" gdbus_owner org.midnattsol.shotlet
+        check "  ... owning io.github.midnattsol.Shotlet" gdbus_owner io.github.midnattsol.Shotlet
         run_shotlet second --daemon -f
         check "a second daemon exits at once" wait_exit 3
         check "  ... with status 0" eq "$RC" 0
@@ -817,7 +845,7 @@ if [ "${1:-}" = "--inner" ]; then
         keys esc
         sleep 1
         check "  ... whose Esc leaves the daemon running" alive
-        gdbus call --session --dest org.midnattsol.shotlet --object-path /MenuBar \
+        gdbus call --session --dest io.github.midnattsol.Shotlet --object-path /MenuBar \
             --method com.canonical.dbusmenu.Event 4 clicked "<0>" 0 >/dev/null 2>&1
         check "menu Quit ends the daemon" wait_exit 5
         check "  ... with status 0" eq "$RC" 0
@@ -827,9 +855,9 @@ if [ "${1:-}" = "--inner" ]; then
         # portal. GNOME asks consent only from the focused app (its app id,
         # from the portal, must match the focused window's .desktop app):
         # the windowless first request is refused or unanswered, then
-        # shotlet asks again from its own small window. The session gives
-        # the portal the app id "shotlet" (a real session gets it from
-        # shotlet's systemd scope) and installs shotlet.desktop.
+        # shotlet asks again from its own small window. Shotlet registers
+        # its app id with the portal (Registry), and the harness installs
+        # its .desktop file under that id.
         mkdir -p "$HOME/.config/xdg-desktop-portal"
         printf '[preferred]\ndefault=gnome;gtk;\norg.freedesktop.impl.portal.ScreenCast=none\n' \
             >"$HOME/.config/xdg-desktop-portal/portals.conf"
@@ -869,6 +897,7 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... without our own window in the capture" test "$VAL" != ff1d2125
         keys esc
         check "  ... and Esc quits" wait_exit 5
+        check "the screenshot consent is stored under $APP_ID" eq "$(perm_apps screenshot)" "$APP_ID"
         run_shotlet granted
         check "with consent stored, capture is direct" wait_log 10 "startup: capture="
         ms=$(grep -o "startup: capture=[0-9]*" "$SHOT_LOG" | grep -o "[0-9]*$")
@@ -965,17 +994,15 @@ for s in $want; do
         mixed | fractional | integer) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
-    ibus= apps= app_id= exts=
+    # GNOME maps windows (and portal callers) to apps through installed
+    # .desktop files whose Exec exists: install Shotlet's, as install.sh does
+    sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
+    ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$s" = ime ] && ibus=hangul
     case $s in
         quick | annotate | history) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
     esac
-    if [ "$s" = fallback ]; then
-        # GNOME maps windows to apps through .desktop files whose Exec exists
-        sed "s|^Exec=.*|Exec=$BIN --daemon|" "$ROOT/shotlet.desktop" >"$E2E_OUT/shotlet.desktop"
-        apps=$E2E_OUT/shotlet.desktop app_id=shotlet
-    fi
-    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_PORTAL_APP_ID=$app_id HL_EXTENSIONS=$exts timeout 300 \
+    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
         while IFS= read -r line; do

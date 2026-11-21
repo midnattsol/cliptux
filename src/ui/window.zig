@@ -837,7 +837,7 @@ pub const Window = struct {
         try c.request(self.wm_base, wl.xdg_wm_base.get_xdg_surface, &.{ .{ .new_id = s.xdg_surf }, .{ .object = s.wl_surface } });
         s.toplevel = c.newId();
         try c.request(s.xdg_surf, wl.xdg_surface.get_toplevel, &.{.{ .new_id = s.toplevel }});
-        try c.request(s.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = "shotlet" }});
+        try c.request(s.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = @import("../app_id.zig").app_id }});
         try c.request(s.toplevel, wl.xdg_toplevel.set_title, &.{.{ .string = title }});
         if (fullscreen) {
             try c.request(s.toplevel, wl.xdg_toplevel.set_fullscreen, &.{.{ .object = output_id }});

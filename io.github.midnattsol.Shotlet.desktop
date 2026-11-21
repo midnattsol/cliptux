@@ -3,8 +3,22 @@ Type=Application
 Name=Shotlet
 Comment=Wayland-native screenshots with annotation editor
 Exec=shotlet --daemon
-Icon=shotlet
+Icon=io.github.midnattsol.Shotlet
 Terminal=false
 Categories=Utility;Graphics;
 StartupNotify=false
+StartupWMClass=io.github.midnattsol.Shotlet
 X-GNOME-UsesNotifications=true
+Actions=Screenshot;History;Settings;
+
+[Desktop Action Screenshot]
+Name=Take screenshot
+Exec=shotlet
+
+[Desktop Action History]
+Name=Recent captures
+Exec=shotlet history
+
+[Desktop Action Settings]
+Name=Settings
+Exec=shotlet settings

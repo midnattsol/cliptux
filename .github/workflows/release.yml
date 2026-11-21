@@ -35,7 +35,7 @@ jobs:
             zig build -Doptimize=safe -Dtarget="$target"
             name="shotlet-${GITHUB_REF_NAME}-linux-${arch}"
             mkdir -p "dist/$name"
-            cp zig-out/bin/shotlet shotlet.desktop shotlet.svg README.md LICENSE "dist/$name/"
+            cp -r zig-out/bin/shotlet io.github.midnattsol.Shotlet.desktop io.github.midnattsol.Shotlet.svg install.sh uninstall.sh gnome-extension README.md LICENSE "dist/$name/"
             tar -C dist -czf "$name.tar.gz" "$name"
           done
           sha256sum shotlet-*.tar.gz > SHA256SUMS

@@ -156,7 +156,7 @@ pub const Tray = struct {
         if (eql(u8, prop, "Category")) {
             try m.putVariantString("ApplicationStatus");
         } else if (eql(u8, prop, "Id")) {
-            try m.putVariantString("shotlet");
+            try m.putVariantString(@import("../app_id.zig").app_id);
         } else if (eql(u8, prop, "Title")) {
             try m.putVariantString("Shotlet");
         } else if (eql(u8, prop, "Status")) {
