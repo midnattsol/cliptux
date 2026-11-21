@@ -299,3 +299,32 @@ test "civil dates" {
     const lt = breakDown(1782907200 + 7200);
     try std.testing.expectEqual(LocalTime{ .year = 2026, .month = 7, .day = 1, .hour = 14, .minute = 0, .second = 0 }, lt);
 }
+
+const weekdays = [_][]const u8{ "Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed" };
+const months = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+/// "Just now", "4 min ago", "Today 11:02", "Yesterday", "Wed", "Nov 3".
+/// Both times are local seconds (UTC plus the zone's offset).
+pub fn relTime(buf: []u8, now: i64, then: i64) []const u8 {
+    const d = now - then;
+    if (d < 60) return "Just now";
+    if (d < 3600) return std.fmt.bufPrint(buf, "{d} min ago", .{@divFloor(d, 60)}) catch "";
+    const day_now = @divFloor(now, 86400);
+    const day_then = @divFloor(then, 86400);
+    const lt = breakDown(then);
+    if (day_now == day_then) return std.fmt.bufPrint(buf, "Today {d:0>2}:{d:0>2}", .{ lt.hour, lt.minute }) catch "";
+    if (day_now - day_then == 1) return "Yesterday";
+    if (day_now - day_then < 7) return weekdays[@intCast(@mod(day_then, 7))];
+    return std.fmt.bufPrint(buf, "{s} {d}", .{ months[lt.month - 1], lt.day }) catch "";
+}
+
+test "relative capture times" {
+    var b: [32]u8 = undefined;
+    const now: i64 = 1763740953; // Fri 2025-11-21 16:02:33
+    try std.testing.expectEqualStrings("Just now", relTime(&b, now, now - 5));
+    try std.testing.expectEqualStrings("4 min ago", relTime(&b, now, now - 4 * 60 - 10));
+    try std.testing.expectEqualStrings("Today 11:02", relTime(&b, now, now - 5 * 3600));
+    try std.testing.expectEqualStrings("Yesterday", relTime(&b, now, now - 86400));
+    try std.testing.expectEqualStrings("Wed", relTime(&b, now, now - 2 * 86400));
+    try std.testing.expectEqualStrings("Nov 3", relTime(&b, now, now - 18 * 86400));
+}

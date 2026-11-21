@@ -20,8 +20,11 @@ pub const Document = struct {
     shapes: std.ArrayList(Shape) = .empty,
     /// selected region in image pixels (normalized except mid-drag)
     sel: ?Rect = null,
-    undo_stack: std.ArrayList([]Shape) = .empty,
-    redo_stack: std.ArrayList([]Shape) = .empty,
+    undo_stack: std.ArrayList(Snap) = .empty,
+    redo_stack: std.ArrayList(Snap) = .empty,
+    /// the mark of the change the last undo or redo crossed (0: none);
+    /// changes beyond the shapes (a crop) are marked to be found again
+    last_mark: u32 = 0,
 
     pub fn init(alloc: std.mem.Allocator, width: u32, height: u32) Document {
         return .{ .alloc = alloc, .width = width, .height = height };
@@ -50,6 +53,9 @@ pub const Document = struct {
 
     // --- undo ---
 
+    /// Shapes as they were before a change, and that change's mark.
+    pub const Snap = struct { shapes: []Shape, mark: u32 = 0 };
+
     fn snapshot(self: *Document) ![]Shape {
         const snap = try self.alloc.alloc(Shape, self.shapes.items.len);
         var n: usize = 0;
@@ -66,7 +72,12 @@ pub const Document = struct {
 
     /// Record the current shapes so the next change can be undone.
     pub fn checkpoint(self: *Document) !void {
-        const snap = try self.snapshot();
+        return self.checkpointMarked(0);
+    }
+
+    /// checkpoint() for a change `mark` names (see last_mark).
+    pub fn checkpointMarked(self: *Document, mark: u32) !void {
+        const snap: Snap = .{ .shapes = try self.snapshot(), .mark = mark };
         errdefer freeSnapshot(self.alloc, snap);
         if (self.undo_stack.items.len >= max_undo) {
             freeSnapshot(self.alloc, self.undo_stack.orderedRemove(0));
@@ -90,28 +101,26 @@ pub const Document = struct {
     }
 
     pub fn undo(self: *Document) !bool {
-        if (self.undo_stack.items.len == 0) return false;
-        const cur = try self.snapshot();
-        errdefer freeSnapshot(self.alloc, cur);
-        try self.redo_stack.ensureUnusedCapacity(self.alloc, 1);
-        const snap = self.undo_stack.items[self.undo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
-        _ = self.undo_stack.pop();
-        self.swapIn(snap);
-        self.redo_stack.appendAssumeCapacity(cur);
-        return true;
+        return self.step(&self.undo_stack, &self.redo_stack);
     }
 
     pub fn redo(self: *Document) !bool {
-        if (self.redo_stack.items.len == 0) return false;
-        const cur = try self.snapshot();
+        return self.step(&self.redo_stack, &self.undo_stack);
+    }
+
+    /// Back to the top of `from`; the current shapes go onto `to` with
+    /// the same mark, so the change can be crossed again either way.
+    fn step(self: *Document, from: *std.ArrayList(Snap), to: *std.ArrayList(Snap)) !bool {
+        if (from.items.len == 0) return false;
+        const snap = from.items[from.items.len - 1];
+        const cur: Snap = .{ .shapes = try self.snapshot(), .mark = snap.mark };
         errdefer freeSnapshot(self.alloc, cur);
-        try self.undo_stack.ensureUnusedCapacity(self.alloc, 1);
-        const snap = self.redo_stack.items[self.redo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
-        _ = self.redo_stack.pop();
-        self.swapIn(snap);
-        self.undo_stack.appendAssumeCapacity(cur);
+        try to.ensureUnusedCapacity(self.alloc, 1);
+        try self.shapes.ensureTotalCapacity(self.alloc, snap.shapes.len);
+        _ = from.pop();
+        self.swapIn(snap.shapes);
+        to.appendAssumeCapacity(cur);
+        self.last_mark = snap.mark;
         return true;
     }
 
@@ -119,9 +128,9 @@ pub const Document = struct {
     pub fn revert(self: *Document) !void {
         if (self.undo_stack.items.len == 0) return;
         const snap = self.undo_stack.items[self.undo_stack.items.len - 1];
-        try self.shapes.ensureTotalCapacity(self.alloc, snap.len);
+        try self.shapes.ensureTotalCapacity(self.alloc, snap.shapes.len);
         _ = self.undo_stack.pop();
-        self.swapIn(snap);
+        self.swapIn(snap.shapes);
     }
 
     // --- shape edits (callers checkpoint first) ---
@@ -206,9 +215,9 @@ fn freeShapes(alloc: std.mem.Allocator, list: []Shape) void {
     for (list) |*s| s.deinit(alloc);
 }
 
-fn freeSnapshot(alloc: std.mem.Allocator, snap: []Shape) void {
-    freeShapes(alloc, snap);
-    alloc.free(snap);
+fn freeSnapshot(alloc: std.mem.Allocator, snap: Document.Snap) void {
+    freeShapes(alloc, snap.shapes);
+    alloc.free(snap.shapes);
 }
 
 // --- composite layer ---
@@ -296,84 +305,12 @@ pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *co
 
 // --- beautify and export ---
 
-pub const Background = struct {
-    from: u32,
-    to: u32,
-    name: []const u8,
-
-    /// no backdrop: padding exported as transparent pixels (PNG with alpha)
-    pub fn transparent(self: Background) bool {
-        return self.from >> 24 == 0 and self.to >> 24 == 0;
-    }
-};
-
-pub const backgrounds = [_]Background{
-    .{ .from = 0xFF8EC5FC, .to = 0xFFE0C3FC, .name = "Lavender" },
-    .{ .from = 0xFFFF9A8B, .to = 0xFFFF6A88, .name = "Coral" },
-    .{ .from = 0xFF4FACFE, .to = 0xFF00F2FE, .name = "Ocean" },
-    .{ .from = 0xFF43E97B, .to = 0xFF38F9D7, .name = "Mint" },
-    .{ .from = 0xFFFA709A, .to = 0xFFFEE140, .name = "Sunset" },
-    .{ .from = 0xFF30343F, .to = 0xFF1B1D24, .name = "Graphite" },
-    .{ .from = 0xFFF1F3F5, .to = 0xFFF1F3F5, .name = "Paper" },
-    // last, so saved indexes of the others keep their meaning
-    .{ .from = 0x00000000, .to = 0x00000000, .name = "Transparent" },
-};
-
-/// Padding as a percentage of the shot's longer side, per level.
-pub const padding_pct = [4]u8{ 0, 4, 7, 12 };
-
-pub const Beautify = struct {
-    enabled: bool = false,
-    bg: u8 = 0,
-    /// padding: 0 none, 1 small, 2 medium, 3 large (see padding_pct)
-    padding: u2 = 2,
-    rounded: bool = true,
-    shadow: bool = true,
-
-    pub const Geometry = struct {
-        out_w: u32,
-        out_h: u32,
-        pad: u32,
-        radius: u32,
-        shadow_blur: u32,
-        shadow_dy: i32,
-    };
-
-    /// Output layout for a `w`×`h` shot, in the shot's own pixels.
-    pub fn geometry(self: Beautify, w: u32, h: u32) Geometry {
-        if (!self.enabled) return .{ .out_w = w, .out_h = h, .pad = 0, .radius = 0, .shadow_blur = 0, .shadow_dy = 0 };
-        const long: f64 = @floatFromInt(@max(w, h));
-        const pct = padding_pct[self.padding];
-        const pad: u32 = if (pct == 0) 0 else @max(16, @as(u32, @intFromFloat(@round(long * @as(f64, @floatFromInt(pct)) / 100.0))));
-        const radius: u32 = if (self.rounded) @min(@min(w, h) / 2, @max(4, @as(u32, @intFromFloat(@round(long * 0.012))))) else 0;
-        const blur: u32 = if (self.shadow and pad > 0) @max(4, pad / 2) else 0;
-        return .{
-            .out_w = w + 2 * pad,
-            .out_h = h + 2 * pad,
-            .pad = pad,
-            .radius = radius,
-            .shadow_blur = blur,
-            .shadow_dy = @intCast(blur / 3),
-        };
-    }
-
-    pub fn background(self: Beautify) Background {
-        return backgrounds[self.bg % backgrounds.len];
-    }
-
-    /// Paint the frame (background, shadow) into `dst` and place `shot`
-    /// at (pad, pad) with rounded corners. `dst` is out_w×out_h.
-    pub fn paint(self: Beautify, alloc: std.mem.Allocator, dst: []u32, shot: []const u32, w: u32, h: u32) void {
-        _ = alloc;
-        const g = self.geometry(w, h);
-        const bg = self.background();
-        const full: effects.Rect = .{ .x = 0, .y = 0, .w = @intCast(g.out_w), .h = @intCast(g.out_h) };
-        effects.gradient(dst, g.out_w, g.out_h, full, bg.from, bg.to);
-        const inner: effects.Rect = .{ .x = @intCast(g.pad), .y = @intCast(g.pad), .w = @intCast(w), .h = @intCast(h) };
-        if (g.shadow_blur > 0) effects.dropShadow(dst, g.out_w, g.out_h, inner, g.shadow_blur, g.shadow_dy, 0x70000000);
-        effects.blitRounded(dst, g.out_w, g.out_h, shot, w, h, inner.x, inner.y, g.radius);
-    }
-};
+// the frame around an export (beautify.zig)
+const beautify = @import("beautify.zig");
+pub const Background = beautify.Background;
+pub const backgrounds = beautify.backgrounds;
+pub const padding_pct = beautify.padding_pct;
+pub const Beautify = beautify.Beautify;
 
 pub const Exported = struct {
     pixels: []u32,
@@ -628,4 +565,23 @@ test "undo covers a text box's width" {
     try testing.expectEqual(@as(i32, 0), d.shapes.items[i].box_w);
     try testing.expect(try d.redo());
     try testing.expectEqual(@as(i32, 40), d.shapes.items[i].box_w);
+}
+
+test "a marked change is named again by the undo and redo crossing it" {
+    const alloc = testing.allocator;
+    var d = Document.init(alloc, 100, 100);
+    defer d.deinit();
+    try d.checkpoint();
+    _ = try d.add(.{ .tool = .rect, .color = 1, .thickness = 2 });
+    try d.checkpointMarked(7);
+    d.shapes.items[0].translate(-10, -10);
+    try testing.expect(try d.undo());
+    try testing.expectEqual(@as(u32, 7), d.last_mark);
+    try testing.expectEqual(@as(i32, 0), d.shapes.items[0].p0.x);
+    try testing.expect(try d.redo());
+    try testing.expectEqual(@as(u32, 7), d.last_mark);
+    try testing.expectEqual(@as(i32, -10), d.shapes.items[0].p0.x);
+    try testing.expect(try d.undo());
+    try testing.expect(try d.undo());
+    try testing.expectEqual(@as(u32, 0), d.last_mark);
 }

@@ -29,6 +29,10 @@ pub const Icon = enum {
     redact,
     counter,
     text,
+    spotlight,
+    ruler,
+    eyedropper,
+    crop,
     // toolbar and menus
     chevron_down,
     undo,
@@ -56,6 +60,9 @@ pub const Icon = enum {
     plus,
     search,
     trash,
+    // editor tools in the More menu
+    scan_text,
+    shield,
     // capture modes
     capture_window,
     capture_scroll,
@@ -101,6 +108,12 @@ pub fn data(icon: Icon) []const u8 {
         .width_fit => "M4 12h16M7.5 8.5L4 12l3.5 3.5M16.5 8.5L20 12l-3.5 3.5",
         .width_fixed => "M4 6h12M4 11h12M4 16h8M20 4v16",
         .trash => "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+        .spotlight => "M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM4 4h16v16H4z",
+        .ruler => "M3 16L16 3l5 5L8 21zM7 12l2 2M10 9l2 2M13 6l2 2",
+        .eyedropper => "M14 6l4 4M16 4l4 4-3 3-4-4zM13 9l-8 8v2h2l8-8",
+        .crop => "M6 2v16h16M2 6h16v16",
+        .scan_text => "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M8 10h8M8 14h5",
+        .shield => "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6zM9 12l2 2 4-4",
         .capture_window => "M3 5h18v14H3zM3 9h18",
         .capture_scroll => "M7 3h10v18H7zM12 8v8M9 13l3 3 3-3",
         .timer => "M12 6c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8zM12 10v4l2.5 1.5M10 2h4",

@@ -23,6 +23,7 @@ pub const MenuAction = enum {
     capture_window,
     capture_scroll,
     capture_timer,
+    capture_text,
 
     /// The shotlet command of a capture mode's item.
     pub fn modeCommand(self: MenuAction) ?[*:0]const u8 {
@@ -31,6 +32,7 @@ pub const MenuAction = enum {
             .capture_window => "window",
             .capture_scroll => "scroll",
             .capture_timer => "timer",
+            .capture_text => "text",
             else => null,
         };
     }
@@ -233,7 +235,8 @@ pub const Tray = struct {
         .{ .id = 7, .label = "Capture window", .separator = false },
         .{ .id = 8, .label = "Scrolling capture", .separator = false },
         .{ .id = 9, .label = "Timer…", .separator = false },
-        .{ .id = 10, .label = "Record screen / stop recording", .separator = false },
+        .{ .id = 10, .label = "Capture text", .separator = false },
+        .{ .id = 20, .label = "Record screen / stop recording", .separator = false },
         .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
@@ -318,7 +321,8 @@ pub const Tray = struct {
             if (std.mem.eql(u8, event_type, "clicked")) {
                 return switch (id) {
                     1 => .capture,
-                    10 => .record,
+                    10 => .capture_text,
+                    20 => .record,
                     5 => .history,
                     2 => .settings,
                     4 => .quit,
@@ -523,6 +527,7 @@ test "menu items map to their actions, Recent captures included" {
     var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
     for ([_]struct { id: i32, want: MenuAction }{
         .{ .id = 1, .want = .capture },
+        .{ .id = 10, .want = .capture_text },
         .{ .id = 5, .want = .history },
         .{ .id = 2, .want = .settings },
         .{ .id = 4, .want = .quit },

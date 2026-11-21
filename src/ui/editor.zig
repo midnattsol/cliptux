@@ -30,6 +30,9 @@ const ui = @import("editor_ui.zig");
 const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
 const dbus = @import("../platform/dbus.zig");
+const tools = @import("tools/mod.zig");
+const caretAt = @import("caret.zig").caretAt;
+pub const scrollSteps = @import("scroll_steps.zig").scrollSteps;
 
 const Window = window.Window;
 const Canvas = render.Canvas;
@@ -98,34 +101,7 @@ const TextState = struct {
     goal_x: ?i32 = null,
 };
 
-/// A small set of dirty rectangles; overflows merge into one bounding box.
-pub const RectList = struct {
-    items: [64]Rect = undefined,
-    len: usize = 0,
-
-    pub fn add(self: *RectList, r: Rect) void {
-        if (r.isEmpty()) return;
-        if (self.len == self.items.len) {
-            var u = self.items[0];
-            for (self.items[1..self.len]) |x| u = Rect.unite(u, x);
-            self.items[0] = u;
-            self.len = 1;
-        }
-        self.items[self.len] = r;
-        self.len += 1;
-    }
-    pub fn addAll(self: *RectList, other: *const RectList) void {
-        for (other.items[0..other.len]) |r| self.add(r);
-    }
-    pub fn slice(self: *const RectList) []const Rect {
-        return self.items[0..self.len];
-    }
-    pub fn area(self: *const RectList) i64 {
-        var a: i64 = 0;
-        for (self.slice()) |r| a += @as(i64, r.w) * r.h;
-        return a;
-    }
-};
+pub const RectList = @import("rect_list.zig").RectList;
 
 // evdev key codes
 const KEY_1 = 2;
@@ -239,6 +215,8 @@ pub const Editor = struct {
     /// per tool, so the rectangle's fill doesn't leak into text
     styles: std.EnumArray(Tool, u2) = .initFill(0),
     beautify: doc_mod.Beautify = .{},
+    /// the extra tools' state (tools/mod.zig)
+    tools: tools.State = .{},
 
     cur: ?Shape = null,
     selected: ?usize = null,
@@ -342,6 +320,7 @@ pub const Editor = struct {
         self.text = null;
         if (self.cur) |*s| s.deinit(self.alloc);
         if (self.drag == .resizing_shape) self.drag.resizing_shape.orig.deinit(self.alloc);
+        tools.deinit(self);
         self.doc.deinit();
         self.buttons.deinit(self.alloc);
         self.releaseCaches();
@@ -443,6 +422,7 @@ pub const Editor = struct {
             const anim = ui.animating(self);
             if (anim) self.needs_render = true;
             var wait: i32 = if (scripted) 5 else if (anim) 8 else 100;
+            wait = @min(wait, tools.tick(self, now));
             const tip = ui.tooltipDueMs(self);
             if (tip != 0) {
                 if (tip <= now) self.needs_render = true else wait = @min(wait, @as(i32, @intCast(std.math.clamp(tip - now, 1, 100))));
@@ -533,6 +513,7 @@ pub const Editor = struct {
         }
         if (!self.ui_init) {
             self.ui_init = true;
+            tools.start(self);
             self.thickness = std.math.clamp(self.cfg_thickness, 1, 32);
         }
         self.n_panes = @max(self.n_panes, idx + 1);
@@ -611,7 +592,7 @@ pub const Editor = struct {
     }
 
     /// Recompose image rect `r` of the layer and everything derived.
-    fn recompose(self: *Editor, r: Rect) !void {
+    pub fn recompose(self: *Editor, r: Rect) !void {
         if (self.layer.len == 0) return;
         var margin: i32 = 0;
         for (self.doc.shapes.items) |*s| margin += s.readMargin();
@@ -644,7 +625,7 @@ pub const Editor = struct {
     }
 
     /// Mark the on-screen selection area (or its beautify frame) dirty.
-    fn selDirty(self: *Editor) void {
+    pub fn selDirty(self: *Editor) void {
         const saved = self.pane_i;
         defer self.pane_i = saved;
         for (self.panes[0..self.n_panes], 0..) |*p, i| {
@@ -821,7 +802,7 @@ pub const Editor = struct {
 
     /// Apply `op(shape, arg)` to the text being edited or the selected
     /// shape, with undo (coalescing repeats of the same `kind`).
-    fn editTarget(self: *Editor, kind: u8, comptime op: anytype, arg: anytype) !void {
+    pub fn editTarget(self: *Editor, kind: u8, comptime op: anytype, arg: anytype) !void {
         if (self.text) |t| {
             op(&self.doc.shapes.items[t.idx], arg);
             self.needs_render = true;
@@ -863,6 +844,7 @@ pub const Editor = struct {
                     self.needs_render = true;
                 }
                 if (ui.loupeVisible(self)) self.needs_render = true;
+                tools.onHover(self);
             },
             .size_slider => try self.setThickness(ui.sliderValue(self, m)),
             .selecting => {
@@ -872,6 +854,7 @@ pub const Editor = struct {
                 const cs = shapes_mod.dragCorners(self.drag_anchor, q, self.mod_shift, self.mod_alt);
                 self.doc.sel = Rect.intersect(Rect.fromCorners(cs[0], cs[1]), self.doc.imageRect()) orelse Rect.fromCorners(q, q);
                 self.selDirty();
+                tools.afterSelDrag(self);
             },
             .moving_sel => |mv| {
                 self.selDirty();
@@ -883,6 +866,7 @@ pub const Editor = struct {
                 self.selDirty();
                 self.doc.sel = shapes_mod.resizeWithHandle(rs.orig, rs.handle, self.clampImg(ip));
                 self.selDirty();
+                tools.afterSelDrag(self);
             },
             .drawing => try self.updateDrawing(ip),
             .moving_shape => |*mv| {
@@ -964,6 +948,7 @@ pub const Editor = struct {
 
     fn cursorFor(self: *Editor, m: Point) window.Cursor {
         if (self.onToolbar(m) or self.help_open) return .arrow;
+        if (tools.cursor(self)) |c| return c;
         if (self.textHandleAt(m) != null) return .resize_ew;
         if (self.picker.open and (self.mouse_pane == self.tb_pane and self.picker.rect.contains(m.x, m.y))) return .crosshair;
         if (self.selected) |i| {
@@ -1099,6 +1084,7 @@ pub const Editor = struct {
             self.closePopover();
             return;
         }
+        if (try tools.onPress(self)) return;
         const ip = self.imgAt(m);
         const now = nowMs();
         const double = now - self.last_click_ms < 400 and @abs(m.x - self.last_click.x) < 5 and @abs(m.y - self.last_click.y) < 5;
@@ -1209,15 +1195,17 @@ pub const Editor = struct {
                 try self.startText(i, true, ip);
             },
             else => {
+                const at = tools.startPoint(self, self.tool, ip);
                 var s = Shape{
                     .tool = self.tool,
                     .color = self.color(),
                     .thickness = self.imgThickness(),
-                    .p0 = ip,
-                    .p1 = ip,
+                    .p0 = at,
+                    .p1 = at,
                     .filled = (self.styles.get(self.tool) & 1) != 0,
                     .rounded = (self.styles.get(self.tool) & 2) != 0,
                 };
+                tools.initShape(self, &s);
                 errdefer s.deinit(self.alloc);
                 if (self.tool == .pen or self.tool == .highlight) {
                     try s.points.append(self.alloc, ip);
@@ -1225,7 +1213,7 @@ pub const Editor = struct {
                 }
                 self.cur = s;
                 self.drag = .drawing;
-                self.drag_anchor = ip;
+                self.drag_anchor = at;
                 self.space_last = null;
                 self.needs_render = true;
             },
@@ -1234,6 +1222,7 @@ pub const Editor = struct {
 
     fn updateDrawing(self: *Editor, ip: Point) !void {
         const s = &(self.cur orelse return);
+        if (tools.updateDrawing(self, s, ip)) return;
         switch (s.tool) {
             .pen, .highlight => {
                 const last = s.points.items[s.points.items.len - 1];
@@ -1366,6 +1355,7 @@ pub const Editor = struct {
                     self.doc.sel = s;
                 }
                 self.selDirty();
+                tools.onSelected(self);
             },
             .moving_sel, .resizing_sel => {
                 self.selDirty();
@@ -1400,7 +1390,7 @@ pub const Editor = struct {
         const min = self.pn().view.lenToImg(3.0);
         const tiny = switch (s.tool) {
             .pen, .highlight => false,
-            .line, .arrow => @abs(s.p1.x - s.p0.x) < @as(i32, @intFromFloat(min)) + 1 and @abs(s.p1.y - s.p0.y) < @as(i32, @intFromFloat(min)) + 1,
+            .line, .arrow, .ruler => @abs(s.p1.x - s.p0.x) < @as(i32, @intFromFloat(min)) + 1 and @abs(s.p1.y - s.p0.y) < @as(i32, @intFromFloat(min)) + 1,
             else => @as(f64, @floatFromInt(f.w)) < min or @as(f64, @floatFromInt(f.h)) < min,
         };
         if (tiny) {
@@ -1413,6 +1403,7 @@ pub const Editor = struct {
             return e;
         };
         const i = try self.doc.add(s);
+        tools.committed(&self.doc.shapes.items[i]);
         try self.paintTop(i);
     }
 
@@ -1436,6 +1427,7 @@ pub const Editor = struct {
             self.closePopover();
             return true;
         }
+        if (tools.cancel(self)) return true;
         if (self.drag == .text_width) {
             const tw = self.drag.text_width;
             self.drag = .none;
@@ -1576,7 +1568,7 @@ pub const Editor = struct {
         }
         if (unchanged) {
             // colour or size may still have changed while editing
-            const before = self.doc.undo_stack.items[self.doc.undo_stack.items.len - 1];
+            const before = self.doc.undo_stack.items[self.doc.undo_stack.items.len - 1].shapes;
             const same = before.len == self.doc.shapes.items.len and before[t.idx].color == s.color and
                 before[t.idx].thickness == s.thickness and before[t.idx].pill == s.pill and
                 before[t.idx].box_w == s.box_w and
@@ -1754,6 +1746,7 @@ pub const Editor = struct {
                 self.closePopover();
                 self.finish(.cancel);
             },
+            .ext => |e| try tools.onButton(self, e),
         }
     }
 
@@ -1814,16 +1807,17 @@ pub const Editor = struct {
                 const fixed = self.doc.shapes.items[i].box_w > 0;
                 if (fixed != (sg == .width_fixed)) try self.toggleTextWidth();
             },
+            else => try tools.applySeg(self, sg),
         }
         self.needs_render = true;
     }
 
-    fn finish(self: *Editor, action: Action) void {
+    pub fn finish(self: *Editor, action: Action) void {
         self.action = action;
         self.running = false;
     }
 
-    fn applyColor(self: *Editor) !void {
+    pub fn applyColor(self: *Editor) !void {
         try self.editTarget(2, struct {
             fn f(s: *Shape, c: u32) void {
                 s.color = c;
@@ -1863,7 +1857,7 @@ pub const Editor = struct {
         self.needs_render = true;
     }
 
-    fn setTool(self: *Editor, t: Tool) !void {
+    pub fn setTool(self: *Editor, t: Tool) !void {
         try self.endText();
         self.deselectShape();
         self.tool = t;
@@ -1918,6 +1912,7 @@ pub const Editor = struct {
             try self.endText();
         }
 
+        if (try tools.onKey(self, k)) return;
         // fixed chords that must win over configurable binds
         if (k.ctrl and !k.shift and k.code == KEY_Y) return self.redo();
         if (k.ctrl and k.code == KEY_D) return self.duplicateSelected();
@@ -1949,6 +1944,7 @@ pub const Editor = struct {
                     .save_as => self.finish(.save_as),
                     .beautify => try self.onButton(.beautify),
                     .style => try self.cycleStyle(),
+                    else => |a| try tools.onAction(self, a),
                 }
                 return;
             }
@@ -2045,7 +2041,7 @@ pub const Editor = struct {
     }
 
     /// End whatever is in progress so the document is consistent.
-    fn settle(self: *Editor) !void {
+    pub fn settle(self: *Editor) !void {
         try self.endText();
         switch (self.drag) {
             .drawing => try self.commitCur(),
@@ -2058,13 +2054,46 @@ pub const Editor = struct {
     fn undo(self: *Editor) !void {
         try self.settle();
         self.selected = null;
-        if (try self.doc.undo()) try self.recomposeAll();
+        if (try self.doc.undo()) {
+            try tools.afterHistory(self, true);
+            try self.recomposeAll();
+        }
     }
 
     fn redo(self: *Editor) !void {
         try self.settle();
         self.selected = null;
-        if (try self.doc.redo()) try self.recomposeAll();
+        if (try self.doc.redo()) {
+            try tools.afterHistory(self, false);
+            try self.recomposeAll();
+        }
+    }
+
+    /// Show `img` instead (a crop, an opened file): the layer, every
+    /// view and its caches start over; the shapes stay as they are.
+    pub fn replaceImage(self: *Editor, img: *const png.Image) !void {
+        self.img = img;
+        self.doc.width = img.width;
+        self.doc.height = img.height;
+        self.monitors = &.{};
+        self.selected = null;
+        self.lifted = null;
+        self.alloc.free(self.layer);
+        self.layer = &.{};
+        self.layer = try self.alloc.alloc(u32, img.pixels.len);
+        try doc_mod.composeRegion(self.alloc, self.layer, img.pixels, img.width, img.height, self.doc.shapes.items, null, self.doc.imageRect());
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |*p, i| {
+            if (!p.alive or p.viewc.len == 0) continue;
+            self.pane_i = @intCast(i);
+            p.view = self.viewFor(@intCast(i));
+            p.bcache_valid = false;
+            for (&p.backdrops) |*b| b.hash = 0;
+            self.refreshView(self.screenRect());
+            for (&p.pending) |*q| q.add(self.screenRect());
+        }
+        self.needs_render = true;
     }
 
     fn copyToClipboard(self: *Editor) !void {
@@ -2324,10 +2353,10 @@ pub const Editor = struct {
 
     fn exportPixels(self: *Editor) !doc_mod.Exported {
         try self.settle();
-        return doc_mod.exportImage(self.alloc, self.layer, self.img.width, self.img.height, self.doc.exportRect(), self.beautify);
+        return tools.exportPixels(self);
     }
 
-    fn exportPng(self: *Editor) ![]u8 {
+    pub fn exportPng(self: *Editor) ![]u8 {
         const exported = try self.exportPixels();
         defer self.alloc.free(exported.pixels);
         // RGBA only for a transparent beautify background; everything else
@@ -2473,12 +2502,13 @@ pub const Editor = struct {
                     }
                 }
                 if (attempt == 1) break;
-                const want: ui.Popover = switch (ui.nameLayer(arg) orelse return error.NoSuchButton) {
+                // not laid out yet: open what holds it, lay it all out again
+                const want: ?ui.Popover = switch (ui.nameLayer(arg) orelse .bar) {
                     .popover => .colors,
                     .menu => .more,
-                    else => return error.NoSuchButton,
+                    else => null,
                 };
-                if (self.popover != want) self.togglePopover(want);
+                if (want) |w| if (self.popover != w) self.togglePopover(w);
                 self.pane_i = self.tb_pane;
                 defer self.pane_i = self.mouse_pane;
                 try ui.layoutToolbar(self);
@@ -2539,87 +2569,7 @@ pub const Editor = struct {
     }
 };
 
-/// Thickness steps for a scroll of `value` surface units: one per wheel
-/// notch (15 units; v120 wheels report 120 per notch as 15). Touchpads
-/// send many small values, which accumulate in `acc` instead of each
-/// stepping. Scrolling up (negative) makes strokes thicker.
-pub fn scrollSteps(acc: *f64, value: f64) i32 {
-    const notch = 15.0;
-    if (value == 0) return 0;
-    if ((value > 0) != (acc.* > 0) and acc.* != 0) acc.* = 0;
-    acc.* += value;
-    var steps: i32 = 0;
-    while (acc.* >= notch) : (acc.* -= notch) steps -= 1;
-    while (acc.* <= -notch) : (acc.* += notch) steps += 1;
-    return steps;
-}
-
 fn getenv(name: [*:0]const u8) ?[]const u8 {
     const v = std.c.getenv(name) orelse return null;
     return std.mem.span(v);
-}
-
-/// Caret in text shape `s` nearest to image point `p` (bidi-aware and
-/// across wrapped lines).
-pub fn caretAt(s: *const Shape, p: Point) textbox.Hit {
-    var buf: [8192]u8 = undefined;
-    var bfa: std.heap.BufferFirstAllocator = .init(&buf, std.heap.page_allocator);
-    const a = bfa.allocator();
-    var lay = textbox.Layout.init(a, s.str.items, s.fontPx(), s.box_w) catch return .{ .off = s.str.items.len };
-    defer lay.deinit(a);
-    return lay.hit(s.str.items, p.x - s.p0.x, p.y - s.p0.y);
-}
-
-test "caret lands on the nearest character" {
-    const alloc = std.testing.allocator;
-    var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "abc\ndefgh");
-    try std.testing.expectEqual(@as(usize, 0), caretAt(&s, .{ .x = 0, .y = 0 }).off);
-    try std.testing.expectEqual(@as(usize, 3), caretAt(&s, .{ .x = 10000, .y = 100 }).off);
-    const lh = text_mod.height(s.fontPx());
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
-    try std.testing.expectEqual(@as(usize, 9), caretAt(&s, .{ .x = 10000, .y = 100000 }).off);
-    try std.testing.expectEqual(@as(usize, 4), caretAt(&s, .{ .x = 100, .y = 100 + lh + 1 }).off);
-}
-
-test "dirty rect list merges on overflow" {
-    var l: RectList = .{};
-    for (0..70) |i| l.add(.{ .x = @intCast(i), .y = 0, .w = 1, .h = 1 });
-    try std.testing.expect(l.len <= 64);
-    var u = Rect.empty;
-    for (l.slice()) |r| u = Rect.unite(u, r);
-    try std.testing.expect(u.eql(.{ .x = 0, .y = 0, .w = 70, .h = 1 }));
-    l.add(Rect.empty);
-    try std.testing.expect(l.len <= 64);
-}
-
-test "scroll accumulates touchpad deltas and steps once per notch" {
-    var acc: f64 = 0;
-    try std.testing.expectEqual(@as(i32, -1), scrollSteps(&acc, 15));
-    try std.testing.expectEqual(@as(i32, 2), scrollSteps(&acc, -30));
-    var small: i32 = 0;
-    for (0..30) |_| small += scrollSteps(&acc, 1.0);
-    try std.testing.expectEqual(@as(i32, -2), small);
-    // a direction change drops the leftover
-    _ = scrollSteps(&acc, 14);
-    try std.testing.expectEqual(@as(i32, 0), scrollSteps(&acc, -14));
-    try std.testing.expectEqual(@as(i32, 1), scrollSteps(&acc, -1));
-}
-
-test "caret across wrapped lines of a fixed-width text" {
-    const alloc = std.testing.allocator;
-    text_mod.init(alloc);
-    defer text_mod.deinit();
-    var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "alpha beta gamma");
-    const fs = s.fontPx();
-    s.box_w = text_mod.width(fs, "alpha beta") + 2;
-    const lh = text_mod.height(fs);
-    // second visual line starts at "gamma"
-    try std.testing.expectEqual(@as(usize, 11), caretAt(&s, .{ .x = 0, .y = 100 + lh + 1 }).off);
-    try std.testing.expectEqual(@as(usize, 16), caretAt(&s, .{ .x = 10000, .y = 100 + lh + 1 }).off);
-    // right of the first line: before its hanging space
-    try std.testing.expectEqual(@as(usize, 10), caretAt(&s, .{ .x = 10000, .y = 101 }).off);
 }
