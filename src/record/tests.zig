@@ -8,4 +8,10 @@ test {
     _ = @import("../encode/yuv.zig");
     _ = @import("../encode/av.zig");
     _ = @import("../encode/av_mp4.zig");
+    _ = @import("../encode/proc.zig");
+    _ = @import("../encode/ffmpeg_proc.zig");
+    _ = @import("../encode/sink.zig");
+    _ = @import("timeline.zig");
+    _ = @import("region.zig");
+    _ = @import("sync.zig");
 }
