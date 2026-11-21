@@ -346,6 +346,14 @@ const Offer = struct {
     id: u32 = 0,
     /// bit 0: text/plain;charset=utf-8, 1: UTF8_STRING, 2: text/plain
     text: u3 = 0,
+    /// bit i: accept_mimes[i] is offered
+    accept: u8 = 0,
+};
+
+/// What a drop onto one of our surfaces delivered (Window.accept_mimes).
+pub const Dropped = struct {
+    mime: []const u8,
+    data: []u8,
 };
 
 const text_mimes = [_][]const u8{ "text/plain;charset=utf-8", "UTF8_STRING", "text/plain" };
@@ -527,6 +535,12 @@ pub const Window = struct {
     kb_focus: bool = false,
     /// queue a pointer_motion to (-1, -1) when the pointer leaves
     report_leave: bool = false,
+
+    // drops onto our surfaces: types taken, best first (empty: none);
+    // a completed drop lands in `dropped` (caller frees .data)
+    accept_mimes: []const []const u8 = &.{},
+    dnd_offer: u32 = 0,
+    dropped: ?Dropped = null,
 
     // mirrors of surface 0, kept for the single-surface API
     width: u32 = 0, // buffer pixels
@@ -1267,6 +1281,9 @@ pub const Window = struct {
                 const mime = try r.string();
                 for (text_mimes, 0..) |m, i| {
                     if (std.mem.eql(u8, mime, m)) self.offers[slot].text |= @as(u3, 1) << @intCast(i);
+                }
+                for (self.accept_mimes[0..@min(8, self.accept_mimes.len)], 0..) |m, i| {
+                    if (std.mem.eql(u8, mime, m)) self.offers[slot].accept |= @as(u8, 1) << @intCast(i);
                 }
             }
         } else if (ev.object != 0 and ev.object == self.clipboard_source) {
@@ -2230,6 +2247,16 @@ pub const Window = struct {
                 self.dropOffer(slot);
                 self.offers[slot] = .{ .id = id };
             },
+            wl.wl_data_device.ev_enter => {
+                const serial = try r.uint();
+                _ = try r.uint(); // surface
+                _ = try r.fixed();
+                _ = try r.fixed();
+                self.dnd_offer = try r.uint();
+                try self.answerDragOffer(serial);
+            },
+            wl.wl_data_device.ev_leave => self.dnd_offer = 0,
+            wl.wl_data_device.ev_drop => try self.takeDrop(),
             wl.wl_data_device.ev_selection => {
                 const id = try r.uint();
                 // the previous selection offer is dead once replaced
@@ -2240,6 +2267,50 @@ pub const Window = struct {
             },
             else => {},
         }
+    }
+
+    /// The best type of the drag offer we take, if any.
+    fn dropMime(self: *const Window) ?[]const u8 {
+        const slot = self.offerSlot(self.dnd_offer) orelse return null;
+        const bits = self.offers[slot].accept;
+        if (bits == 0) return null;
+        return self.accept_mimes[@ctz(bits)];
+    }
+
+    fn answerDragOffer(self: *Window, serial: u32) !void {
+        if (self.dnd_offer == 0 or self.accept_mimes.len == 0) return;
+        const c = &self.conn;
+        const mime = self.dropMime();
+        if (mime) |m| {
+            try c.request(self.dnd_offer, wl.wl_data_offer.accept, &.{ .{ .uint = serial }, .{ .string = m } });
+        } else {
+            try c.request(self.dnd_offer, wl.wl_data_offer.accept, &.{ .{ .uint = serial }, .null_string });
+        }
+        if (self.ddm_version >= 3) {
+            const a: u32 = if (mime != null) wl.dnd_action_copy else 0;
+            try c.request(self.dnd_offer, wl.wl_data_offer.set_actions, &.{ .{ .uint = a }, .{ .uint = a } });
+        }
+        try c.flush();
+    }
+
+    fn takeDrop(self: *Window) !void {
+        const id = self.dnd_offer;
+        const mime = self.dropMime() orelse return;
+        const c = &self.conn;
+        const fds = try sys.pipe();
+        defer sys.close(fds[0]);
+        {
+            defer sys.close(fds[1]);
+            try c.request(id, wl.wl_data_offer.receive, &.{ .{ .string = mime }, .{ .fd = fds[1] } });
+            try c.flush();
+        }
+        const data = try readBounded(self.alloc, fds[0], 256 * 1024 * 1024, sys.monoMs() + 10_000);
+        if (self.ddm_version >= 3) try c.request(id, wl.wl_data_offer.finish, &.{});
+        if (self.offerSlot(id)) |slot| self.dropOffer(slot);
+        self.dnd_offer = 0;
+        try c.flush();
+        if (self.dropped) |d| self.alloc.free(d.data);
+        self.dropped = .{ .mime = mime, .data = data };
     }
 
     /// Plain text on the clipboard, or null when it holds none. Reads at

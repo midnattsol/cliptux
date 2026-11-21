@@ -54,17 +54,35 @@ pub fn build(b: *std.Build) void {
             }) }},
         }),
     });
-    // compiled with the tests so it cannot rot unnoticed
+    const droptarget = b.addExecutable(.{
+        .name = "shotlet-droptarget",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/e2e/droptarget.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
+                .root_source_file = b.path("src/testkit.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }) }},
+        }),
+    });
+    // compiled with the tests so they cannot rot unnoticed
     test_step.dependOn(&drive.step);
+    test_step.dependOn(&droptarget.step);
     const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});
     run_e2e.addArtifactArg(exe);
     run_e2e.addArtifactArg(drive);
+    run_e2e.step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
     run_e2e.addPassthruArgs();
     run_e2e.has_side_effects = true;
     const e2e_step = b.step("e2e", "Run the end-to-end suite (private headless GNOME session)");
     e2e_step.dependOn(&run_e2e.step);
     const drive_step = b.step("e2e-driver", "Install the e2e input driver (zig-out/bin/shotlet-drive)");
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
+    drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
 }
 
 /// The GNOME Shell extension ships inside the binary, for

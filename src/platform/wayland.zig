@@ -265,6 +265,8 @@ pub const wl_data_offer = struct {
     pub const accept = 0;
     pub const receive = 1;
     pub const destroy = 2;
+    pub const finish = 3; // since v3
+    pub const set_actions = 4; // since v3
     pub const ev_offer = 0;
 };
 
@@ -276,6 +278,8 @@ pub const Arg = union(enum) {
     int: i32,
     fixed: f64, // converted to 24.8
     string: []const u8,
+    /// a null string (length 0 on the wire)
+    null_string: void,
     object: u32, // 0 for null
     new_id: u32,
     fd: i32, // sent via SCM_RIGHTS
@@ -375,7 +379,7 @@ pub const Connection = struct {
     pub fn request(self: *Connection, object: u32, opcode: u16, args: []const Arg) !void {
         var size: usize = 8;
         for (args) |a| size += switch (a) {
-            .uint, .int, .object, .new_id => 4,
+            .uint, .int, .object, .new_id, .null_string => 4,
             .fixed => 4,
             .fd => 0,
             .string => |s| 4 + std.mem.alignForward(usize, s.len + 1, 4),
@@ -391,6 +395,7 @@ pub const Connection = struct {
             .uint => |v| appendU32(w, self.alloc, v),
             .int => |v| appendU32(w, self.alloc, @bitCast(v)),
             .object, .new_id => |v| appendU32(w, self.alloc, v),
+            .null_string => appendU32(w, self.alloc, 0),
             .fixed => |v| appendU32(w, self.alloc, @bitCast(@as(i32, @intFromFloat(v * 256.0)))),
             .fd => |fd| try self.out_fds.append(self.alloc, fd),
             .string => |s| {
