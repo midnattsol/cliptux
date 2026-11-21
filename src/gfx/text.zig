@@ -10,6 +10,7 @@ const ttf = @import("ttf.zig");
 const fontdb = @import("fontdb.zig");
 const utf8 = @import("utf8.zig");
 const bidi = @import("bidi.zig");
+const otl = @import("otl.zig");
 const render = @import("render.zig");
 
 const Canvas = render.Canvas;
@@ -211,18 +212,45 @@ fn fauxBoldOffset(size_px: f64) i32 {
 
 /// One glyph of a laid-out line, in visual (left-to-right) order.
 pub const Item = struct {
-    /// codepoint drawn (after Arabic shaping and mirroring)
+    /// first codepoint of the glyph's characters (after mirroring, and
+    /// after presentation-form shaping when the font has no GSUB)
     cp: u21,
-    /// byte range of the logical character(s) in the source string
+    /// byte range of the logical character(s) in the source string; every
+    /// glyph of a cluster (ligature, base + marks) has the same range
     start: u32,
     end: u32,
     /// part of a right-to-left run (its leading edge is on the right)
     rtl: bool,
     slot: u8,
     gid: u16,
-    /// left edge relative to the start of the line, and advance
+    /// caret box: left edge relative to the start of the line, and advance
+    /// (0 for attached marks)
     x: f64,
     adv: f64,
+    /// where the glyph is drawn: origin x relative to the line start, and
+    /// offset below the baseline (negative: raised)
+    gx: f64,
+    gy: f64 = 0,
+};
+
+/// A glyph in logical order while a line is being laid out.
+const LGlyph = struct {
+    cp: u21,
+    /// character index range [c0, c1)
+    c0: u32,
+    c1: u32,
+    level: u8,
+    slot: u8,
+    gid: u16,
+    adv: f64,
+    dx: f64 = 0,
+    dy: f64 = 0,
+    /// global index of the glyph this one is attached to
+    attach: i32 = -1,
+    // filled while positioning
+    x: f64 = 0,
+    ox: f64 = 0,
+    oy: f64 = 0,
 };
 
 const Scratch = struct {
@@ -232,6 +260,17 @@ const Scratch = struct {
     levels: std.ArrayList(u8) = .empty,
     order: std.ArrayList(u32) = .empty,
     items: std.ArrayList(Item) = .empty,
+    /// characters as drawn (mirrored at odd levels)
+    shaped: std.ArrayList(u21) = .empty,
+    /// presentation-form shaped copy (fallback for fonts without GSUB)
+    pforms: std.ArrayList(u21) = .empty,
+    masks: std.ArrayList(u8) = .empty,
+    slots: std.ArrayList(u8) = .empty,
+    run: std.ArrayList(otl.Glyph) = .empty,
+    lg: std.ArrayList(LGlyph) = .empty,
+    glevels: std.ArrayList(u8) = .empty,
+    /// total advance of the last laid-out line
+    width: f64 = 0,
 
     fn deinit(self: *Scratch, alloc: std.mem.Allocator) void {
         self.cps.deinit(alloc);
@@ -240,69 +279,297 @@ const Scratch = struct {
         self.levels.deinit(alloc);
         self.order.deinit(alloc);
         self.items.deinit(alloc);
+        self.shaped.deinit(alloc);
+        self.pforms.deinit(alloc);
+        self.masks.deinit(alloc);
+        self.slots.deinit(alloc);
+        self.run.deinit(alloc);
+        self.lg.deinit(alloc);
+        self.glevels.deinit(alloc);
     }
 };
 
-/// Lay out one line: decode (lossily), shape Arabic, resolve bidi levels,
-/// reorder to visual order, mirror brackets in RTL runs, and position
-/// every glyph. The result lives in the state's scratch until the next
-/// call. Null when memory runs out.
-fn layout(st: *State, size_px: f64, style: Style, s: []const u8) ?[]Item {
-    return layoutInner(st, size_px, style, s) catch null;
+/// Script that needs shaping from the font's layout tables, or null.
+/// Presentation forms (U+FB50...) are already shaped and are not listed.
+fn scriptOf(cp: u21) ?otl.Script {
+    return switch (cp) {
+        0x0590...0x05FF, 0xFB1D...0xFB4F => .hebr,
+        0x0600...0x06FF, 0x0750...0x077F, 0x0870...0x089F, 0x08A0...0x08FF => .arab,
+        0x0700...0x074F, 0x0860...0x086F => .syrc,
+        0x07C0...0x07FF => .nko,
+        else => null,
+    };
 }
 
-fn layoutInner(st: *State, size_px: f64, style: Style, s: []const u8) ![]Item {
+fn isMark(cp: u21) bool {
+    return cp >= 0x0300 and bidi.class(cp) == .NSM;
+}
+
+fn advanceUnits(f: *const ttf.Font, gid: u16) i32 {
+    const a = f.advanceUnits(gid);
+    return if (a < 1e6) @intFromFloat(a) else 0;
+}
+
+/// Lay out one line: decode (lossily), resolve bidi levels, shape runs of
+/// complex scripts with the font's GSUB/GPOS (or Arabic presentation forms
+/// when the font has none), reorder to visual order, mirror brackets in
+/// RTL runs, and position every glyph. `dir` sets the paragraph direction
+/// (.auto: from the first strong character). The result lives in the
+/// state's scratch until the next call. Null when memory runs out.
+fn layout(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) ?[]Item {
+    return layoutInner(st, size_px, style, s, dir) catch null;
+}
+
+fn layoutInner(st: *State, size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) ![]Item {
     const a = st.alloc;
     const sc = &st.scratch;
     sc.cps.clearRetainingCapacity();
     sc.starts.clearRetainingCapacity();
     var it = utf8.Iterator.init(s);
-    var has_rtl = false;
+    var has_rtl = dir == .rtl;
+    var has_complex = false;
+    var has_arabic = false;
     var pos: usize = 0;
     while (it.next()) |cp| {
         try sc.cps.append(a, cp);
         try sc.starts.append(a, @intCast(pos));
         pos = it.i;
-        has_rtl = has_rtl or bidi.isRtl(cp);
+        if (cp >= 0x0590) {
+            has_rtl = has_rtl or bidi.isRtl(cp);
+            if (scriptOf(cp)) |scr| {
+                has_complex = true;
+                has_arabic = has_arabic or scr != .hebr;
+            }
+        }
     }
     const n = sc.cps.items.len;
     const cps = sc.cps.items;
-    try sc.order.resize(a, n);
     try sc.levels.resize(a, n);
-    const order = sc.order.items;
     const levels = sc.levels.items;
     if (has_rtl) {
         try sc.types.resize(a, n);
-        const para = bidi.paragraphLevel(cps, .auto);
-        bidi.shapeArabic(cps);
-        bidi.resolveLevels(cps, para, sc.types.items, levels);
-        bidi.reorder(levels, order);
-    } else {
-        @memset(levels, 0);
-        for (order, 0..) |*o, i| o.* = @intCast(i);
+        bidi.resolveLevels(cps, bidi.paragraphLevel(cps, dir), sc.types.items, levels);
+    } else @memset(levels, 0);
+
+    // characters as drawn: mirrored at odd levels; the presentation-form
+    // copy is only used where a font cannot shape Arabic itself
+    try sc.shaped.resize(a, n);
+    const drawn = sc.shaped.items;
+    for (cps, levels, drawn) |cp, l, *d| d.* = if (l % 2 == 1) bidi.mirror(cp) else cp;
+    try sc.masks.resize(a, n);
+    const masks = sc.masks.items;
+    if (has_arabic) bidi.joiningMasks(cps, masks) else @memset(masks, 0);
+
+    // font per character
+    try sc.slots.resize(a, n);
+    const slots = sc.slots.items;
+    for (drawn, slots, 0..) |cp, *sl, i| {
+        if (invisible(cp)) {
+            sl.* = no_font;
+            continue;
+        }
+        sl.* = st.resolve(style, cp)[0];
+        // a combining mark stays in its base's font when that has it
+        if (i > 0 and isMark(cp) and slots[i - 1] != no_font and slots[i - 1] != sl.* and
+            st.slots[slots[i - 1]].font.hasGlyph(cp)) sl.* = slots[i - 1];
     }
+    if (has_complex) unifyScriptRuns(st, style, cps, slots);
+
     _ = st.styleSlot(style);
     const smear: f64 = if (style == .bold and st.faux_bold) @floatFromInt(fauxBoldOffset(size_px)) else 0;
-    sc.items.clearRetainingCapacity();
-    try sc.items.ensureTotalCapacity(a, n);
+    sc.lg.clearRetainingCapacity();
+    try sc.lg.ensureTotalCapacity(a, n);
+    var arabic_forms = false;
+    var i: usize = 0;
+    while (i < n) {
+        const scr = runScript(cps, i);
+        var j = i + 1;
+        while (j < n and slots[j] == slots[i] and levels[j] == levels[i] and
+            std.meta.eql(runScript(cps, j), scr) and !invisible(drawn[j])) j += 1;
+        if (scr != null and slots[i] != no_font and try shapeRun(st, size_px, smear, i, j, scr.?)) {
+            i = j;
+            continue;
+        }
+        // one glyph per character (Latin and everything simple; Arabic
+        // with a font lacking GSUB goes through presentation forms)
+        const forms = scr != null and scr.? != .hebr;
+        if (forms and !arabic_forms) {
+            arabic_forms = true;
+            try sc.pforms.resize(a, n);
+            @memcpy(sc.pforms.items, drawn);
+            bidi.shapeArabic(sc.pforms.items);
+        }
+        for (i..j) |k| {
+            const cp = if (forms) sc.pforms.items[k] else drawn[k];
+            var g: LGlyph = .{ .cp = cp, .c0 = @intCast(k), .c1 = @intCast(k + 1), .level = levels[k], .slot = no_font, .gid = 0, .adv = 0 };
+            if (!invisible(cp)) {
+                if (cp == drawn[k] and slots[k] != no_font) {
+                    g.slot = slots[k];
+                    g.gid = st.slots[g.slot].font.glyphIndex(cp);
+                }
+                if (g.gid == 0) g.slot, g.gid = st.resolve(style, cp);
+                if (st.slots[g.slot].font.rasterize(g.gid, size_px)) |gl| {
+                    g.adv = gl.advance + smear;
+                } else |_| {}
+            }
+            sc.lg.appendAssumeCapacity(g);
+        }
+        i = j;
+    }
+
+    // visual order of the glyphs
+    const lg = sc.lg.items;
+    const m = lg.len;
+    try sc.glevels.resize(a, m);
+    try sc.order.resize(a, m);
+    for (lg, sc.glevels.items) |g, *l| l.* = g.level;
+    const order = sc.order.items;
+    if (has_rtl) bidi.reorder(sc.glevels.items, order) else for (order, 0..) |*o, k| {
+        o.* = @intCast(k);
+    }
     var x: f64 = 0;
     for (order) |li| {
-        const rtl = levels[li] % 2 == 1;
-        var cp = cps[li];
-        if (rtl) cp = bidi.mirror(cp);
-        const start = sc.starts.items[li];
-        const end: u32 = if (li + 1 < n) sc.starts.items[li + 1] else @intCast(s.len);
-        var item: Item = .{ .cp = cp, .start = start, .end = end, .rtl = rtl, .slot = 0, .gid = 0, .x = x, .adv = 0 };
-        if (!invisible(cp)) {
-            item.slot, item.gid = st.resolve(style, cp);
-            if (st.slots[item.slot].font.rasterize(item.gid, size_px)) |g| {
-                item.adv = g.advance + smear;
-            } else |_| {}
-        } else item.slot = no_font;
-        sc.items.appendAssumeCapacity(item);
-        x += item.adv;
+        const g = &lg[li];
+        g.x = x;
+        g.ox = x + g.dx;
+        g.oy = g.dy;
+        x += g.adv;
+    }
+    // attached marks follow their base (always earlier in logical order)
+    for (lg, 0..) |*g, k| {
+        if (g.attach < 0 or g.attach >= k) continue;
+        const b = lg[@intCast(g.attach)];
+        g.x = b.x;
+        g.ox = b.ox + g.dx;
+        g.oy = b.oy + g.dy;
+    }
+    sc.width = x;
+    sc.items.clearRetainingCapacity();
+    try sc.items.ensureTotalCapacity(a, m);
+    for (order) |li| {
+        const g = lg[li];
+        sc.items.appendAssumeCapacity(.{
+            .cp = g.cp,
+            .start = sc.starts.items[g.c0],
+            .end = if (g.c1 < n) sc.starts.items[g.c1] else @intCast(s.len),
+            .rtl = g.level % 2 == 1,
+            .slot = g.slot,
+            .gid = g.gid,
+            .x = g.x,
+            .adv = g.adv,
+            .gx = g.ox,
+            .gy = g.oy,
+        });
     }
     return sc.items.items;
+}
+
+/// Script of the shaping run character `i` belongs to: its own, or for a
+/// combining mark the one of the character it follows.
+fn runScript(cps: []const u21, i: usize) ?otl.Script {
+    var k = i;
+    while (true) {
+        if (scriptOf(cps[k])) |scr| return scr;
+        if (k == 0 or !isMark(cps[k])) return null;
+        k -= 1;
+    }
+}
+
+/// Use one font for each word of a complex script when one font has all
+/// its letters, so joining and marks are not split across fonts.
+fn unifyScriptRuns(st: *State, style: Style, cps: []const u21, slots: []u8) void {
+    var i: usize = 0;
+    while (i < cps.len) {
+        const scr = runScript(cps, i) orelse {
+            i += 1;
+            continue;
+        };
+        var j = i + 1;
+        while (j < cps.len and std.meta.eql(runScript(cps, j), scr)) j += 1;
+        defer i = j;
+        const first = slots[i];
+        const same = for (slots[i..j]) |sl| {
+            if (sl != first and sl != no_font) break false;
+        } else true;
+        if (same) continue;
+        var cands: [8]u8 = undefined;
+        var nc: usize = 0;
+        cands[0] = st.styleSlot(style);
+        nc = 1;
+        for (slots[i..j]) |sl| {
+            if (sl == no_font or std.mem.indexOfScalar(u8, cands[0..nc], sl) != null) continue;
+            if (nc == cands.len) break;
+            cands[nc] = sl;
+            nc += 1;
+        }
+        for (cands[0..nc]) |cand| {
+            const f = &st.slots[cand].font;
+            const covers = for (cps[i..j], slots[i..j]) |cp, sl| {
+                if (sl != no_font and !f.hasGlyph(cp)) break false;
+            } else true;
+            if (!covers) continue;
+            for (slots[i..j]) |*sl| {
+                if (sl.* != no_font) sl.* = cand;
+            }
+            break;
+        }
+    }
+}
+
+/// Shape characters [i, j) (one font, level and script) with the font's
+/// layout tables and append the glyphs. False when the font has no GSUB
+/// for the script (the caller falls back to presentation forms).
+fn shapeRun(st: *State, size_px: f64, smear: f64, i: usize, j: usize, scr: otl.Script) !bool {
+    const a = st.alloc;
+    const sc = &st.scratch;
+    const slot = sc.slots.items[i];
+    const font = &st.slots[slot].font;
+    const level = sc.levels.items[i];
+    sc.run.clearRetainingCapacity();
+    for (i..j) |k| {
+        const cp = sc.shaped.items[k];
+        try sc.run.append(a, .{
+            .gid = font.glyphIndex(cp),
+            .cl0 = @intCast(k),
+            .cl1 = @intCast(k + 1),
+            .mask = sc.masks.items[k] | otl.mask_global,
+            .umark = isMark(cp),
+        });
+    }
+    if (!try otl.shape(a, font.layout, scr, level % 2 == 1, &sc.run, font, advanceUnits)) return false;
+    const run = sc.run.items;
+    // a mark joins the cluster of the glyph it follows: carets and line
+    // breaks never fall between a letter and its marks
+    for (run[1..], 1..) |*g, k| {
+        if (isMark(sc.cps.items[g.cl0]) and g.cl0 > run[k - 1].cl0) g.cl0 = run[k - 1].cl0;
+    }
+    var k = run.len;
+    while (k > 1) {
+        k -= 1;
+        if (run[k].cl0 == run[k - 1].cl0) run[k - 1].cl1 = @max(run[k - 1].cl1, run[k].cl1);
+    }
+    for (run[1..], 1..) |*g, q| {
+        if (g.cl0 == run[q - 1].cl0) g.cl1 = run[q - 1].cl1;
+    }
+    const scale = size_px / font.units_per_em;
+    const base: i32 = @intCast(sc.lg.items.len);
+    try sc.lg.ensureUnusedCapacity(a, run.len);
+    for (run) |g| {
+        const adv = @as(f64, @floatFromInt(g.adv)) * scale;
+        sc.lg.appendAssumeCapacity(.{
+            .cp = sc.shaped.items[g.cl0],
+            .c0 = g.cl0,
+            .c1 = g.cl1,
+            .level = level,
+            .slot = slot,
+            .gid = g.gid,
+            .adv = if (adv > 0) adv + smear else adv,
+            .dx = @as(f64, @floatFromInt(g.dx)) * scale,
+            .dy = -@as(f64, @floatFromInt(g.dy)) * scale,
+            .attach = if (g.attach >= 0) base + g.attach else -1,
+        });
+    }
+    return true;
 }
 
 /// Draw text with the top-left corner at (x, y).
@@ -314,25 +581,32 @@ pub fn draw(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, s: []cons
 /// bold to a synthesized bold, when the system lacks those faces).
 /// Right-to-left and mixed text is shaped and drawn in visual order.
 pub fn drawStyled(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, style: Style, s: []const u8) void {
+    drawDir(canvas, x, y, size_px, color, style, s, .auto);
+}
+
+/// drawStyled with an explicit paragraph direction (for a line wrapped
+/// out of a longer paragraph, whose direction comes from the paragraph).
+pub fn drawDir(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, style: Style, s: []const u8, dir: bidi.Direction) void {
     const st = if (state) |*p| p else {
         canvas.text(x, y, bitmapScale(size_px), color, s);
         return;
     };
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return;
-    const items = layout(st, size_px, style, s) orelse return;
+    const items = layout(st, size_px, style, s, dir) orelse return;
     const primary = st.styleSlot(style);
     const smear: i32 = if (style == .bold and st.faux_bold) fauxBoldOffset(size_px) else 0;
     const baseline = @as(f64, @floatFromInt(y)) + st.slots[primary].font.ascentPx(size_px);
     const x0: f64 = @floatFromInt(x);
+    const right = @as(f64, @floatFromInt(canvas.w)) + 1024;
     for (items) |item| {
         if (item.slot == no_font) continue;
-        const pen = x0 + item.x;
+        const pen = x0 + item.gx;
         // far past the right edge: nothing more can show
-        if (pen > @as(f64, @floatFromInt(canvas.w)) + 1024) break;
+        if (x0 + item.x > right) break;
         const g = st.slots[item.slot].font.rasterize(item.gid, size_px) catch continue;
         if (g.w > 0) {
             const gx = @as(i32, @intFromFloat(@round(pen))) + g.bearing_x;
-            const gy = @as(i32, @intFromFloat(@round(baseline))) + g.bearing_y;
+            const gy = @as(i32, @intFromFloat(@round(baseline + item.gy))) + g.bearing_y;
             var k: i32 = 0;
             while (k <= smear) : (k += 1) blitAlpha(canvas, gx + k, gy, g, color);
         }
@@ -344,35 +618,95 @@ pub fn width(size_px: f64, s: []const u8) i32 {
 }
 
 pub fn widthStyled(size_px: f64, style: Style, s: []const u8) i32 {
+    return widthDir(size_px, style, s, .auto);
+}
+
+pub fn widthDir(size_px: f64, style: Style, s: []const u8, dir: bidi.Direction) i32 {
     const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s);
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s) orelse return 0;
-    if (items.len == 0) return 0;
-    const last = items[items.len - 1];
-    const total = last.x + last.adv;
+    _ = layout(st, size_px, style, s, dir) orelse return 0;
+    const total = st.scratch.width;
     if (!(total < 1e9)) return std.math.maxInt(i32) / 2;
     return @intFromFloat(@ceil(total));
+}
+
+/// The run of items around `k` drawing the same characters (a cluster:
+/// a ligature, a letter and its marks, a multi-glyph substitution), as
+/// [first, last] item indices and its left and right edges.
+fn clusterAt(items: []const Item, k: usize) struct { usize, usize, f64, f64 } {
+    var lo = k;
+    var hi = k;
+    const same = struct {
+        fn f(p: Item, q: Item) bool {
+            return p.start == q.start and p.end == q.end;
+        }
+    }.f;
+    while (lo > 0 and same(items[lo - 1], items[k])) lo -= 1;
+    while (hi + 1 < items.len and same(items[hi + 1], items[k])) hi += 1;
+    var x0: f64 = std.math.inf(f64);
+    var x1: f64 = -std.math.inf(f64);
+    for (items[lo .. hi + 1]) |it| {
+        if (it.adv <= 0) continue;
+        x0 = @min(x0, it.x);
+        x1 = @max(x1, it.x + it.adv);
+    }
+    if (x0 > x1) {
+        x0 = items[k].x;
+        x1 = x0;
+    }
+    return .{ lo, hi, x0, x1 };
+}
+
+/// Caret stops inside a cluster's characters: byte offsets in (start, end)
+/// that do not split a letter from its marks; at most `out.len`.
+fn innerStops(s: []const u8, start: usize, end: usize, out: []usize) usize {
+    var n: usize = 0;
+    var it = utf8.Iterator.init(s[0..end]);
+    it.i = start;
+    _ = it.next();
+    while (it.i < end) {
+        const at = it.i;
+        const cp = it.next() orelse break;
+        if (isMark(cp)) continue;
+        if (n == out.len) break;
+        out[n] = at;
+        n += 1;
+    }
+    return n;
 }
 
 /// Byte offset in `s` of the caret position closest to `x` pixels from
 /// the left edge of the drawn text. Works in visual order, so clicks on
 /// right-to-left text land on the right logical character.
 pub fn offsetForX(size_px: f64, style: Style, s: []const u8, x: i32) usize {
+    return offsetForXDir(size_px, style, s, x, .auto);
+}
+
+pub fn offsetForXDir(size_px: f64, style: Style, s: []const u8, x: i32, dir: bidi.Direction) usize {
     const st = if (state) |*p| p else return bitmapOffsetForX(size_px, s, x);
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s) orelse return 0;
+    const items = layout(st, size_px, style, s, dir) orelse return 0;
     if (items.len == 0) return 0;
     const fx: f64 = @floatFromInt(x);
     // before the first / past the last glyph: the visual line ends
     const first = items[0];
     if (fx <= first.x) return if (first.rtl) first.end else first.start;
     var last_vis: ?Item = null;
-    for (items) |item| {
+    for (items, 0..) |item, k| {
         if (item.adv <= 0) continue;
         last_vis = item;
         if (fx < item.x + item.adv) {
-            const left_half = fx < item.x + item.adv / 2;
-            return if (left_half != item.rtl) item.start else item.end;
+            _, _, const c0, const c1 = clusterAt(items, k);
+            // a cluster of several characters (ligature): split it evenly
+            var stops: [32]usize = undefined;
+            const ns = innerStops(s, item.start, item.end, &stops);
+            const w = @max(1e-9, c1 - c0);
+            var t = std.math.clamp((fx - c0) / w, 0.0, 1.0);
+            if (item.rtl) t = 1 - t;
+            const idx: usize = @intFromFloat(@round(t * @as(f64, @floatFromInt(ns + 1))));
+            if (idx == 0) return item.start;
+            if (idx > ns) return item.end;
+            return stops[idx - 1];
         }
     }
     const last = last_vis orelse items[items.len - 1];
@@ -383,22 +717,50 @@ pub fn offsetForX(size_px: f64, style: Style, s: []const u8, x: i32) usize {
 /// before the character at byte offset `offset` (or after the last one
 /// when `offset == s.len`), in visual order.
 pub fn xForOffset(size_px: f64, style: Style, s: []const u8, offset: usize) i32 {
+    return xForOffsetDir(size_px, style, s, offset, .auto);
+}
+
+pub fn xForOffsetDir(size_px: f64, style: Style, s: []const u8, offset: usize, dir: bidi.Direction) i32 {
     const st = if (state) |*p| p else return Canvas.textWidth(bitmapScale(size_px), s[0..@min(offset, s.len)]);
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return 0;
-    const items = layout(st, size_px, style, s) orelse return 0;
+    const items = layout(st, size_px, style, s, dir) orelse return 0;
     if (items.len == 0) return 0;
     var x: f64 = 0;
     if (offset >= s.len) {
         // trailing edge of the logically last character
-        for (items) |item| {
-            if (item.end == s.len) x = if (item.rtl) item.x else item.x + item.adv;
+        var found: ?usize = null;
+        for (items, 0..) |item, k| {
+            if (item.end == s.len and (found == null or item.adv > 0)) found = k;
         }
+        if (found) |k| {
+            _, _, const c0, const c1 = clusterAt(items, k);
+            x = if (items[k].rtl) c0 else c1;
+        } else if (dir == .rtl) x = 0 else x = st.scratch.width;
     } else {
-        for (items) |item| {
+        var found: ?usize = null;
+        for (items, 0..) |item, k| {
             if (offset >= item.start and offset < item.end) {
-                x = if (item.rtl) item.x + item.adv else item.x;
-                break;
+                if (found == null) found = k;
+                if (item.adv > 0) {
+                    found = k;
+                    break;
+                }
             }
+        }
+        if (found) |k| {
+            const item = items[k];
+            _, _, const c0, const c1 = clusterAt(items, k);
+            var t: f64 = 0;
+            if (offset > item.start) {
+                // inside a ligature: proportional to the caret stop
+                var stops: [32]usize = undefined;
+                const ns = innerStops(s, item.start, item.end, &stops);
+                const idx = for (stops[0..ns], 0..) |p, q| {
+                    if (p >= offset) break q + 1;
+                } else ns;
+                t = @as(f64, @floatFromInt(idx)) / @as(f64, @floatFromInt(ns + 1));
+            }
+            x = if (item.rtl) c1 - t * (c1 - c0) else c0 + t * (c1 - c0);
         }
     }
     return @intFromFloat(@round(x));
@@ -509,7 +871,7 @@ test "bidi layout: visual order, carets and shaping" {
     const st = if (state) |*p| p else return;
     // Hebrew is drawn right to left
     const heb = "\u{5E9}\u{5DC}\u{5D5}\u{5DD}"; // shalom
-    const items = layout(st, 16, .regular, heb).?;
+    const items = layout(st, 16, .regular, heb, .auto).?;
     try std.testing.expectEqual(@as(usize, 4), items.len);
     try std.testing.expectEqual(@as(u21, 0x5DD), items[0].cp);
     try std.testing.expect(items[0].rtl);
@@ -532,13 +894,13 @@ test "bidi layout: visual order, carets and shaping" {
     try std.testing.expect(@abs(width(16, "abc") - xForOffset(16, .regular, "abc", 3)) <= 1);
     // Arabic is shaped: salaam -> 3 visible glyphs (lam-alef ligature)
     const ar = "\u{633}\u{644}\u{627}\u{645}";
-    const ai = layout(st, 16, .regular, ar).?;
+    const ai = layout(st, 16, .regular, ar, .auto).?;
     var visible: usize = 0;
     for (ai) |it| {
         if (it.slot != no_font) visible += 1;
     }
     try std.testing.expectEqual(@as(usize, 3), visible);
-    try std.testing.expectEqual(@as(u21, 0xFEE1), ai[0].cp); // meem, isolated, leftmost
+    try std.testing.expectEqual(@as(u32, 6), ai[0].start); // meem, leftmost
     // mixed text with numbers and invalid bytes never crashes
     var px: [64 * 32]u32 = @splat(0);
     var c = Canvas.init(&px, 64, 32);
@@ -547,8 +909,87 @@ test "bidi layout: visual order, carets and shaping" {
     _ = xForOffset(14, .mono, "\u{5D0}1(2)\u{5D1}", 3);
 }
 
+/// Drawn bounding box (left, top, right, bottom) of item `it` relative to
+/// the line origin and baseline.
+fn testBox(st: *State, it: Item, size: f64) [4]f64 {
+    const g = st.slots[it.slot].font.rasterize(it.gid, size) catch unreachable;
+    const l = it.gx + @as(f64, @floatFromInt(g.bearing_x));
+    const t = it.gy + @as(f64, @floatFromInt(g.bearing_y));
+    return .{ l, t, l + @as(f64, @floatFromInt(g.w)), t + @as(f64, @floatFromInt(g.h)) };
+}
+
+test "complex scripts are shaped with the font: joining, ligatures, marks" {
+    const alloc = std.testing.allocator;
+    init(alloc);
+    defer deinit();
+    const st = if (state) |*p| p else return;
+    // Urdu ڈاکٹر: letters outside Presentation Forms-B still join (ٹ
+    // and ک take their initial/medial glyphs)
+    const urdu = "\u{688}\u{627}\u{6A9}\u{679}\u{631}";
+    const items = layout(st, 32, .regular, urdu, .auto).?;
+    const slot = items[0].slot;
+    if (!otl.hasScript(st.slots[slot].font.layout.gsub, .arab)) return; // no shaping font
+    var changed: usize = 0;
+    for (items) |it| {
+        try std.testing.expectEqual(slot, it.slot); // one font for the word
+        if (it.gid != st.slots[slot].font.glyphIndex(it.cp)) changed += 1;
+    }
+    try std.testing.expect(changed >= 2);
+    // lam-alef: one glyph for two characters; the caret between them sits
+    // inside it, the ends at its edges
+    const la = "\u{644}\u{627}";
+    const li = layout(st, 32, .regular, la, .auto).?;
+    try std.testing.expectEqual(@as(usize, 1), li.len);
+    try std.testing.expectEqual(@as(u32, 0), li[0].start);
+    try std.testing.expectEqual(@as(u32, 4), li[0].end);
+    const w = width(32, la);
+    const mid = xForOffset(32, .regular, la, 2);
+    try std.testing.expect(mid > 0 and mid < w);
+    try std.testing.expect(@abs(xForOffset(32, .regular, la, 0) - w) <= 1);
+    try std.testing.expectEqual(@as(usize, 2), offsetForX(32, .regular, la, mid));
+    // fatha sits above beh, over it (not after it); the caret never lands
+    // between a letter and its mark
+    const bf = "\u{628}\u{64E}";
+    const bi = layout(st, 32, .regular, bf, .auto).?;
+    try std.testing.expectEqual(@as(usize, 2), bi.len);
+    var base: Item = bi[0];
+    var mark: Item = bi[1];
+    if (mark.cp != 0x64E) std.mem.swap(Item, &base, &mark);
+    try std.testing.expectEqual(@as(f64, 0), mark.adv);
+    try std.testing.expectEqual(base.start, mark.start);
+    const bb = testBox(st, base, 32);
+    const mb = testBox(st, mark, 32);
+    try std.testing.expect(mb[1] < bb[1] + 2); // top of the mark above the letter's
+    const mcx = (mb[0] + mb[2]) / 2;
+    try std.testing.expect(mcx > base.x and mcx < base.x + base.adv);
+    try std.testing.expectEqual(@as(usize, 0), offsetForX(32, .regular, bf, @intFromFloat(base.x + base.adv - 1)));
+    // Hebrew qamats goes under bet
+    const hq = "\u{5D1}\u{5B8}";
+    const hi = layout(st, 32, .regular, hq, .auto).?;
+    for (hi) |it| {
+        if (it.cp != 0x5B8) continue;
+        const other = if (hi[0].cp == 0x5B8) hi[1] else hi[0];
+        const qb = testBox(st, it, 32);
+        const ob = testBox(st, other, 32);
+        try std.testing.expect(qb[3] > ob[3]); // reaches below the letter
+        try std.testing.expect((qb[0] + qb[2]) / 2 > other.x and (qb[0] + qb[2]) / 2 < other.x + other.adv);
+    }
+    // ASCII is laid out exactly as before: one glyph per character, nominal
+    const ascii = "office fi ffl AV To.";
+    const ai = layout(st, 20, .regular, ascii, .auto).?;
+    try std.testing.expectEqual(ascii.len, ai.len);
+    var x: f64 = 0;
+    for (ai, 0..) |it, k| {
+        try std.testing.expectEqual(@as(u21, ascii[k]), it.cp);
+        try std.testing.expectEqual(st.slots[it.slot].font.glyphIndex(ascii[k]), it.gid);
+        try std.testing.expectEqual(x, it.x);
+        x += it.adv;
+    }
+}
+
 test {
     _ = @import("bidi.zig");
+    _ = @import("otl.zig");
     _ = @import("ttf.zig");
     _ = @import("fontdb.zig");
     _ = @import("utf8.zig");
