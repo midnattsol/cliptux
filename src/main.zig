@@ -214,6 +214,10 @@ test {
     _ = @import("app/editfile.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
+    _ = @import("ocr/page.zig");
+    _ = @import("ocr/reflow.zig");
+    _ = @import("redact/detect.zig");
+    _ = @import("redact/locate.zig");
     _ = @import("ui/floatui.zig");
     _ = @import("gfx/text.zig");
     _ = @import("ui/editor.zig");
