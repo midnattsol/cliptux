@@ -336,9 +336,15 @@ pub const EncodeOptions = struct {
     threads: u32 = 0,
     /// adaptive per-row filters; false writes filter 0 everywhere
     filter: bool = true,
+    /// write RGBA (colour type 6) instead of RGB: never (default, alpha
+    /// ignored), always, or auto (only when some pixel is not opaque)
+    alpha: Alpha = .never,
+
+    pub const Alpha = enum { never, always, auto };
 };
 
-/// Encode opaque 8-bit RGB PNG from 0xAARRGGBB pixels (alpha ignored).
+/// Encode opaque 8-bit RGB PNG from 0xAARRGGBB pixels (alpha ignored;
+/// encodeWith(.., .{ .alpha = .always/.auto }) writes RGBA).
 /// Large images are compressed on worker threads, which allocate from
 /// `alloc` concurrently: it must be thread-safe (DebugAllocator and
 /// smp_allocator are; pass .threads = 1 to encodeWith otherwise).
@@ -346,7 +352,6 @@ pub fn encode(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height:
     return encodeWith(alloc, pixels, width, height, .{});
 }
 
-const enc_bpp = 3;
 /// rows are filtered with this many zero bytes in front, so the "left"
 /// neighbour of the first pixel needs no special case
 const pad = 32;
@@ -356,7 +361,11 @@ const VI = @Vector(32, i16);
 /// Filter one row (RGB bytes in `cur`/`prev`, both with `pad` leading
 /// zeros) into `out` (filter byte + data), choosing the filter with the
 /// minimum sum of absolute differences.
-fn filterRow(cur: []const u8, prev: []const u8, out: []u8, adaptive: bool) void {
+fn filterRow(bpp: u8, cur: []const u8, prev: []const u8, out: []u8, adaptive: bool) void {
+    if (bpp == 4) filterRowN(4, cur, prev, out, adaptive) else filterRowN(3, cur, prev, out, adaptive);
+}
+
+fn filterRowN(comptime enc_bpp: usize, cur: []const u8, prev: []const u8, out: []u8, adaptive: bool) void {
     const n = cur.len - pad;
     if (!adaptive) {
         out[0] = 0;
@@ -440,6 +449,8 @@ const Band = struct {
     y1: u32,
     last: bool,
     filter: bool,
+    /// bytes per pixel: 3 (RGB) or 4 (RGBA)
+    bpp: u8 = 3,
     alloc: std.mem.Allocator,
     out: std.Io.Writer.Allocating,
     adler: u32 = 1,
@@ -455,7 +466,7 @@ const Band = struct {
     fn compress(self: *Band) !void {
         const alloc = self.alloc;
         const w: usize = self.width;
-        const row_len = w * enc_bpp;
+        const row_len = w * self.bpp;
         const bufs = try alloc.alloc(u8, 2 * (pad + row_len) + 1 + row_len);
         defer alloc.free(bufs);
         var cur = bufs[0 .. pad + row_len];
@@ -463,7 +474,7 @@ const Band = struct {
         const filtered = bufs[2 * (pad + row_len) ..];
         @memset(cur[0..pad], 0);
         @memset(prev, 0);
-        if (self.y0 > 0) toRgb(self.pixels[(self.y0 - 1) * w ..][0..w], prev[pad..]);
+        if (self.y0 > 0) toBytes(self.pixels[(self.y0 - 1) * w ..][0..w], prev[pad..], self.bpp);
 
         const window = try alloc.alloc(u8, flate.max_window_len);
         defer alloc.free(window);
@@ -494,8 +505,8 @@ const Band = struct {
             if (self.filter and (y - self.y0) % segment_rows == 0) {
                 adaptive = try self.probeAdaptive(probe.?, probe_window, probe_bufs, y, @min(self.y1, y + segment_rows));
             }
-            toRgb(self.pixels[y * w ..][0..w], cur[pad..]);
-            filterRow(cur, prev, filtered, adaptive);
+            toBytes(self.pixels[y * w ..][0..w], cur[pad..], self.bpp);
+            filterRow(self.bpp, cur, prev, filtered, adaptive);
             adler.update(filtered);
             try comp.writer.writeAll(filtered);
             std.mem.swap([]u8, &cur, &prev);
@@ -513,7 +524,7 @@ const Band = struct {
     /// Decided by fast-compressing a few sample rows both ways.
     fn probeAdaptive(self: *Band, probe: *flate.Compress, window: []u8, bufs: []u8, ys: u32, ye: u32) !bool {
         const w: usize = self.width;
-        const row_len = w * enc_bpp;
+        const row_len = w * self.bpp;
         var cur = bufs[0 .. pad + row_len];
         var prev = bufs[pad + row_len ..][0 .. pad + row_len];
         const filtered = bufs[2 * (pad + row_len) ..][0 .. 1 + row_len];
@@ -528,11 +539,11 @@ const Band = struct {
                 if (gi == 1 and g[0] < groups[0][1]) break; // overlapping: short segment
                 @memset(cur[0..pad], 0);
                 @memset(prev, 0);
-                if (g[0] > 0) toRgb(self.pixels[(g[0] - 1) * w ..][0..w], prev[pad..]);
+                if (g[0] > 0) toBytes(self.pixels[(g[0] - 1) * w ..][0..w], prev[pad..], self.bpp);
                 var y = g[0];
                 while (y < g[1]) : (y += 1) {
-                    toRgb(self.pixels[y * w ..][0..w], cur[pad..]);
-                    filterRow(cur, prev, filtered, mode == 1);
+                    toBytes(self.pixels[y * w ..][0..w], cur[pad..], self.bpp);
+                    filterRow(self.bpp, cur, prev, filtered, mode == 1);
                     try probe.writer.writeAll(filtered);
                     std.mem.swap([]u8, &cur, &prev);
                 }
@@ -548,7 +559,16 @@ const Band = struct {
 const segment_rows = 64;
 const probe_rows = 4;
 
-fn toRgb(src: []const u32, dst: []u8) void {
+fn toBytes(src: []const u32, dst: []u8, bpp: u8) void {
+    if (bpp == 4) {
+        for (src, 0..) |p, x| {
+            dst[x * 4] = @truncate(p >> 16);
+            dst[x * 4 + 1] = @truncate(p >> 8);
+            dst[x * 4 + 2] = @truncate(p);
+            dst[x * 4 + 3] = @truncate(p >> 24);
+        }
+        return;
+    }
     for (src, 0..) |p, x| {
         dst[x * 3] = @truncate(p >> 16);
         dst[x * 3 + 1] = @truncate(p >> 8);
@@ -576,8 +596,16 @@ pub fn encodeWith(alloc: std.mem.Allocator, pixels: []const u32, width: u32, hei
     if (width == 0 or height == 0 or width > 0x7FFFFFFF / 4 or height > 0x7FFFFFFF) return error.BadDimensions;
     if (pixels.len != @as(u64, width) * height) return error.BadDimensions;
 
-    // bands of at least ~1 MB of raw data each, one per worker
-    const raw_total: u64 = @as(u64, height) * (@as(u64, width) * enc_bpp + 1);
+    const with_alpha = switch (opts.alpha) {
+        .never => false,
+        .always => true,
+        .auto => for (pixels) |p| {
+            if (p >> 24 != 0xFF) break true;
+        } else false,
+    };
+    const bpp: u8 = if (with_alpha) 4 else 3;
+    // bands of at least ~256 KB of raw data each, one per worker
+    const raw_total: u64 = @as(u64, height) * (@as(u64, width) * bpp + 1);
     const cpus: u32 = if (opts.threads != 0) opts.threads else @intCast(@min(16, std.Thread.getCpuCount() catch 1));
     const by_size: u32 = @intCast(@max(1, @min(64, raw_total / (256 << 10))));
     const n_bands: u32 = @max(1, @min(@min(cpus, by_size), height));
@@ -590,7 +618,7 @@ pub fn encodeWith(alloc: std.mem.Allocator, pixels: []const u32, width: u32, hei
     for (bands, 0..) |*b, i| {
         const y0: u32 = @intCast(@min(height, i * rows_per));
         const y1: u32 = @intCast(@min(height, (i + 1) * rows_per));
-        b.* = .{ .pixels = pixels, .width = width, .y0 = y0, .y1 = y1, .last = i + 1 == n_bands, .filter = opts.filter, .alloc = alloc, .out = .init(alloc) };
+        b.* = .{ .pixels = pixels, .width = width, .y0 = y0, .y1 = y1, .last = i + 1 == n_bands, .filter = opts.filter, .bpp = bpp, .alloc = alloc, .out = .init(alloc) };
         n_init += 1;
     }
 
@@ -619,7 +647,7 @@ pub fn encodeWith(alloc: std.mem.Allocator, pixels: []const u32, width: u32, hei
     std.mem.writeInt(u32, ihdr[0..4], width, .big);
     std.mem.writeInt(u32, ihdr[4..8], height, .big);
     ihdr[8] = 8; // bit depth
-    ihdr[9] = 2; // color type rgb
+    ihdr[9] = if (with_alpha) 6 else 2; // colour type rgba / rgb
     ihdr[10] = 0; // compression
     ihdr[11] = 0; // filter
     ihdr[12] = 0; // no interlace
@@ -726,6 +754,38 @@ test "png parallel bands roundtrip, every filter, odd sizes" {
     }
     try std.testing.expectError(error.BadDimensions, encode(alloc, &.{}, 0, 0));
     try std.testing.expectError(error.BadDimensions, encode(alloc, &.{0}, 2, 1));
+}
+
+test "png rgba: transparent pixels round-trip, rgb stays the default" {
+    const alloc = std.testing.allocator;
+    const w = 300;
+    const h = 200;
+    const px = try alloc.alloc(u32, w * h);
+    defer alloc.free(px);
+    testImage(px, w, 9);
+    for (px, 0..) |*p, i| p.* = (p.* & 0x00FFFFFF) | (@as(u32, @intCast((i * 7) % 256)) << 24);
+    for ([_]u32{ 1, 4 }) |threads| {
+        for ([_]EncodeOptions.Alpha{ .always, .auto }) |mode| {
+            const enc = try encodeWith(alloc, px, w, h, .{ .threads = threads, .alpha = mode });
+            defer alloc.free(enc);
+            try std.testing.expectEqual(@as(u8, 6), enc[25]);
+            var img = try decode(alloc, enc);
+            defer img.deinit(alloc);
+            try std.testing.expectEqualSlices(u32, px, img.pixels);
+        }
+    }
+    // default and .auto on an opaque image: RGB, alpha dropped
+    const plain = try encode(alloc, px, w, h);
+    defer alloc.free(plain);
+    try std.testing.expectEqual(@as(u8, 2), plain[25]);
+    var img = try decode(alloc, plain);
+    defer img.deinit(alloc);
+    for (px, img.pixels) |a, b| try std.testing.expectEqual(a | 0xFF000000, b);
+    for (px) |*p| p.* |= 0xFF000000;
+    const auto = try encodeWith(alloc, px, w, h, .{ .alpha = .auto });
+    defer alloc.free(auto);
+    try std.testing.expectEqual(@as(u8, 2), auto[25]);
+    try std.testing.expectEqualSlices(u8, plain, auto);
 }
 
 test "adler32 combine" {
