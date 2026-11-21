@@ -374,8 +374,9 @@ pub const palette = [8]u32{
 // --- shape drawing ---
 
 /// Paint `s` through `xf`. `alloc` is scratch for transformed polylines
-/// and blur; `caret` is a byte offset into a text shape being edited.
-pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, caret: ?usize) void {
+/// and blur; `cursor` marks the caret and selection of a text shape being
+/// edited.
+pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const tf = @max(1.0, s.th() * xf.scale);
     switch (s.tool) {
         .pen, .highlight => {
@@ -440,12 +441,20 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
                 label,
             );
         },
-        .text => drawText(canvas, s, xf, caret),
+        .text => drawText(canvas, s, xf, cursor),
         .select => {},
     }
 }
 
-fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, caret: ?usize) void {
+/// Caret (byte offset) and selected byte range of a text being edited.
+pub const TextCursor = struct {
+    caret: usize,
+    sel: ?[2]usize = null,
+};
+
+pub const selection_color: u32 = 0x804DABF7;
+
+fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const fs = s.fontPx() * xf.scale;
     const lh = text_mod.height(fs);
     const fg = if (s.pill) contrastColor(s.color) else s.color;
@@ -458,8 +467,20 @@ fn drawText(canvas: *Canvas, s: *const Shape, xf: Xform, caret: ?usize) void {
     var start: usize = 0;
     var it = std.mem.splitScalar(u8, s.str.items, '\n');
     while (it.next()) |line| {
+        if (cursor) |cur| if (cur.sel) |sel| {
+            // the part of the selection on this line (+ a sliver for its newline)
+            const a = @max(sel[0], start);
+            const b = @min(sel[1], start + line.len + 1);
+            if (a < b) {
+                const sx = x0 + text_mod.width(fs, line[0 .. a - start]);
+                const ex = x0 + text_mod.width(fs, line[0 .. @min(b, start + line.len) - start]) +
+                    (if (b > start + line.len) @as(i32, @intFromFloat(@round(fs * 0.25))) else 0);
+                canvas.fillRect(sx, y, ex - sx, lh, selection_color);
+            }
+        };
         text_mod.draw(canvas, x0, y, fs, fg, line);
-        if (caret) |c| {
+        if (cursor) |cur| {
+            const c = cur.caret;
             if (c >= start and c <= start + line.len) {
                 const cx = x0 + text_mod.width(fs, line[0 .. c - start]);
                 const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));
@@ -588,6 +609,52 @@ pub fn contrastColor(c: u32) u32 {
     const b = c & 0xFF;
     const lum = (r * 299 + g * 587 + b * 114) / 1000;
     return if (lum > 140) 0xFF1A1A1A else 0xFFFFFFFF;
+}
+
+// --- drag constraints (Shift: square / 45 degrees, Alt: from the centre) ---
+
+/// Corners of a box dragged from `anchor` to `p`: Shift makes it a
+/// square (circle), Alt grows it around the anchor.
+pub fn dragCorners(anchor: Point, p: Point, square: bool, center: bool) [2]Point {
+    var q = p;
+    if (square) {
+        const dx = p.x - anchor.x;
+        const dy = p.y - anchor.y;
+        const m: i32 = @intCast(@max(@abs(dx), @abs(dy)));
+        q = .{ .x = anchor.x + (if (dx < 0) -m else m), .y = anchor.y + (if (dy < 0) -m else m) };
+    }
+    if (center) return .{ .{ .x = 2 * anchor.x - q.x, .y = 2 * anchor.y - q.y }, q };
+    return .{ anchor, q };
+}
+
+/// `p` moved onto the nearest 45-degree ray from `anchor`, keeping its
+/// distance along that ray.
+pub fn snapAngle(anchor: Point, p: Point) Point {
+    const dx: f64 = @floatFromInt(p.x - anchor.x);
+    const dy: f64 = @floatFromInt(p.y - anchor.y);
+    if (dx == 0 and dy == 0) return p;
+    const step = std.math.pi / 4.0;
+    const ang = @round(std.math.atan2(dy, dx) / step) * step;
+    const len = dx * @cos(ang) + dy * @sin(ang);
+    return .{
+        .x = anchor.x + @as(i32, @intFromFloat(@round(len * @cos(ang)))),
+        .y = anchor.y + @as(i32, @intFromFloat(@round(len * @sin(ang)))),
+    };
+}
+
+test "shift and alt drag constraints" {
+    const a = Point{ .x = 100, .y = 100 };
+    const sq = dragCorners(a, .{ .x = 130, .y = 90 }, true, false);
+    try std.testing.expectEqual(Point{ .x = 130, .y = 70 }, sq[1]);
+    const c = dragCorners(a, .{ .x = 120, .y = 110 }, false, true);
+    try std.testing.expectEqual(Point{ .x = 80, .y = 90 }, c[0]);
+    try std.testing.expectEqual(Point{ .x = 120, .y = 110 }, c[1]);
+    const both = dragCorners(a, .{ .x = 90, .y = 130 }, true, true);
+    try std.testing.expect(Rect.fromCorners(both[0], both[1]).eql(.{ .x = 70, .y = 70, .w = 60, .h = 60 }));
+    try std.testing.expectEqual(Point{ .x = 150, .y = 100 }, snapAngle(a, .{ .x = 150, .y = 108 }));
+    try std.testing.expectEqual(Point{ .x = 100, .y = 40 }, snapAngle(a, .{ .x = 95, .y = 40 }));
+    const d = snapAngle(a, .{ .x = 140, .y = 136 });
+    try std.testing.expectEqual(d.x - a.x, d.y - a.y);
 }
 
 // --- selection handles ---

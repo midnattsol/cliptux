@@ -8,13 +8,16 @@ Wayland and DBus wire protocols directly.
   Screenshot-portal fallback. One consent dialog ever.
 - Multi-monitor: every monitor you share in the picker is captured and
   laid out as on your desktop, at the sharpest monitor's pixel density.
-- Region selection, then annotate: pencil, line, arrow, rectangle, ellipse,
-  highlighter, pixelate, counter badges, text. Undo/redo, 8 colors,
-  mouse-wheel thickness.
+- Region selection (with a magnifier), then annotate: pencil, line, arrow,
+  rectangle (outline, filled, rounded), ellipse, highlighter, blur,
+  pixelate, solid redaction, counter badges, editable multi-line text.
+  Every annotation can be selected again to move, resize, recolour or
+  delete. Undo/redo, 8 colours plus a custom picker, mouse-wheel size,
+  and a "beautify" frame (background, padding, rounded corners, shadow).
 - Copies straight to the clipboard (nothing written to disk), saves to
   your Pictures folder, or asks where to save (Save As, through the
-  desktop's file chooser). `Enter`/`Ctrl+C` copy, `Ctrl+S` save, `Esc`
-  quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
+  desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
+  save, `Esc` cancels then quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
   time and never overwrite an existing file (`-2`, `-3`, ... are added).
 - Tray icon with menu, and a Settings window with rebindable shortcuts.
 
@@ -54,6 +57,32 @@ Tip: bind a key to `shotlet` in GNOME Settings > Keyboard > Custom Shortcuts.
 On GNOME the tray needs the AppIndicator extension. The first capture shows
 a one-time screen-share picker: select every monitor you want captured.
 The choice is remembered. Cancelling the picker just ends the capture.
+
+## Editor shortcuts
+
+Defaults follow CleanShot X and Flameshot where they agree; the tool keys
+and the main actions can be rebound in `shotlet settings`. Press `?` in
+the editor for the full list.
+
+| Key | Action |
+| --- | --- |
+| Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
+| `Enter` / `Ctrl+C` | copy to the clipboard and close |
+| `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
+| `Esc` / right click | cancel the current action; `Esc` again closes |
+| `V` `P` `L` `A` `R` `E` `M` | select, pen, line, arrow, rectangle, ellipse, marker |
+| `X` (again) | blur, then pixelate, then solid redaction |
+| `N` `T` | counter badge, text |
+| `F` | outline / filled / rounded (text: background) |
+| `B` | beautify frame |
+| `1`-`8`, `9` | preset colours, custom colour |
+| wheel, `-` `=` | size |
+| `Shift` while drawing | square, circle, 45° lines and arrows (`Alt`: from the centre) |
+| arrows, `Shift`+arrows | move the selection or shape by 1 / 10 px (`Alt`: resize) |
+| `Delete`, `Ctrl+D`, `Ctrl+]` | delete, duplicate, bring to front |
+| `Ctrl+Z` / `Ctrl+Shift+Z`, `Ctrl+Y` | undo / redo |
+| `Tab`, `Enter` | move through the toolbar, activate |
+| Text: `Ctrl+Enter` or `Esc` | finish editing (`Enter` is a new line) |
 
 ## Files
 

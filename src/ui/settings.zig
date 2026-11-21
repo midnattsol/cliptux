@@ -470,7 +470,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
 
         ry += ui.sc(10);
         const fixed = [_][]const u8{
-            "Fixed:  Enter copies    Esc quits    Right click cancels",
+            "Fixed:  Enter copies and closes    Esc cancels, then quits",
             "1-8 picks a color    Wheel or - / = adjusts thickness",
             "Recording: press the new combo, Esc to cancel.  Tab moves focus",
         };
