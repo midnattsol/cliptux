@@ -53,6 +53,16 @@ rec-shell)
     check "  ... showing the desktop" near "$VAL" "$BG"
     check "the thumbnail shows the recording" any_log 10 "quick video: showing"
     check "  ... and the history keeps it" eval 'ls "$XDG_STATE_HOME"/shotlet/history/*/video >/dev/null'
+    sleep 1
+    shot 0 thumbnail
+    drv move 0 150 790 && drv sleep 300 && drv move 0 156 789 && drv sleep 400
+    shot 0 thumbnail-hover
+    click 0 100 841
+    sleep 0.5
+    types=$(timeout 5 wl-paste -l 2>/dev/null | tr '\n' ' ')
+    check "  ... whose Copy offers the file ($types)" eval '[[ "$types" == *text/uri-list* && "$types" == *video/mp4* ]]'
+    check "  ... as its uri" eval 'timeout 5 wl-paste -n -t text/uri-list | tr -d "\\r" | grep -qx "file://$f"'
+    check "  ... and its bytes" eval 'timeout 5 wl-paste -n -t video/mp4 | cmp -s - "$f"'
     # clicks are drawn inside the area, and recorded
     run_shotlet clicks record --region "200,150,480,320" --seconds 3 --no-countdown --clicks
     wait_log 15 "record: recording" && drv sleep 800

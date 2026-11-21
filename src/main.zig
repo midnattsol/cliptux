@@ -137,6 +137,8 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("app/history_ui.zig").run(gpa, env, smoke);
+    } else if (std.mem.eql(u8, cmd, "quick-video") and args.len > 3) {
+        try @import("record/quickvid.zig").run(gpa, env, args[2], args[3]);
     } else if (std.mem.eql(u8, cmd, "record")) {
         try @import("record/cli.zig").main(gpa, env, args[2..]);
     } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {

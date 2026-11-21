@@ -25,6 +25,9 @@ test {
     _ = @import("source.zig");
     _ = @import("cli.zig");
     _ = @import("run.zig");
+    _ = @import("files.zig");
+    _ = @import("quickvid.zig");
+    _ = @import("../ui/recui/vidcard.zig");
     _ = @import("../ui/recui/control.zig");
     _ = @import("../ui/recui/control_draw.zig");
     _ = @import("../ui/recui/glyphs.zig");
