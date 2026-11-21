@@ -18,7 +18,7 @@
 //!   down|up|click [BTN]   left (default), right, middle
 //!   wheel STEPS           discrete vertical scroll (+ is down)
 //!   shot MON PATH         write the monitor's current picture as a PNG
-//!   find MON RRGGBB [TOL [MINW]]
+//!   find MON RRGGBB [TOL [MINW [X0 Y0 X1 Y1]]]
 //!                         answer "cx cy w h" of the first blob of that colour
 //!                         (at least MINW wide)
 //!   png PATH              answer the image size, WxH
@@ -250,6 +250,17 @@ const Driver = struct {
             const min_w = try std.fmt.parseInt(u32, it.next() orelse "1", 10);
             var frame = try self.grab(mon);
             defer frame.deinit();
+            // optional region X0 Y0 X1 Y1: pixels outside it never match
+            var region = [4]u32{ 0, 0, frame.width, frame.height };
+            if (it.next()) |first| {
+                region[0] = try std.fmt.parseInt(u32, first, 10);
+                for (region[1..]) |*v| v.* = try std.fmt.parseInt(u32, it.next() orelse return error.MissingArg, 10);
+                for (frame.pixels, 0..) |*p, i| {
+                    const x: u32 = @intCast(i % frame.width);
+                    const y: u32 = @intCast(i / frame.width);
+                    if (x < region[0] or y < region[1] or x >= region[2] or y >= region[3]) p.* = ~rgb;
+                }
+            }
             const box = try findBlob(self.gpa, frame.pixels, frame.width, frame.height, rgb, tol, min_w);
             return std.fmt.bufPrint(&self.out, "{d} {d} {d} {d}", .{ (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, box[2] - box[0] + 1, box[3] - box[1] + 1 });
         }

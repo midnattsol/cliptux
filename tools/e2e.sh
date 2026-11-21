@@ -98,7 +98,7 @@ if [ "${1:-}" = "--inner" ]; then
             [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
     }
     not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
-    no_find_exact() { ! drv find "$1" "$2" "$3" 2>/dev/null; }
+    no_find_exact() { ! drv find "$@" 2>/dev/null; }
     no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }
     gdbus_owner() {
         gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
@@ -333,6 +333,11 @@ if [ "${1:-}" = "--inner" ]; then
         # key repeat: hold a key past the repeat delay
         keys end
         drv hold l 1500
+        sleep 0.3
+        shot 0 held
+        # text past the selection (x >= 702) is dimmed, as it will be cut
+        check "live text inside the selection is bright" drv find 0 e03131 30 1 400 230 700 290
+        check "  ... and dimmed past its edge (not exported)" no_find_exact 0 e03131 30 1 703 230 1600 290
         keys ctrl+a ctrl+c
         sleep 0.3
         n=$(timeout 5 wl-paste -n | grep -o l | wc -l)
