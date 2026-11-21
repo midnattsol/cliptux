@@ -13,7 +13,7 @@ const portal = @import("../../platform/portal.zig");
 const sys = @import("../../platform/sys.zig");
 const env_mod = @import("../../app/env.zig");
 const gnome = @import("../../app/gnome.zig");
-const direct = @import("../../app/direct.zig");
+const capture_path = @import("../../app/capture_path.zig");
 const settings_modes = @import("../settings_modes.zig");
 const model = @import("model.zig");
 const focus = @import("focus.zig");
@@ -207,7 +207,7 @@ pub const App = struct {
 /// The window's state from the desktop: appearance, GNOME integration,
 /// capture modes, and the headless test overrides.
 fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) model.State {
-    var st: model.State = .{ .direct = direct.lastPath(env.home) == .direct };
+    var st: model.State = .{ .direct = capture_path.last(env.home) == .direct };
     if (bus) |b| {
         st.prefs = theme_mod.readPrefs(b, 1500);
         theme_mod.watch(b) catch {};

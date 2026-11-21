@@ -6,6 +6,7 @@
 const std = @import("std");
 const capture = @import("capture.zig");
 const direct = @import("direct.zig");
+const capture_path = @import("capture_path.zig");
 const config = @import("config.zig");
 const dbus = @import("../platform/dbus.zig");
 const env_mod = @import("env.zig");
@@ -354,7 +355,7 @@ pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
         switch (screencast(gpa, env, conn, cfg)) {
             .granted => |cap| {
                 std.log.info("capture path: portal (ScreenCast)", .{});
-                direct.remember(env.home, .portal);
+                capture_path.remember(env.home, .portal);
                 return cap;
             },
             .cancelled => return null,
@@ -372,6 +373,7 @@ fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
     if (from.shell) |args| {
         const t_load = nowMs();
         const cap = try shellcap.load(gpa, env.runtime_dir, args);
+        capture_path.remember(env.home, .gnome);
         std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }
@@ -394,7 +396,7 @@ fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.
     switch (res) {
         .captured => |c| {
             std.log.info("capture path: direct ({s})", .{c.method.label()});
-            direct.remember(env.home, .direct);
+            capture_path.remember(env.home, .direct);
             return c.cap;
         },
         .unavailable => |why| {
@@ -407,7 +409,7 @@ fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.
 /// The Screenshot portal, the last resort; null when cancelled.
 fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?capture.Capture {
     std.log.info("capture path: portal (Screenshot)", .{});
-    direct.remember(env.home, .portal);
+    capture_path.remember(env.home, .portal);
     const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
         .granted => |d| d,
         .cancelled => return null,

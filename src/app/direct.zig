@@ -19,7 +19,6 @@ const capture = @import("capture.zig");
 const dbus = @import("../platform/dbus.zig");
 const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
-const env_mod = @import("env.zig");
 const kwin = @import("direct_kwin.zig");
 
 pub const Method = enum {
@@ -451,28 +450,15 @@ pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []co
     return .{ .captured = .{ .cap = try capture.stitch(gpa, parts[0..n]), .method = method } };
 }
 
-/// How the last capture got its pixels, for Settings
-/// ($XDG_STATE_HOME/shotlet/capture-path).
-pub const Path = enum { direct, portal };
-
-pub fn remember(home: []const u8, path: Path) void {
-    if (lastPath(home) == path) return;
-    var dbuf: [1024]u8 = undefined;
-    const dir = env_mod.stateDir(&dbuf, home) catch return;
-    sys.mkdirAll(dir, 0o700);
-    var pbuf: [1100]u8 = undefined;
-    const p = std.fmt.bufPrint(&pbuf, "{s}/capture-path", .{dir}) catch return;
-    sys.writeFile(p, @tagName(path)) catch {};
-}
-
-pub fn lastPath(home: []const u8) ?Path {
-    var dbuf: [1024]u8 = undefined;
-    const dir = env_mod.stateDir(&dbuf, home) catch return null;
-    var pbuf: [1100]u8 = undefined;
-    const p = std.fmt.bufPrint(&pbuf, "{s}/capture-path", .{dir}) catch return null;
-    var buf: [16]u8 = undefined;
-    const fd = sys.openRead(p) catch return null;
-    defer sys.close(fd);
-    const n = sys.read(fd, &buf) catch return null;
-    return std.meta.stringToEnum(Path, std.mem.trim(u8, buf[0..n], " \n"));
+/// The direct interface a capture would use now, without capturing;
+/// null when there is none (the portal then). KWin counts when it is on
+/// the bus, though it may still refuse this binary.
+pub fn probe(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u8, bus: *dbus.Connection) ?Method {
+    var cl: Client = .{ .gpa = gpa, .conn = wl.Connection.connect(gpa, runtime_dir, display) catch return null };
+    defer cl.conn.deinit();
+    cl.registry = cl.conn.getRegistry() catch return null;
+    cl.roundtrip() catch return null;
+    const m = cl.method();
+    if (m != .kwin_screenshot) return m;
+    return if (bus.nameHasOwner("org.kde.KWin") catch false) m else null;
 }
