@@ -16,6 +16,7 @@ const ui_panel_hi: u32 = 0xFF2A2F34;
 const ui_fg: u32 = 0xFFE9ECEF;
 const ui_dim: u32 = 0xFF99A1A9;
 const ui_accent: u32 = 0xFF4DABF7;
+const ui_focus: u32 = 0xFF74C0FC;
 
 const palette = [8]u32{
     0xFFE03131, 0xFFFF922B, 0xFFFFD43B, 0xFF51CF66,
@@ -70,13 +71,12 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
     var regions: std.ArrayList(Region) = .empty;
     defer regions.deinit(alloc);
 
-    var mouse_x: i32 = 0;
-    var mouse_y: i32 = 0;
-    var dirty = true;
-    var scroll_y: i32 = 0;
-    var content_h: i32 = 0;
-    var recording: ?config.Action = null;
-    var hover_idx: i32 = -1;
+    var st: State = .{};
+    // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, so the
+    // focus ring can be checked in headless runs (which cannot type)
+    if (std.c.getenv("SHOTLET_SETTINGS_FOCUS")) |v| {
+        st.pending_focus = std.fmt.parseInt(usize, std.mem.span(v), 10) catch null;
+    }
 
     while (true) {
         if (smoke_deadline != 0) {
@@ -86,22 +86,24 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
         }
         const ev = (try win.nextEventTimeout(100)) orelse continue;
         switch (ev) {
-            .resize => dirty = true,
+            .resize => {
+                // keep the focused control in view at the new size
+                st.dirty = true;
+                st.reveal_focus = true;
+            },
             .frame_done => {},
             .close => break,
             .key => |k| {
-                if (!k.pressed) continue;
-                if (recording) |action| {
+                if (!k.pressed or k.code == 0) continue;
+                if (st.recording) |action| {
+                    if (k.repeat) continue;
                     if (k.code == window.KEY_ESC) {
-                        recording = null;
-                        dirty = true;
+                        st.recording = null;
+                        st.dirty = true;
                         continue;
                     }
                     // ignore bare modifiers; wait for the real key
-                    switch (k.code) {
-                        29, 97, 42, 54, 56, 100, 125, 126 => continue, // ctrl/shift/alt/super
-                        else => {},
-                    }
+                    if (isModifier(k.code)) continue;
                     const new_bind = config.Bind{ .code = k.code, .ctrl = k.ctrl, .shift = k.shift };
                     // clear any other action using the same combo
                     for (&cfg.binds, 0..) |*b, i| {
@@ -110,35 +112,42 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
                         }
                     }
                     cfg.binds[@backingInt(action)] = new_bind;
-                    recording = null;
+                    st.recording = null;
                     config.save(alloc, home, &cfg) catch |err|
                         std.log.warn("could not save config: {t}", .{err});
-                    dirty = true;
+                    st.dirty = true;
                     continue;
                 }
-                if (k.code == window.KEY_ESC or k.code == 16) break; // Esc or Q
+                switch (keyCommand(k)) {
+                    .close => break,
+                    .next => st.moveFocus(regions.items, &win, true),
+                    .prev => st.moveFocus(regions.items, &win, false),
+                    .activate => if (st.focus) |hit| {
+                        if (k.repeat) continue;
+                        if (try activate(hit, &cfg, &st, &win, alloc, home)) return;
+                    },
+                    .none => {},
+                }
             },
             .pointer_axis => |a| {
                 var step: i32 = @intFromFloat(a.value * 12.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0);
                 if (step == 0 and a.value != 0) step = if (a.value > 0) 1 else -1;
-                const max_scroll = @max(0, content_h - @as(i32, @intCast(win.height)));
-                scroll_y = std.math.clamp(scroll_y + step, 0, max_scroll);
-                dirty = true;
+                st.scrollBy(step, &win);
             },
             .pointer_motion => |m| {
-                mouse_x = @intFromFloat(m.x);
-                mouse_y = @intFromFloat(m.y);
+                st.mouse_x = @intFromFloat(m.x);
+                st.mouse_y = @intFromFloat(m.y);
                 // redraw only when the hovered control changes
                 var hover: i32 = -1;
                 for (regions.items, 0..) |r, ri| {
-                    if (r.contains(mouse_x, mouse_y)) {
+                    if (r.contains(st.mouse_x, st.mouse_y)) {
                         hover = @intCast(ri);
                         break;
                     }
                 }
-                if (hover != hover_idx) {
-                    hover_idx = hover;
-                    dirty = true;
+                if (hover != st.hover_idx) {
+                    st.hover_idx = hover;
+                    st.dirty = true;
                 }
             },
             .pointer_button => |b| {
@@ -151,39 +160,17 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
                     if (!r.contains(px, py)) continue;
                     // content scrolled under the fixed header must not
                     // swallow clicks meant for the window controls
-                    const is_win_ctl = r.hit == .win_close or r.hit == .win_max or r.hit == .win_min;
-                    if (py < hh_click and !is_win_ctl) continue;
+                    if (py < hh_click and !isWindowControl(r.hit)) continue;
                     hit_something = true;
-                    switch (r.hit) {
-                        .toggle_notify => cfg.notify = !cfg.notify,
-                        .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
-                        .th_minus => cfg.default_thickness = @max(1, cfg.default_thickness - 1),
-                        .th_plus => cfg.default_thickness = @min(32, cfg.default_thickness + 1),
-                        .color => |c| cfg.default_color = c,
-                        .bind => |action| {
-                            recording = if (recording == action) null else action;
-                            dirty = true;
-                            break;
-                        },
-                        .close, .win_close => {
-                            config.save(alloc, home, &cfg) catch |err|
-                                std.log.warn("could not save config: {t}", .{err});
-                            return;
-                        },
-                        .win_max => try win.toggleMaximize(),
-                        .win_min => try win.minimize(),
-                    }
-                    if (r.hit != .bind) {
-                        config.save(alloc, home, &cfg) catch |err|
-                            std.log.warn("could not save config: {t}", .{err});
-                    }
-                    dirty = true;
+                    // clicking moves keyboard focus there too
+                    if (isFocusable(r.hit)) st.focus = r.hit;
+                    if (try activate(r.hit, &cfg, &st, &win, alloc, home)) return;
                     break;
                 }
                 if (!hit_something) {
-                    if (recording != null) {
-                        recording = null;
-                        dirty = true;
+                    if (st.recording != null) {
+                        st.recording = null;
+                        st.dirty = true;
                     } else if (py < headerHeight(&win)) {
                         // drag the window by its header bar
                         try win.startMove();
@@ -192,12 +179,161 @@ pub fn run(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u
             },
         }
 
-        if (dirty and !win.frame_pending and win.width > 0) {
-            content_h = try draw(&win, &cfg, &regions, alloc, mouse_x, mouse_y, scroll_y, recording);
-            dirty = false;
+        if (st.dirty and !win.frame_pending and win.width > 0) {
+            st.content_h = try draw(&win, &cfg, &regions, alloc, &st);
+            st.dirty = false;
+            if (st.pending_focus) |n| {
+                st.pending_focus = null;
+                var i: usize = 0;
+                for (regions.items) |r| if (isFocusable(r.hit)) {
+                    if (i == n) {
+                        st.focus = r.hit;
+                        st.reveal_focus = true;
+                        break;
+                    }
+                    i += 1;
+                };
+            }
+            if (st.reveal_focus) {
+                // positions are only known after a draw at the current size
+                st.reveal_focus = false;
+                const before = st.scroll_y;
+                st.scrollBy(0, &win); // clamp to the new size
+                st.ensureVisible(regions.items, &win);
+                st.dirty = st.scroll_y != before or st.focus != null;
+            }
         }
     }
     config.save(alloc, home, &cfg) catch {};
+}
+
+/// Mutable UI state of the settings window.
+const State = struct {
+    mouse_x: i32 = 0,
+    mouse_y: i32 = 0,
+    dirty: bool = true,
+    scroll_y: i32 = 0,
+    content_h: i32 = 0,
+    recording: ?config.Action = null,
+    hover_idx: i32 = -1,
+    /// keyboard focus (Tab / Shift+Tab); null until the first Tab
+    focus: ?Hit = null,
+    pending_focus: ?usize = null,
+    /// scroll the focused control into view after the next draw
+    reveal_focus: bool = false,
+
+    fn scrollBy(self: *State, step: i32, win: *const Window) void {
+        const max_scroll = @max(0, self.content_h - @as(i32, @intCast(win.height)));
+        const new = std.math.clamp(self.scroll_y + step, 0, max_scroll);
+        if (new != self.scroll_y) self.dirty = true;
+        self.scroll_y = new;
+    }
+
+    fn moveFocus(self: *State, regions: []const Region, win: *const Window, forward: bool) void {
+        self.focus = nextFocus(regions, self.focus, forward);
+        self.ensureVisible(regions, win);
+        self.dirty = true;
+    }
+
+    /// Scroll so the focused control is not hidden under the header or
+    /// below the bottom edge.
+    fn ensureVisible(self: *State, regions: []const Region, win: *const Window) void {
+        const hit = self.focus orelse return;
+        const r = findRegion(regions, hit) orelse return;
+        if (isWindowControl(hit)) return;
+        const f = @as(f64, @floatFromInt(win.scale120)) / 120.0;
+        const pad: i32 = @intFromFloat(@round(12.0 * f));
+        const top = headerHeight(win) + pad;
+        const bottom = @as(i32, @intCast(win.height)) - pad;
+        if (r.y < top) {
+            self.scrollBy(r.y - top, win);
+        } else if (r.y + r.h > bottom) {
+            self.scrollBy(r.y + r.h - bottom, win);
+        }
+    }
+};
+
+const KeyCommand = enum { none, close, next, prev, activate };
+
+/// Keyboard map of the settings window: Tab/Shift+Tab and arrows move
+/// focus, Space/Enter activate, Esc (or Q) closes.
+fn keyCommand(k: window.Key) KeyCommand {
+    return switch (k.code) {
+        window.KEY_ESC => .close,
+        window.KEY_TAB => if (k.shift) .prev else .next,
+        window.KEY_DOWN, window.KEY_RIGHT => .next,
+        window.KEY_UP, window.KEY_LEFT => .prev,
+        window.KEY_SPACE, window.KEY_ENTER, window.KEY_KPENTER => .activate,
+        else => if (!k.ctrl and (k.keysym == 'q' or k.keysym == 'Q')) .close else .none,
+    };
+}
+
+fn isModifier(code: u32) bool {
+    return switch (code) {
+        29, 97, 42, 54, 56, 100, 125, 126 => true, // ctrl/shift/alt/super
+        else => false,
+    };
+}
+
+fn isWindowControl(hit: Hit) bool {
+    return hit == .win_close or hit == .win_max or hit == .win_min;
+}
+
+/// Window controls are mouse-only (Esc closes); everything else takes focus.
+fn isFocusable(hit: Hit) bool {
+    return !isWindowControl(hit);
+}
+
+fn findRegion(regions: []const Region, hit: Hit) ?Region {
+    for (regions) |r| if (std.meta.eql(r.hit, hit)) return r;
+    return null;
+}
+
+/// Next (or previous) focusable control after `current`, wrapping around.
+fn nextFocus(regions: []const Region, current: ?Hit, forward: bool) ?Hit {
+    var list: [64]Hit = undefined;
+    var n: usize = 0;
+    for (regions) |r| {
+        if (!isFocusable(r.hit) or n == list.len) continue;
+        list[n] = r.hit;
+        n += 1;
+    }
+    if (n == 0) return null;
+    const cur = current orelse return if (forward) list[0] else list[n - 1];
+    for (list[0..n], 0..) |h, i| {
+        if (std.meta.eql(h, cur)) {
+            return if (forward) list[(i + 1) % n] else list[(i + n - 1) % n];
+        }
+    }
+    return if (forward) list[0] else list[n - 1];
+}
+
+/// Perform a control's action (mouse click or Space/Enter). Returns true
+/// when the window should close.
+fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.mem.Allocator, home: []const u8) !bool {
+    switch (hit) {
+        .toggle_notify => cfg.notify = !cfg.notify,
+        .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
+        .th_minus => cfg.default_thickness = @max(1, cfg.default_thickness - 1),
+        .th_plus => cfg.default_thickness = @min(32, cfg.default_thickness + 1),
+        .color => |c| cfg.default_color = c,
+        .bind => |action| {
+            st.recording = if (st.recording == action) null else action;
+            st.dirty = true;
+            return false;
+        },
+        .close, .win_close => {
+            config.save(alloc, home, cfg) catch |err|
+                std.log.warn("could not save config: {t}", .{err});
+            return true;
+        },
+        .win_max => try win.toggleMaximize(),
+        .win_min => try win.minimize(),
+    }
+    config.save(alloc, home, cfg) catch |err|
+        std.log.warn("could not save config: {t}", .{err});
+    st.dirty = true;
+    return false;
 }
 
 const Ui = struct {
@@ -213,7 +349,11 @@ const Ui = struct {
     }
 };
 
-fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, mx: i32, my: i32, scroll_y: i32, recording: ?config.Action) !i32 {
+fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, st: *const State) !i32 {
+    const mx = st.mouse_x;
+    const my = st.mouse_y;
+    const scroll_y = st.scroll_y;
+    const recording = st.recording;
     const px = try win.backBuffer();
     var ui = Ui{
         .win = win,
@@ -263,9 +403,9 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
             const row_h = ui.sc(48);
             const cy: f64 = @floatFromInt(ry + @divTrunc(row_h, 2));
             text.draw(c, margin + ui.sc(16), ry + @divTrunc(row_h - text.height(body), 2), body, ui_fg, "Default color");
-            var cx = w - margin - ui.sc(16) - ui.sc(8 * 32 - 6);
+            var cx = w - margin - ui.sc(16) - ui.sc(8 * 32 - 6) - ui.sc(3);
             for (palette, 0..) |col, i| {
-                const cxf: f64 = @floatFromInt(cx + ui.sc(12));
+                const cxf: f64 = @as(f64, @floatFromInt(cx)) + 15.0 * ui.f;
                 const hovered = mx >= cx and mx < cx + ui.sc(30) and my >= ry and my < ry + row_h;
                 const radius: f64 = if (hovered) 11.5 * ui.f else 9.5 * ui.f;
                 c.fillCircleAA(cxf, cy, radius, col);
@@ -290,7 +430,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         const row_h = ui.sc(34);
         const fixed_rows = 3; // non-editable hints at the bottom
         const card_h = ui.sc(16) + ui.sc(26) + n * row_h + ui.sc(10) + fixed_rows * (text.height(small) + ui.sc(6)) + ui.sc(14);
-        card(&ui, margin, y, w - margin * 2, card_h, "Editor shortcuts  -  click one to change it");
+        card(&ui, margin, y, w - margin * 2, card_h, "Editor shortcuts  -  click or Enter to change one");
         var ry = y + ui.sc(16) + ui.sc(26);
 
         inline for (0..config.n_actions) |i| {
@@ -321,7 +461,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         const fixed = [_][]const u8{
             "Fixed:  Enter copies    Esc quits    Right click cancels",
             "1-8 picks a color    Wheel or - / = adjusts thickness",
-            "Recording: press the new combo, Esc to cancel",
+            "Recording: press the new combo, Esc to cancel.  Tab moves focus",
         };
         for (fixed) |line| {
             text.draw(c, margin + ui.sc(16), ry, small, ui_dim, line);
@@ -362,6 +502,20 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
     }
 
     const content_h = y + scroll_y;
+
+    // keyboard focus ring (under the fixed header, like the content)
+    if (st.focus) |hit| if (findRegion(regions.items, hit)) |r| {
+        const ring = @max(1, ui.sc(2));
+        const out = ui.sc(2);
+        switch (hit) {
+            .color => {
+                const cxf = @as(f64, @floatFromInt(r.x)) + @as(f64, @floatFromInt(r.w)) / 2.0;
+                const cyf = @as(f64, @floatFromInt(r.y)) + @as(f64, @floatFromInt(r.h)) / 2.0;
+                c.ringAA(cxf, cyf, 15.5 * ui.f, 2.0 * ui.f, ui_focus);
+            },
+            else => c.rectOutline(r.x - out, r.y - out, r.w + out * 2, r.h + out * 2, ring, ui_focus),
+        }
+    };
 
     // ---- fixed header bar (drawn over scrolled content) ----
     {
@@ -486,4 +640,37 @@ fn squareButton(ui: *Ui, regions: *std.ArrayList(Region), alloc: std.mem.Allocat
     const body = ui.fs(17);
     text.draw(c, x + @divTrunc(size - text.width(body, glyph), 2), y + @divTrunc(size - text.height(body), 2), body, ui_fg, glyph);
     try regions.append(alloc, .{ .x = x, .y = y, .w = size, .h = size, .hit = hit });
+}
+
+test "tab order wraps and skips window controls" {
+    const regions = [_]Region{
+        .{ .x = 0, .y = 0, .w = 1, .h = 1, .hit = .toggle_notify },
+        .{ .x = 0, .y = 0, .w = 1, .h = 1, .hit = .{ .color = 2 } },
+        .{ .x = 0, .y = 0, .w = 1, .h = 1, .hit = .close },
+        .{ .x = 0, .y = 0, .w = 1, .h = 1, .hit = .win_close },
+    };
+    const t = std.testing;
+    try t.expect(std.meta.eql(nextFocus(&regions, null, true).?, Hit.toggle_notify));
+    try t.expect(std.meta.eql(nextFocus(&regions, null, false).?, Hit.close));
+    try t.expect(std.meta.eql(nextFocus(&regions, .toggle_notify, true).?, Hit{ .color = 2 }));
+    try t.expect(std.meta.eql(nextFocus(&regions, .close, true).?, Hit.toggle_notify));
+    try t.expect(std.meta.eql(nextFocus(&regions, .toggle_notify, false).?, Hit.close));
+    try t.expect(nextFocus(&.{}, null, true) == null);
+}
+
+test "settings key commands" {
+    const t = std.testing;
+    const K = struct {
+        fn k(code: u32, shift: bool, keysym: u32) window.Key {
+            return .{ .code = code, .pressed = true, .ctrl = false, .shift = shift, .keysym = keysym };
+        }
+    };
+    try t.expectEqual(KeyCommand.next, keyCommand(K.k(window.KEY_TAB, false, 0)));
+    try t.expectEqual(KeyCommand.prev, keyCommand(K.k(window.KEY_TAB, true, 0)));
+    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(window.KEY_SPACE, false, ' ')));
+    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(window.KEY_ENTER, false, 0)));
+    try t.expectEqual(KeyCommand.close, keyCommand(K.k(window.KEY_ESC, false, 0)));
+    // Q closes by keysym, wherever the layout puts it (AZERTY: evdev 30)
+    try t.expectEqual(KeyCommand.close, keyCommand(K.k(30, false, 'q')));
+    try t.expectEqual(KeyCommand.none, keyCommand(K.k(16, false, 'a')));
 }

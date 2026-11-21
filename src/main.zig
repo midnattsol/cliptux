@@ -92,4 +92,5 @@ test {
     _ = @import("platform/wayland.zig");
     _ = @import("ui/keyboard.zig");
     _ = @import("ui/window.zig");
+    _ = @import("ui/settings.zig");
 }
