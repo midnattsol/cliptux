@@ -1021,8 +1021,8 @@ fn drawButtonIcon(self: *Editor, canvas: *Canvas, b: Button, fg: u32, active: bo
             if (active) canvas.ringAA(cxf, cyf, 11.5 * f, 2.0 * f, 0xFFFFFFFF);
         },
         .style => {
-            const filled = (self.style & 1) != 0;
-            const rounded = (self.style & 2) != 0;
+            const filled = (self.styles.get(target) & 1) != 0;
+            const rounded = (self.styles.get(target) & 2) != 0;
             const r = Rect{ .x = x, .y = y + @divTrunc(si, 8), .w = si, .h = si - @divTrunc(si, 4) };
             switch (target) {
                 .text => {

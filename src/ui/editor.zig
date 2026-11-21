@@ -163,7 +163,8 @@ pub const Editor = struct {
     /// logical stroke width; image pixels = thickness * ui scale / view scale
     thickness: i32 = 3,
     /// bit 0: filled (text: background pill), bit 1: rounded corners
-    style: u2 = 0,
+    /// per tool, so the rectangle's fill doesn't leak into text
+    styles: std.EnumArray(Tool, u2) = .initFill(0),
     beautify: doc_mod.Beautify = .{},
 
     cur: ?Shape = null,
@@ -504,7 +505,9 @@ pub const Editor = struct {
                 if (k.code == 0) {
                     // input method: committed text or a preedit change,
                     // never a shortcut
-                    if (k.pressed and self.text != null) try self.typeText(k);
+                    if (k.pressed and self.picker.open) {
+                        if (ui.pickerKey(self, k) orelse false) try self.applyPickerColor();
+                    } else if (k.pressed and self.text != null) try self.typeText(k);
                     self.needs_render = true;
                 } else if (k.pressed) try self.onKey(k);
             },
@@ -791,7 +794,7 @@ pub const Editor = struct {
                     .color = self.color(),
                     .thickness = t,
                     .p0 = .{ .x = ip.x, .y = ip.y - @divTrunc(lh, 2) },
-                    .pill = (self.style & 1) != 0,
+                    .pill = (self.styles.get(.text) & 1) != 0,
                 });
                 try self.startText(i, true, ip);
             },
@@ -802,8 +805,8 @@ pub const Editor = struct {
                     .thickness = self.imgThickness(),
                     .p0 = ip,
                     .p1 = ip,
-                    .filled = (self.style & 1) != 0,
-                    .rounded = (self.style & 2) != 0,
+                    .filled = (self.styles.get(self.tool) & 1) != 0,
+                    .rounded = (self.styles.get(self.tool) & 2) != 0,
                 };
                 errdefer s.deinit(self.alloc);
                 if (self.tool == .pen or self.tool == .highlight) {
@@ -1029,7 +1032,7 @@ pub const Editor = struct {
             }
         }
         if (self.custom_active) self.custom_color = s.color;
-        self.style = @as(u2, @intFromBool(s.filled or s.pill)) | (@as(u2, @intFromBool(s.rounded)) << 1);
+        self.styles.set(s.tool, @as(u2, @intFromBool(s.filled or s.pill)) | (@as(u2, @intFromBool(s.rounded)) << 1));
         self.needs_render = true;
     }
 
@@ -1197,10 +1200,12 @@ pub const Editor = struct {
     /// Outline -> filled -> rounded outline -> rounded filled (text: pill).
     fn cycleStyle(self: *Editor) !void {
         const target_tool = if (self.text) |t| self.doc.shapes.items[t.idx].tool else if (self.selected) |i| self.doc.shapes.items[i].tool else self.tool;
-        self.style = switch (target_tool) {
-            .rect => self.style +% 1,
-            else => (self.style ^ 1) & 1,
+        const old = self.styles.get(target_tool);
+        const style: u2 = switch (target_tool) {
+            .rect => old +% 1,
+            else => (old ^ 1) & 1,
         };
+        self.styles.set(target_tool, style);
         self.breakCoalescing();
         try self.editTarget(3, struct {
             fn f(s: *Shape, st: u2) void {
@@ -1208,7 +1213,7 @@ pub const Editor = struct {
                 s.rounded = (st & 2) != 0 and s.tool == .rect;
                 s.pill = (st & 1) != 0 and s.tool == .text;
             }
-        }.f, self.style);
+        }.f, style);
         self.needs_render = true;
     }
 
