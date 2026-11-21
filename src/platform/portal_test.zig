@@ -143,6 +143,13 @@ const Mock = struct {
             try m.beginStruct();
             try m.putString("restore_token");
             try m.putVariantString("mock-token");
+        } else if (std.mem.eql(u8, member, "OpenFile")) {
+            try m.beginStruct();
+            try m.putString("uris");
+            try m.putSignature("as");
+            const uris = try m.beginArray(4);
+            try m.putString("file:///home/u/Im%C3%A1genes/Shots");
+            m.endArray(uris);
         } else if (std.mem.eql(u8, member, "SaveFile")) {
             try m.beginStruct();
             try m.putString("uris");
@@ -293,6 +300,21 @@ test "portal round trips against a private bus and a mock portal" {
     try std.testing.expectEqualStrings("shotlet-x.png", mock.save_name[0..mock.save_name_len]);
     // current_folder travels as NUL-terminated bytes
     try std.testing.expectEqualStrings("/home/u/Pictures\x00", mock.save_folder[0..mock.save_folder_len]);
+
+    // a folder, asked for without blocking (the Settings window)
+    {
+        var req = try portal.beginChooseFolder(alloc, &conn, .{ .current_folder = "/home/u" });
+        defer req.deinit(alloc);
+        const deadline = sys.monoMs() + 5000;
+        while (!req.done() and sys.monoMs() < deadline) {
+            var msg = (try conn.nextMessageDeadline(sys.monoMs() + 50)) orelse continue;
+            if (!(try req.handle(alloc, &msg))) msg.deinit(alloc);
+        }
+        try std.testing.expectEqual(portal.Outcome.granted, req.outcome.?);
+        const p = try portal.chosenPath(alloc, &req);
+        defer alloc.free(p);
+        try std.testing.expectEqualStrings("/home/u/Imágenes/Shots", p);
+    }
 
     // the person cancels the dialog
     mock.mode.store(@backingInt(Mode.cancel), .release);
