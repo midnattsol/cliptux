@@ -296,7 +296,16 @@ pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *co
 
 // --- beautify and export ---
 
-pub const Background = struct { from: u32, to: u32, name: []const u8 };
+pub const Background = struct {
+    from: u32,
+    to: u32,
+    name: []const u8,
+
+    /// no backdrop: padding exported as transparent pixels (PNG with alpha)
+    pub fn transparent(self: Background) bool {
+        return self.from >> 24 == 0 and self.to >> 24 == 0;
+    }
+};
 
 pub const backgrounds = [_]Background{
     .{ .from = 0xFF8EC5FC, .to = 0xFFE0C3FC, .name = "Lavender" },
@@ -306,6 +315,8 @@ pub const backgrounds = [_]Background{
     .{ .from = 0xFFFA709A, .to = 0xFFFEE140, .name = "Sunset" },
     .{ .from = 0xFF30343F, .to = 0xFF1B1D24, .name = "Graphite" },
     .{ .from = 0xFFF1F3F5, .to = 0xFFF1F3F5, .name = "Paper" },
+    // last, so saved indexes of the others keep their meaning
+    .{ .from = 0x00000000, .to = 0x00000000, .name = "Transparent" },
 };
 
 /// Padding as a percentage of the shot's longer side, per level.

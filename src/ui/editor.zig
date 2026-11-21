@@ -594,7 +594,14 @@ pub const Editor = struct {
         const k = self.pn().view.scale;
         const effects = @import("../gfx/effects.zig");
         const bg = b.background();
-        effects.gradient(self.pn().bcache, fw, fh, .{ .x = 0, .y = 0, .w = fr.w, .h = fr.h }, bg.from, bg.to);
+        if (bg.transparent()) {
+            // the usual checkerboard stands for "nothing here" on screen;
+            // the export itself is transparent
+            const cell: usize = @max(4, @as(usize, @intFromFloat(@round(8 * k))));
+            for (0..fh) |yy| for (0..fw) |xx| {
+                self.pn().bcache[yy * fw + xx] = if ((xx / cell + yy / cell) % 2 == 0) 0xFFFFFFFF else 0xFFD9DDE1;
+            };
+        } else effects.gradient(self.pn().bcache, fw, fh, .{ .x = 0, .y = 0, .w = fr.w, .h = fr.h }, bg.from, bg.to);
         const pad = s.x - fr.x;
         const inner: effects.Rect = .{ .x = pad, .y = s.y - fr.y, .w = s.w, .h = s.h };
         const blur: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_blur)) * k));
@@ -1905,7 +1912,10 @@ pub const Editor = struct {
     fn exportPng(self: *Editor) ![]u8 {
         const exported = try self.exportPixels();
         defer self.alloc.free(exported.pixels);
-        return png.encode(self.alloc, exported.pixels, exported.width, exported.height);
+        // RGBA only for a transparent beautify background; everything else
+        // stays RGB as before
+        const see_through = self.beautify.enabled and self.beautify.background().transparent();
+        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
     }
 
     // --- dev hooks: scripted input and frame dumps ---

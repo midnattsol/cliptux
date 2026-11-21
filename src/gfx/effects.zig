@@ -338,10 +338,31 @@ pub fn over(dst: u32, src: u32) u32 {
     const s: V = @as(@Vector(4, u8), @bitCast(src));
     const d: V = @as(@Vector(4, u8), @bitCast(dst));
     // floor(x / 255) == (x * 0x8081) >> 23 for every x <= 255 * 255
-    const m = ((s * @as(V, @splat(sa)) + d * @as(V, @splat(inv))) * @as(V, @splat(0x8081))) >> @splat(23);
-    var out: @Vector(4, u8) = @intCast(m);
-    out[3] = @intCast(sa + (dst >> 24) * inv / 255);
+    const da = (dst >> 24) & 0xFF;
+    if (da == 255) {
+        const m = ((s * @as(V, @splat(sa)) + d * @as(V, @splat(inv))) * @as(V, @splat(0x8081))) >> @splat(23);
+        var out: @Vector(4, u8) = @intCast(m);
+        out[3] = 255;
+        return @bitCast(out);
+    }
+    // translucent destination (a transparent beautify background): straight
+    // alpha, so edges over nothing keep their colour instead of darkening
+    const dw = da * inv / 255; // destination's remaining weight
+    const oa = sa + dw;
+    if (oa == 0) return 0;
+    const m = (s * @as(V, @splat(sa)) + d * @as(V, @splat(dw)) + @as(V, @splat(oa / 2))) / @as(V, @splat(oa));
+    var out: @Vector(4, u8) = @intCast(@min(m, @as(V, @splat(255))));
+    out[3] = @intCast(oa);
     return @bitCast(out);
+}
+
+test "over keeps colour on a transparent destination" {
+    // half-covered red edge over nothing: still red, half opaque
+    const p = over(0x00000000, 0x80FF0000);
+    try std.testing.expectEqual(@as(u32, 0x80), p >> 24);
+    try std.testing.expectEqual(@as(u32, 0xFF), (p >> 16) & 0xFF);
+    // over an opaque destination nothing changes from before
+    try std.testing.expectEqual(@as(u32, 0xFF7F7F7F) & 0xFF000000, over(0xFF000000, 0x80FFFFFF) & 0xFF000000);
 }
 
 test "effects clip to the buffer and leave the outside alone" {
@@ -490,8 +511,23 @@ test "over matches the per-channel formula" {
         var v: u32 = 0;
         while (v < 256) : (v += 5) {
             const src = (sa << 24) | (v << 16) | ((255 - v) << 8) | (v / 2);
-            for ([_]u32{ 0xFF000000, 0xFFFFFFFF, 0x80123456, 0x00FEDCBA, 0xFF000000 | v * 0x010101 }) |dst| {
+            for ([_]u32{ 0xFF000000, 0xFFFFFFFF, 0xFF000000 | v * 0x010101 }) |dst| {
                 try std.testing.expectEqual(Ref.overScalar(dst, src), over(dst, src));
+            }
+            // translucent destinations use straight alpha: colour is the
+            // alpha-weighted mix, alpha is the usual union
+            for ([_]u32{ 0x80123456, 0x00FEDCBA }) |dst| {
+                const got = over(dst, src);
+                if (sa == 0) {
+                    try std.testing.expectEqual(dst, got);
+                    continue;
+                }
+                const da = dst >> 24;
+                const dw = da * (255 - sa) / 255;
+                try std.testing.expectEqual(sa + dw, got >> 24);
+                const oa = sa + dw;
+                const want_r = (((src >> 16) & 0xFF) * sa + ((dst >> 16) & 0xFF) * dw + oa / 2) / oa;
+                try std.testing.expectEqual(@min(want_r, 255), (got >> 16) & 0xFF);
             }
         }
     }

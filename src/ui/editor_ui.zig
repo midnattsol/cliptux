@@ -1087,7 +1087,13 @@ fn drawButtonIcon(self: *Editor, canvas: *Canvas, b: Button, fg: u32, active: bo
             const bg = self.beautify.background();
             var px: [64 * 64]u32 = @splat(0);
             const s: u32 = @intCast(@min(64, si));
-            @import("../gfx/effects.zig").gradient(&px, s, s, .{ .x = 0, .y = 0, .w = @intCast(s), .h = @intCast(s) }, bg.from, bg.to);
+            if (bg.transparent()) {
+                // checkerboard, the usual sign for "no background"
+                const cell = @max(2, s / 4);
+                for (0..s) |yy| for (0..s) |xx| {
+                    px[yy * s + xx] = if ((xx / cell + yy / cell) % 2 == 0) 0xFFFFFFFF else 0xFFB8BEC6;
+                };
+            } else @import("../gfx/effects.zig").gradient(&px, s, s, .{ .x = 0, .y = 0, .w = @intCast(s), .h = @intCast(s) }, bg.from, bg.to);
             var yy: u32 = 0;
             while (yy < s) : (yy += 1) {
                 var xx: u32 = 0;

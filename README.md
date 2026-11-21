@@ -13,7 +13,8 @@ Wayland and DBus wire protocols directly.
   pixelate, solid redaction, counter badges, editable multi-line text.
   Every annotation can be selected again to move, resize, recolour or
   delete. Undo/redo, 8 colours plus a custom picker, mouse-wheel size,
-  and a "beautify" frame (background, padding, rounded corners, shadow).
+  and a "beautify" frame (gradient, solid or transparent background,
+  padding, rounded corners, shadow).
 - Copies straight to the clipboard (nothing written to disk), saves to
   your Pictures folder, or asks where to save (Save As, through the
   desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
