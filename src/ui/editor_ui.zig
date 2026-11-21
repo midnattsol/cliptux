@@ -6,6 +6,7 @@
 //! rectangles (collectOverlays must cover everything drawChrome draws).
 
 const std = @import("std");
+const hsv_mod = @import("hsv.zig");
 const render = @import("../gfx/render.zig");
 const text_mod = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
@@ -68,6 +69,10 @@ pub const ButtonKind = union(enum) {
     more,
     help,
     cancel,
+    // other capture modes (app/modes/): the editor closes and they start
+    capture_window,
+    capture_scroll,
+    capture_timer,
 };
 
 /// Which floating surface a control sits on.
@@ -138,7 +143,7 @@ pub fn nameLayer(name: []const u8) ?Layer {
     for (shapes_mod.palette_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     inline for (@typeInfo(Seg).@"enum".field_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "custom_color", "thickness" }) |n| if (std.mem.eql(u8, n, name)) return .popover;
-    for ([_][]const u8{ "save_as", "help", "cancel", "beautify" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
+    for ([_][]const u8{ "save_as", "help", "cancel", "beautify", "capture_window", "capture_scroll", "capture_timer" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
     return null;
 }
 
@@ -195,6 +200,9 @@ fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
         .more => .{ "More", null, "" },
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
+        .capture_window => .{ "Capture window", null, "" },
+        .capture_scroll => .{ "Scrolling capture", null, "" },
+        .capture_timer => .{ "Timer\u{2026}", null, "" },
     };
     const key = if (action) |a| config.bindName(self.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = name, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
@@ -482,7 +490,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
     return n;
 }
 
-const menu_items = [_]ButtonKind{ .beautify, .save_as, .help, .cancel };
+const menu_items = [_]ButtonKind{ .beautify, .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel };
 
 fn layoutPopover(self: *Editor) !void {
     const f = self.uf();
@@ -1274,6 +1282,9 @@ fn kindIcon(self: *const Editor, kind: ButtonKind) ?Icon {
         .padding => .padding,
         .corners => .corners,
         .shadow => .shadow,
+        .capture_window => .capture_window,
+        .capture_scroll => .capture_scroll,
+        .capture_timer => .timer,
         else => null,
     };
 }
@@ -1767,60 +1778,8 @@ fn drawPicker(self: *Editor, canvas: *Canvas) void {
     canvas.fillRect(tx + text_mod.width(fs, label) + 1, ty, @max(1, self.sc(1)), text_mod.height(fs), th.accent);
 }
 
-pub fn hsvToRgb(h: f64, s: f64, v: f64) u32 {
-    const c = v * s;
-    const hp = @mod(h, 360.0) / 60.0;
-    const x = c * (1.0 - @abs(@mod(hp, 2.0) - 1.0));
-    var r: f64 = 0;
-    var g: f64 = 0;
-    var b: f64 = 0;
-    if (hp < 1) {
-        r = c;
-        g = x;
-    } else if (hp < 2) {
-        r = x;
-        g = c;
-    } else if (hp < 3) {
-        g = c;
-        b = x;
-    } else if (hp < 4) {
-        g = x;
-        b = c;
-    } else if (hp < 5) {
-        r = x;
-        b = c;
-    } else {
-        r = c;
-        b = x;
-    }
-    const m = v - c;
-    const ri: u32 = @intFromFloat(@round((r + m) * 255.0));
-    const gi: u32 = @intFromFloat(@round((g + m) * 255.0));
-    const bi: u32 = @intFromFloat(@round((b + m) * 255.0));
-    return 0xFF000000 | ri << 16 | gi << 8 | bi;
-}
-
-pub fn rgbToHsv(c: u32) [3]f64 {
-    const r = ff(@intCast((c >> 16) & 0xFF)) / 255.0;
-    const g = ff(@intCast((c >> 8) & 0xFF)) / 255.0;
-    const b = ff(@intCast(c & 0xFF)) / 255.0;
-    const mx = @max(r, @max(g, b));
-    const mn = @min(r, @min(g, b));
-    const d = mx - mn;
-    var h: f64 = 0;
-    if (d > 0) {
-        if (mx == r) {
-            h = 60.0 * @mod((g - b) / d, 6.0);
-        } else if (mx == g) {
-            h = 60.0 * ((b - r) / d + 2.0);
-        } else {
-            h = 60.0 * ((r - g) / d + 4.0);
-        }
-    }
-    return .{ h, if (mx == 0) 0 else d / mx, mx };
-}
-
-// --- loupe ---
+pub const hsvToRgb = hsv_mod.hsvToRgb;
+pub const rgbToHsv = hsv_mod.rgbToHsv;
 
 pub fn loupeVisible(self: *const Editor) bool {
     if (self.help_open) return false;
@@ -2023,18 +1982,6 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
         },
     }
     text_mod.draw(canvas, r.x + self.sc(14) + icon_size + self.sc(10), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, th.fg, message);
-}
-
-test "hsv round trip" {
-    for ([_]u32{ 0xFFE03131, 0xFF339AF0, 0xFFFFFFFF, 0xFF000000, 0xFF51CF66, 0xFF15AABF }) |c| {
-        const hsv = rgbToHsv(c);
-        const back = hsvToRgb(hsv[0], hsv[1], hsv[2]);
-        inline for (.{ 16, 8, 0 }) |sh| {
-            const a: i32 = @intCast((c >> sh) & 0xFF);
-            const b: i32 = @intCast((back >> sh) & 0xFF);
-            try std.testing.expect(@abs(a - b) <= 1);
-        }
-    }
 }
 
 test "every button has a script name and popover names are known" {

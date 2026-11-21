@@ -11,6 +11,42 @@
       <summary>Record the screen with Shotlet</summary>
       <description>Opens Shotlet's area picker to record a video or GIF, without any prompt; during a recording, stops it.</description>
     </key>
+    <key name="fullscreen-shortcut" type="as">
+      <default>['&lt;Ctrl&gt;Print']</default>
+      <summary>Capture the screen under the pointer</summary>
+      <description>Captures the monitor under the pointer, then does what Shotlet's after_fullscreen setting says (thumbnail, editor or copy). Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="screens-shortcut" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Shift&gt;Print']</default>
+      <summary>Capture all screens</summary>
+      <description>Captures every monitor, then does what after_fullscreen says. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="previous-shortcut" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;Print']</default>
+      <summary>Capture the previous area</summary>
+      <description>Opens the editor with the last selection made on this monitor layout already selected. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="window-shortcut" type="as">
+      <default>['&lt;Super&gt;Print']</default>
+      <summary>Capture a window</summary>
+      <description>Outlines the windows; a click captures just that window, with its rounded corners on a transparent background. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="scroll-shortcut" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Super&gt;Print']</default>
+      <summary>Scrolling capture</summary>
+      <description>Select a region, then Shotlet scrolls it and stitches one tall image. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="timer-shortcut" type="as">
+      <default>['&lt;Ctrl&gt;&lt;Shift&gt;&lt;Super&gt;Print']</default>
+      <summary>Self-timer</summary>
+      <description>Captures an area after timer-seconds. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
+    <key name="timer-seconds" type="u">
+      <range min="1" max="60"/>
+      <default>5</default>
+      <summary>Self-timer delay</summary>
+      <description>Seconds the self-timer counts down before capturing.</description>
+    </key>
     <key name="shotlet-path" type="s">
       <default>''</default>
       <summary>The shotlet program</summary>

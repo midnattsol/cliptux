@@ -95,6 +95,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
             .settings => spawnChild(env, "settings"),
             .quit => return,
             .none => {},
+            else => if (action.modeCommand()) |cmd| spawnChild(env, cmd),
         }
     }
 }

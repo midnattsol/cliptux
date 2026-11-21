@@ -11,6 +11,11 @@ const usage =
     \\
     \\usage:
     \\  shotlet             capture + editor (copy/save)
+    \\  shotlet fullscreen|screens|previous|window|scroll [--delay S]
+    \\                      capture modes: the screen under the pointer,
+    \\                      all screens, the last area, a window, a
+    \\                      scrolling capture; --delay: the self-timer
+    \\  shotlet timer [3|5|10]   area capture after a countdown
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
     \\  shotlet history     recent captures (history clear: forget them)
     \\  shotlet record      record an area or the screen (MP4 or GIF);
@@ -77,6 +82,7 @@ pub fn main(init: std.process.Init) !void {
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
         var then_record = false;
+        var req: @import("app/modes/mode.zig").Request = .{};
         var i: usize = if (shell_launch) 1 else 2;
         while (i + 1 < args.len) : (i += 2) {
             if (std.mem.eql(u8, args[i], "--from")) {
@@ -93,6 +99,10 @@ pub fn main(init: std.process.Init) !void {
             } else if (std.mem.eql(u8, args[i], "--then")) {
                 // the extension's record shortcut: the picker on this capture
                 if (std.mem.eql(u8, args[i + 1], "record")) then_record = true;
+            } else if (std.mem.eql(u8, args[i], "--mode")) {
+                req.withModeArg(args[i + 1]);
+            } else if (std.mem.eql(u8, args[i], "--pointer")) {
+                req.withPointerArg(args[i + 1]);
             } else if (std.mem.eql(u8, args[i], "--t0")) {
                 t0 = std.fmt.parseInt(i64, args[i + 1], 10) catch null;
             } else if (std.mem.eql(u8, args[i], "--smoke")) {
@@ -112,7 +122,7 @@ pub fn main(init: std.process.Init) !void {
             fs.t0_ms = t0;
         }
         if (then_record and from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, from_shell.?);
-        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell }, sel, smoke_ms);
+        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell, .req = req }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
             (std.mem.eql(u8, args[2], "--foreground") or std.mem.eql(u8, args[2], "-f"));
@@ -149,6 +159,8 @@ pub fn main(init: std.process.Init) !void {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
+    } else if (try @import("app/modes/cli.zig").run(gpa, env, cmd, args[2..])) {
+        // a capture mode
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
@@ -202,7 +214,16 @@ test {
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
     _ = @import("app/gnome.zig");
+    _ = @import("app/accel.zig");
     _ = @import("app/shellcap.zig");
+    _ = @import("app/scroll/stitch.zig");
+    _ = @import("app/modes/mode.zig");
+    _ = @import("app/modes/settings.zig");
+    _ = @import("app/modes/geom.zig");
+    _ = @import("app/modes/last_area.zig");
+    _ = @import("app/modes/window_frame.zig");
+    _ = @import("app/modes/cli.zig");
+    _ = @import("app/scroll/capture.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/history_ui.zig");
@@ -215,11 +236,15 @@ test {
     _ = @import("ui/editor_ui.zig");
     _ = @import("ui/doc.zig");
     _ = @import("ui/view.zig");
+    _ = @import("ui/tall_view.zig");
+    _ = @import("ui/script_input.zig");
+    _ = @import("ui/hsv.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");
+    _ = @import("app/direct_kwin.zig");
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");
@@ -231,6 +256,8 @@ test {
     _ = @import("ui/keyboard.zig");
     _ = @import("ui/window.zig");
     _ = @import("ui/settings.zig");
+    _ = @import("ui/settings_modes.zig");
+    _ = @import("ui/settings_steps.zig");
     _ = @import("ui/theme.zig");
     _ = @import("ui/motion.zig");
     _ = @import("ui/icons.zig");

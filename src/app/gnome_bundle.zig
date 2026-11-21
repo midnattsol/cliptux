@@ -1,13 +1,7 @@
-//! The GNOME Shell extension's files, built into the binary for
-//! `shotlet gnome-integration install` (the schemas are in gnome.zig).
+//! The recorder's module of the GNOME Shell extension (recorder.js),
+//! built into the binary for `shotlet gnome-integration install` along
+//! with the rest (gnome.zig).
 
-pub const File = struct { name: []const u8, data: []const u8 };
-
-pub const files = [_]File{
-    .{ .name = "extension.js", .data = @embedFile("gnome_ext_js") },
-    .{ .name = "recorder.js", .data = @embedFile("gnome_ext_recorder_js") },
-    .{ .name = "metadata.json", .data = @embedFile("gnome_ext_metadata") },
+pub const modules = [_][2][]const u8{
+    .{ "recorder.js", @embedFile("gnome_ext_recorder_js") },
 };
-
-pub const js = files[0].data;
-pub const metadata = files[2].data;

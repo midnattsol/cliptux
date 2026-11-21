@@ -11,7 +11,30 @@ const sni_iface = "org.kde.StatusNotifierItem";
 const menu_iface = "com.canonical.dbusmenu";
 const props_iface = "org.freedesktop.DBus.Properties";
 
-pub const MenuAction = enum { capture, record, history, settings, quit, none };
+pub const MenuAction = enum {
+    capture,
+    record,
+    history,
+    settings,
+    quit,
+    none,
+    // the other capture modes (app/modes/)
+    capture_screen,
+    capture_window,
+    capture_scroll,
+    capture_timer,
+
+    /// The shotlet command of a capture mode's item.
+    pub fn modeCommand(self: MenuAction) ?[*:0]const u8 {
+        return switch (self) {
+            .capture_screen => "fullscreen",
+            .capture_window => "window",
+            .capture_scroll => "scroll",
+            .capture_timer => "timer",
+            else => null,
+        };
+    }
+};
 
 pub const Tray = struct {
     alloc: std.mem.Allocator,
@@ -206,7 +229,11 @@ pub const Tray = struct {
 
     const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
         .{ .id = 1, .label = "Take screenshot", .separator = false },
-        .{ .id = 6, .label = "Record screen / stop recording", .separator = false },
+        .{ .id = 6, .label = "Capture screen", .separator = false },
+        .{ .id = 7, .label = "Capture window", .separator = false },
+        .{ .id = 8, .label = "Scrolling capture", .separator = false },
+        .{ .id = 9, .label = "Timer…", .separator = false },
+        .{ .id = 10, .label = "Record screen / stop recording", .separator = false },
         .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
@@ -291,10 +318,14 @@ pub const Tray = struct {
             if (std.mem.eql(u8, event_type, "clicked")) {
                 return switch (id) {
                     1 => .capture,
-                    6 => .record,
+                    10 => .record,
                     5 => .history,
                     2 => .settings,
                     4 => .quit,
+                    6 => .capture_screen,
+                    7 => .capture_window,
+                    8 => .capture_scroll,
+                    9 => .capture_timer,
                     else => .none,
                 };
             }
@@ -495,6 +526,8 @@ test "menu items map to their actions, Recent captures included" {
         .{ .id = 5, .want = .history },
         .{ .id = 2, .want = .settings },
         .{ .id = 4, .want = .quit },
+        .{ .id = 7, .want = .capture_window },
+        .{ .id = 9, .want = .capture_timer },
         .{ .id = 99, .want = .none },
     }) |c| {
         var m = dbus.Marshal.init(alloc);

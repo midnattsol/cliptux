@@ -18,11 +18,11 @@ const env_mod = @import("../app/env.zig");
 const gnome = @import("../app/gnome.zig");
 const history = @import("../app/history.zig");
 const keep = @import("../app/keep.zig");
+const settings_modes = @import("settings_modes.zig");
 
 const Canvas = render.Canvas;
 const Window = window.Window;
 const Theme = theme_mod.Theme;
-
 const View = enum { general, editor, shortcuts, recording };
 
 pub const Hit = union(enum) {
@@ -51,6 +51,8 @@ pub const Hit = union(enum) {
     open_history,
     clear_history,
     gnome_enable,
+    /// the capture modes' rows (settings_modes.zig)
+    mode: settings_modes.Hit,
 };
 
 /// The GNOME Shell integration as the Settings window shows it.
@@ -64,16 +66,13 @@ fn gnomeState(alloc: std.mem.Allocator, bus: ?*dbus.Connection) GnomeState {
     return if (st == 99) .missing else .installed;
 }
 
-const steps_mod = @import("settings_steps.zig");
-pub const stepSeconds = steps_mod.stepSeconds;
-pub const stepCount = steps_mod.stepCount;
-pub const stepMb = steps_mod.stepMb;
+const steps = @import("settings_steps.zig");
 
 fn headerHeight(win: *const Window) i32 {
     return @intFromFloat(@round(52.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0));
 }
 
-const Region = struct {
+pub const Region = struct {
     x: i32,
     y: i32,
     w: i32,
@@ -108,6 +107,7 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     st.env = env;
     st.gnome = gnomeState(alloc, if (bus) |*b| b else null);
     if (st.gnome == .active) st.capture = gnome.captureInfo(alloc, &bus.?);
+    st.modes = settings_modes.load(alloc, env, if (bus) |*b| b else null);
 
     var win = try Window.init(alloc, env.runtime_dir, env.wayland_display);
     defer win.deinit();
@@ -170,6 +170,10 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
             .close => break,
             .key => |k| key: {
                 if (!k.pressed or k.code == 0) break :key;
+                if (!k.repeat and settings_modes.onKey(&st.modes, k, alloc, env)) {
+                    st.dirty = true;
+                    break :key;
+                }
                 if (st.recording) |action| {
                     if (k.repeat) break :key;
                     if (k.code == window.KEY_ESC) {
@@ -306,6 +310,7 @@ const State = struct {
     gnome: GnomeState = .not_gnome,
     capture: gnome.CaptureInfo = .{},
     history_cleared: bool = false,
+    modes: settings_modes.State = .{},
 
     fn scrollBy(self: *State, step: i32, win: *const Window) void {
         const max_scroll = @max(0, self.content_h - @as(i32, @intCast(win.height)));
@@ -445,10 +450,10 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
         },
         .reset_binds => cfg.binds = config.default_binds,
         .toggle_quick => cfg.quick_access = !cfg.quick_access,
-        .quick_minus, .quick_plus => cfg.quick_access_seconds = stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
+        .quick_minus, .quick_plus => cfg.quick_access_seconds = steps.stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
         .toggle_history => cfg.history = !cfg.history,
-        .hist_minus, .hist_plus => cfg.history_max = stepCount(cfg.history_max, hit == .hist_plus),
-        .hist_mb_minus, .hist_mb_plus => cfg.history_max_mb = stepMb(cfg.history_max_mb, hit == .hist_mb_plus),
+        .hist_minus, .hist_plus => cfg.history_max = steps.stepCount(cfg.history_max, hit == .hist_plus),
+        .hist_mb_minus, .hist_mb_plus => cfg.history_max_mb = steps.stepMb(cfg.history_max_mb, hit == .hist_mb_plus),
         .open_history => {
             keep.spawnSelf(st.env, &.{"history"});
             return false;
@@ -470,6 +475,11 @@ fn activate(hit: Hit, cfg: *config.Config, st: *State, win: *Window, alloc: std.
             if (st.gnome == .active) if (bus) |b| {
                 st.capture = gnome.captureInfo(alloc, b);
             };
+            st.dirty = true;
+            return false;
+        },
+        .mode => |h| {
+            settings_modes.activate(h, &st.modes, alloc, st.env);
             st.dirty = true;
             return false;
         },
@@ -498,21 +508,21 @@ pub const Ui = struct {
     pub fn sc(self: *const Ui, v: f64) i32 {
         return @intFromFloat(@round(v * self.f));
     }
-    fn fs(self: *const Ui, v: f64) f64 {
+    pub fn fs(self: *const Ui, v: f64) f64 {
         return v * self.f; // font size in px
     }
-    fn hovered(self: *const Ui, x: i32, y: i32, w: i32, h: i32) bool {
+    pub fn hovered(self: *const Ui, x: i32, y: i32, w: i32, h: i32) bool {
         return self.mx >= x and self.mx < x + w and self.my >= y and self.my < y + h;
     }
-    fn add(self: *Ui, r: Region) !void {
+    pub fn add(self: *Ui, r: Region) !void {
         try self.regions.append(self.alloc, r);
     }
     /// Text vertically centred in [y, y + h).
-    fn label(self: *Ui, x: i32, y: i32, h: i32, size: f64, color: u32, style: text.Style, s: []const u8) void {
+    pub fn label(self: *Ui, x: i32, y: i32, h: i32, size: f64, color: u32, style: text.Style, s: []const u8) void {
         const px = self.fs(size);
         text.drawStyled(&self.c, x, y + @divTrunc(h - text.heightStyled(px, style), 2), px, color, style, s);
     }
-    fn width(self: *const Ui, size: f64, style: text.Style, s: []const u8) i32 {
+    pub fn width(self: *const Ui, size: f64, style: text.Style, s: []const u8) i32 {
         return text.widthStyled(self.fs(size), style, s);
     }
 };
@@ -655,6 +665,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
                 } else rowTitle(&ui, r, "Bind a key to \u{201C}shotlet\u{201D}", "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts");
             }
             y = endCard(&card) + ui.sc(26);
+            y = try settings_modes.drawGeneral(&ui, cx, y, col_w, &st.modes);
         },
         .editor => {
             y = try groupTitle(&ui, cx, y, col_w, "New annotations", null);
@@ -673,6 +684,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
         },
         .recording => y = try @import("recui/settings_rec.zig").draw(&ui, alloc, cx, y, col_w),
         .shortcuts => {
+            y = try settings_modes.drawShortcuts(&ui, cx, y, col_w, &st.modes);
             y = try groupTitle(&ui, cx, y, col_w, "Editor shortcuts", "Reset to defaults");
             var card = beginCard(&ui, cx, y, col_w, @as(i32, config.n_actions) * ui.sc(48));
             inline for (0..config.n_actions) |i| {
@@ -868,7 +880,7 @@ pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8,
 }
 
 /// A chip button on the right of row `r`.
-fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
+pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
     const th = ui.th;
     const style: text.Style = if (bold) .bold else .regular;
     const is = ui.sc(16);
@@ -981,7 +993,7 @@ pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !
 }
 
 /// Key caps right-aligned in row `r`; returns their left edge.
-fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, accent: ?u32) i32 {
+pub fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, accent: ?u32) i32 {
     const th = ui.th;
     const ch = ui.sc(26);
     const gap = ui.sc(4);

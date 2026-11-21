@@ -50,9 +50,12 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {Recorder} from './recorder.js';
+import {RECORDER_IFACE, Recorder} from './recorder.js';
+import {MODES, ModeShortcuts, countdown, modeArgs} from './modes.js';
+import {captureWindow, pickWindow} from './windowpick.js';
+import {ScrollSessions} from './scroll.js';
+import {APP_ID, CaptureError, fileId, monotonicMs, normalizeAccel, roleOf} from './util.js';
 
-const APP_ID = 'io.github.midnattsol.Shotlet';
 const BUS_NAME = 'dev.shotlet.Shell1';
 const OBJECT_PATH = '/dev/shotlet/Shell1';
 const IFACE = `<node>
@@ -60,18 +63,32 @@ const IFACE = `<node>
     <property name="Version" type="u" access="read"/>
     <property name="Shortcuts" type="as" access="read"/>
     <property name="BlockedShortcuts" type="as" access="read"/>
+    <property name="ModeShortcuts" type="as" access="read"/>
     <method name="Capture">
       <arg type="b" name="started" direction="out"/>
     </method>
-    <method name="StartRecording">
-      <arg type="a{sv}" name="options" direction="in"/>
-      <arg type="u" name="node" direction="out"/>
-    </method>
-    <method name="StopRecording"/>
-    <method name="RecordSelect">
+    ${RECORDER_IFACE}
+    <method name="CaptureMode">
+      <arg type="s" name="mode" direction="in"/>
+      <arg type="u" name="delay" direction="in"/>
       <arg type="b" name="started" direction="out"/>
     </method>
-    <signal name="RecordingStopRequested"/>
+    <method name="ScrollBegin">
+      <arg type="i" name="x" direction="in"/>
+      <arg type="i" name="y" direction="in"/>
+      <arg type="i" name="width" direction="in"/>
+      <arg type="i" name="height" direction="in"/>
+      <arg type="b" name="auto" direction="in"/>
+      <arg type="s" name="session" direction="out"/>
+    </method>
+    <method name="ScrollStep">
+      <arg type="s" name="session" direction="in"/>
+      <arg type="i" name="clicks" direction="in"/>
+      <arg type="s" name="capture" direction="out"/>
+    </method>
+    <method name="ScrollEnd">
+      <arg type="s" name="session" direction="in"/>
+    </method>
     <method name="Place">
       <arg type="s" name="title" direction="in"/>
       <arg type="i" name="x" direction="in"/>
@@ -100,49 +117,6 @@ const DESKTOP_ID = `${APP_ID}.desktop`;
 const PIXELS_PER_PIECE = 500 * 1000;
 const MAX_STRIPS = 6;
 
-// "<Ctrl><Shift>s", "<Shift><Control>S": the same key
-function normalizeAccel(accel) {
-    const mods = [];
-    const key = accel.replace(/<([^>]+)>/g, (_m, mod) => {
-        mod = mod.toLowerCase();
-        mods.push({ctrl: 'control', primary: 'control', ctl: 'control'}[mod] ?? mod);
-        return '';
-    }).toLowerCase();
-    return [...mods.sort(), key].join('+');
-}
-
-// errors Capture() answers with: dev.shotlet.Shell1.Error.<name>
-class CaptureError extends Error {
-    constructor(name, message) {
-        super(message);
-        this.dbusName = `dev.shotlet.Shell1.Error.${name}`;
-    }
-}
-
-function monotonicMs() {
-    return Math.floor(GLib.get_monotonic_time() / 1000);
-}
-
-// device and inode of what a path finally names (symlinks followed)
-function fileId(path) {
-    try {
-        const info = Gio.File.new_for_path(path).query_info(
-            'unix::device,unix::inode', Gio.FileQueryInfoFlags.NONE, null);
-        return `${info.get_attribute_uint32('unix::device')}:${info.get_attribute_uint64('unix::inode')}`;
-    } catch {
-        return null;
-    }
-}
-
-function roleOf(win) {
-    if (!win || win.get_wm_class() !== APP_ID)
-        return null;
-    const title = win.get_title() ?? '';
-    if (!title.startsWith('shotlet:'))
-        return null;
-    return title.split(':')[1] || null;
-}
-
 export default class ShotletExtension extends Extension {
     enable() {
         // window -> {ids: [signal ids], role, monitor, handed_back, born}
@@ -168,7 +142,11 @@ export default class ShotletExtension extends Extension {
             this._settings.connect(`changed::${SHORTCUT_KEY}`, () => this._bindShortcut()),
             ...GNOME_KEYS.map(k => this._gnomeKeys.connect(`changed::${k}`, () => this._bindShortcut())),
         ];
+        this._modes = new ModeShortcuts(this._settings, this._gnomeKeys, GNOME_KEYS,
+            normalizeAccel, (mode, delay, t0) => this._capture(t0, false, mode, delay));
         this._bindShortcut();
+        this._scroll = new ScrollSessions(s => this._checkCaller(s), () => this._captureDir(),
+            () => [...this._windows].some(([w, st]) => st.role === 'scroll' && w.showing_on_its_workspace()));
         this._removeStale();
 
         this._dbus = Gio.DBusExportedObject.wrapJSObject(IFACE, this);
@@ -181,6 +159,10 @@ export default class ShotletExtension extends Extension {
     disable() {
         this._recorder.destroy();
         this._recorder = null;
+        this._scroll.destroy();
+        this._scroll = null;
+        this._modes.destroy();
+        this._modes = null;
         this._unbindShortcut();
         for (const id of this._settingsIds.slice(0, 1))
             this._settings.disconnect(id);
@@ -216,21 +198,13 @@ export default class ShotletExtension extends Extension {
         return 3;
     }
 
-    // recordings (recorder.js)
-    StartRecordingAsync(params, invocation) {
-        this._recorder.startCall(params, invocation);
-    }
-
-    StopRecordingAsync(params, invocation) {
-        this._recorder.stopCall(params, invocation);
-    }
-
-    RecordSelectAsync(params, invocation) {
-        this._recorder.selectCall(params, invocation);
-    }
-
     get Shortcuts() {
         return this._bound ? this._settings.get_strv(SHORTCUT_KEY) : [];
+    }
+
+    // the capture modes' bound keys, "mode=accel"
+    get ModeShortcuts() {
+        return this._modes?.describe() ?? [];
     }
 
     get BlockedShortcuts() {
@@ -243,6 +217,7 @@ export default class ShotletExtension extends Extension {
     // of its keys (two bindings for one key: mutter picks either).
     _bindShortcut() {
         this._unbindShortcut();
+        this._modes?.bind();
         const ours = this._settings.get_strv(SHORTCUT_KEY).filter(a => a);
         const gnome = new Set(GNOME_KEYS.flatMap(k => this._gnomeKeys.get_strv(k)).map(normalizeAccel));
         this._blocked = ours.filter(a => gnome.has(normalizeAccel(a)));
@@ -279,6 +254,49 @@ export default class ShotletExtension extends Extension {
             this._lastBusCapture = now;
             await this._capture(t0, true);
             invocation.return_value(new GLib.Variant('(b)', [true]));
+        } catch (e) {
+            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
+        }
+    }
+
+    // CaptureMode(mode, delay): Capture() for one of the capture modes,
+    // after a countdown of `delay` seconds (at most 60).
+    async CaptureModeAsync([mode, delay], invocation) {
+        const t0 = monotonicMs();
+        try {
+            await this._checkCaller(invocation.get_sender());
+            if (!MODES.includes(mode) || delay > 60)
+                throw new CaptureError('Failed', 'no such capture mode');
+            const now = monotonicMs();
+            if (this._busy || now - this._lastBusCapture < BUS_INTERVAL_MS)
+                throw new CaptureError('Busy', 'one capture at a time, at most one a second');
+            this._lastBusCapture = now;
+            // the reply goes out once the capture (or the countdown, or the
+            // window picker) is under way
+            const started = this._capture(t0, true, mode, delay);
+            started.catch(e => console.warn(`Shotlet: ${mode} capture failed: ${e.message}`));
+            invocation.return_value(new GLib.Variant('(b)', [true]));
+        } catch (e) {
+            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
+        }
+    }
+
+    async ScrollBeginAsync([x, y, w, h, auto], invocation) {
+        await this._reply(invocation, 's', () => this._scroll.begin(invocation.get_sender(), x, y, w, h, auto));
+    }
+
+    async ScrollStepAsync([id, clicks], invocation) {
+        await this._reply(invocation, 's', () => this._scroll.step(invocation.get_sender(), id, clicks));
+    }
+
+    async ScrollEndAsync([id], invocation) {
+        await this._reply(invocation, null, () => this._scroll.end(invocation.get_sender(), id));
+    }
+
+    async _reply(invocation, type, fn) {
+        try {
+            const v = await fn();
+            invocation.return_value(type ? new GLib.Variant(`(${type})`, [v]) : null);
         } catch (e) {
             invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
         }
@@ -371,8 +389,9 @@ export default class ShotletExtension extends Extension {
         return {monitors: fmt(monitors), pieces, piecesArg: fmt(pieces)};
     }
 
-    // Take the screenshot and start shotlet on it.
-    async _capture(t0, fromBus, extra = []) {
+    // Take the screenshot (of every monitor, or of the window picked) and
+    // start shotlet on it, after `delay` seconds.
+    async _capture(t0, fromBus, mode = 'area', delay = 0, extra = []) {
         if (this._busy)
             throw new CaptureError('Busy', 'a capture is under way');
         if (Main.sessionMode.isLocked)
@@ -386,6 +405,12 @@ export default class ShotletExtension extends Extension {
             // a menu (the tray's) that asked for this closes first
             if (fromBus)
                 await this._popupsClosed();
+            if (delay > 0 && !await countdown(delay))
+                return;
+            if (mode === 'window') {
+                await this._captureWindow(t0, exe, files);
+                return;
+            }
             this._removeStale();
             const dir = this._captureDir();
             const id = GLib.uuid_string_random().replace(/-/g, '');
@@ -415,7 +440,7 @@ export default class ShotletExtension extends Extension {
             await Promise.all(shots);
             const t1 = monotonicMs();
             Util.trySpawn([exe, '--from-shell', id, '--monitors', plan.monitors,
-                '--pieces', plan.piecesArg, '--t0', `${t0}`, ...extra]);
+                '--pieces', plan.piecesArg, '--t0', `${t0}`, ...modeArgs(mode), ...extra]);
             console.log(`Shotlet: captured ${plan.pieces.length} areas in ${t1 - t0} ms, started shotlet`);
             files.length = 0;
         } finally {
@@ -426,6 +451,22 @@ export default class ShotletExtension extends Extension {
                 } catch {}
             }
         }
+    }
+
+    // Pick a window and capture just that window (windowpick.js).
+    async _captureWindow(t0, exe, files) {
+        const win = await pickWindow(w => roleOf(w) !== null);
+        if (!win)
+            return;
+        const id = GLib.uuid_string_random().replace(/-/g, '');
+        const file = Gio.File.new_for_path(GLib.build_filenamev([this._captureDir(), `shot-${id}-0.png`]));
+        files.push(file);
+        const r = await captureWindow(win, file);
+        const layout = [r.x, r.y, r.w, r.h, r.scale].join(',');
+        Util.trySpawn([exe, '--from-shell', id, '--monitors', layout, '--pieces', layout,
+            '--t0', `${t0}`, '--mode', 'window']);
+        console.log(`Shotlet: captured a ${r.pw}x${r.ph} window, started shotlet`);
+        files.length = 0;
     }
 
     _popupsClosed() {

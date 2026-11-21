@@ -1,7 +1,8 @@
-//! The numeric settings' steps (Settings window): seconds, captures, MiB.
+//! The value scales of the Settings window's numeric steppers.
 
 const std = @import("std");
 
+/// Steps of the numeric settings: seconds, captures, MiB.
 pub fn stepSeconds(v: u16, up: bool) u16 {
     const steps = [_]u16{ 3, 5, 8, 10, 15, 20, 30, 45, 60, 120, 300 };
     return stepIn(u16, &steps, v, up);

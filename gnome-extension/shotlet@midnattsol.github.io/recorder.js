@@ -47,9 +47,24 @@ function mutterCall(path, iface, method, params, type) {
     });
 }
 
+// dev.shotlet.Shell1's recording members (extension.js's IFACE)
+export const RECORDER_IFACE = `<method name="StartRecording">
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="node" direction="out"/>
+    </method>
+    <method name="StopRecording"/>
+    <method name="RecordSelect">
+      <arg type="b" name="started" direction="out"/>
+    </method>
+    <signal name="RecordingStopRequested"/>`;
+
 export class Recorder {
     constructor(ext) {
         this._ext = ext;
+        // the bus methods, on the exported object
+        ext.StartRecordingAsync = (p, inv) => this.startCall(p, inv);
+        ext.StopRecordingAsync = (p, inv) => this.stopCall(p, inv);
+        ext.RecordSelectAsync = (p, inv) => this.selectCall(p, inv);
         this._rec = null;
         this._bound = false;
         this._settingsId = ext._settings.connect(`changed::${RECORD_KEY}`, () => this._bind());
@@ -89,7 +104,7 @@ export class Recorder {
             return;
         }
         const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
-        this._ext._capture(t0, false, ['--then', 'record']).catch(e =>
+        this._ext._capture(t0, false, 'area', 0, ['--then', 'record']).catch(e =>
             console.warn(`Shotlet: record failed: ${e.message}`));
     }
 
@@ -124,7 +139,7 @@ export class Recorder {
             if (this._rec)
                 throw this._error('Busy', 'a recording is under way');
             const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
-            await this._ext._capture(t0, true, ['--then', 'record']);
+            await this._ext._capture(t0, true, 'area', 0, ['--then', 'record']);
             invocation.return_value(new GLib.Variant('(b)', [true]));
         } catch (e) {
             invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);

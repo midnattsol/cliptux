@@ -8,6 +8,8 @@
 #   drop texture W H       an image was dropped (read as image/png)
 #   drop files PATH...     files were dropped (text/uri-list)
 # usage: target.py [MIME...]   types to ask for on drop, best first
+# env: TARGET_SIZE=WxH         an ordinary window of that size instead
+import os
 import sys
 import gi
 
@@ -48,7 +50,14 @@ class Target(Gtk.Application):
         win.add_controller(drop)
 
         win.connect("notify::is-active", lambda w, _p: out("active", w.is_active()))
-        win.maximize()
+        # TARGET_SIZE=WxH: a plain (not maximized) window of that size,
+        # for the window capture
+        size = os.environ.get("TARGET_SIZE")
+        if size:
+            w, h = (int(v) for v in size.split("x"))
+            win.set_default_size(w, h)
+        else:
+            win.maximize()
         win.present()
         entry.grab_focus()
 
