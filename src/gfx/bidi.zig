@@ -721,34 +721,59 @@ fn joining(cp: u21) Joining {
 }
 
 /// Contextual joining form of every character (logical order), as OpenType
-/// feature masks: 1 isol, 2 fina, 4 medi, 8 init, 0 none. ZWJ joins,
-/// ZWNJ and anything non-joining breaks the chain, marks are transparent.
+/// feature masks: 1 isol, 2 fina, 4 medi, 8 init, 0x10 fin2, 0x20 fin3,
+/// 0x40 med2 (the last three for Syriac Alaph), 0 none. ZWJ joins, ZWNJ
+/// and anything non-joining breaks the chain, marks are transparent.
+/// This is the joining state machine shapers use, with Syriac's Alaph and
+/// Dalath/Rish groups.
 pub fn joiningMasks(cps: []const u21, out: []u8) void {
-    const joins_prev: u8 = 0x10;
-    const joins_next: u8 = 0x20;
+    const none: u8 = 0;
+    const isol: u8 = 1;
+    const fina: u8 = 2;
+    const medi: u8 = 4;
+    const init: u8 = 8;
+    const fin2: u8 = 0x10;
+    const fin3: u8 = 0x20;
+    const med2: u8 = 0x40;
+    const E = struct { prev: u8, cur: u8, next: u3 };
+    // columns: U, L, R, D, Alaph, Dalath/Rish
+    const table = [7][6]E{
+        // 0: previous non-joining
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 6 } },
+        // 1: previous R (or an isolated Alaph), not joining forward
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = fin2, .next = 5 }, .{ .prev = none, .cur = isol, .next = 6 } },
+        // 2: previous D/L, isolated so far, willing to join
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = init, .cur = fina, .next = 1 }, .{ .prev = init, .cur = fina, .next = 3 }, .{ .prev = init, .cur = fina, .next = 4 }, .{ .prev = init, .cur = fina, .next = 6 } },
+        // 3: previous D in final form, willing to join
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = medi, .cur = fina, .next = 1 }, .{ .prev = medi, .cur = fina, .next = 3 }, .{ .prev = medi, .cur = fina, .next = 4 }, .{ .prev = medi, .cur = fina, .next = 6 } },
+        // 4: previous final Alaph
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = med2, .cur = isol, .next = 2 }, .{ .prev = med2, .cur = isol, .next = 1 }, .{ .prev = med2, .cur = isol, .next = 2 }, .{ .prev = med2, .cur = fin2, .next = 5 }, .{ .prev = med2, .cur = isol, .next = 6 } },
+        // 5: previous fin2/fin3 Alaph
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = isol, .cur = isol, .next = 2 }, .{ .prev = isol, .cur = isol, .next = 1 }, .{ .prev = isol, .cur = isol, .next = 2 }, .{ .prev = isol, .cur = fin2, .next = 5 }, .{ .prev = isol, .cur = isol, .next = 6 } },
+        // 6: previous Dalath/Rish
+        .{ .{ .prev = none, .cur = none, .next = 0 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = isol, .next = 1 }, .{ .prev = none, .cur = isol, .next = 2 }, .{ .prev = none, .cur = fin3, .next = 5 }, .{ .prev = none, .cur = isol, .next = 6 } },
+    };
     @memset(out, 0);
+    var state: u3 = 0;
     var prev: ?usize = null;
-    var prev_jt: Joining = .U;
     for (cps, 0..) |cp, i| {
-        const jt = joining(cp);
-        if (jt == .T) continue;
-        if (prev) |p| {
-            if ((prev_jt == .D or prev_jt == .C) and (jt == .D or jt == .R or jt == .C)) {
-                out[p] |= joins_next;
-                out[i] |= joins_prev;
-            }
-        }
-        prev = i;
-        prev_jt = jt;
-    }
-    for (cps, out) |cp, *m| {
-        const p = m.* & joins_prev != 0;
-        const n = m.* & joins_next != 0;
-        m.* = switch (joining(cp)) {
-            .D => if (p and n) 4 else if (p) 2 else if (n) 8 else 1,
-            .R => if (p) 2 else 1,
-            else => 0,
+        const col: usize = switch (cp) {
+            0x0710 => 4,
+            0x0715, 0x0716, 0x072A, 0x072F => 5,
+            else => switch (joining(cp)) {
+                .T => continue,
+                .U => 0,
+                .R => 2,
+                .D, .C => 3,
+            },
         };
+        const e = table[state][col];
+        if (e.prev != none) if (prev) |p| {
+            out[p] = e.prev;
+        };
+        out[i] = e.cur;
+        prev = i;
+        state = e.next;
     }
 }
 
@@ -890,6 +915,17 @@ test "joining masks: forms, transparent marks, non-joiners" {
     try std.testing.expectEqualSlices(u8, &.{ isol, 0, isol }, m[0..3]);
     joiningMasks(&u32s("ب\u{200D}"), m[0..2]);
     try std.testing.expectEqual(@as(u8, init), m[0]);
+    // Syriac Alaph: final after a joining letter, fin2 after a
+    // non-joining one, fin3 after Dalath/Rish, med2 when a final Alaph
+    // is followed by more letters
+    joiningMasks(&u32s("ܫܠܡܐ"), m[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ init, medi, medi, fina }, m[0..4]);
+    joiningMasks(&u32s("ܘܐ"), m[0..2]);
+    try std.testing.expectEqual(@as(u8, 0x10), m[1]);
+    joiningMasks(&u32s("ܕܐ"), m[0..2]);
+    try std.testing.expectEqual(@as(u8, 0x20), m[1]);
+    joiningMasks(&u32s("ܒܐܒ"), m[0..3]);
+    try std.testing.expectEqualSlices(u8, &.{ init, 0x40, isol }, m[0..3]);
 }
 
 test "bidi classes" {

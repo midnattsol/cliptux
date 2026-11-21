@@ -28,6 +28,10 @@ pub const mask_isol: u8 = 1;
 pub const mask_fina: u8 = 2;
 pub const mask_medi: u8 = 4;
 pub const mask_init: u8 = 8;
+/// Syriac Alaph forms
+pub const mask_fin2: u8 = 0x10;
+pub const mask_fin3: u8 = 0x20;
+pub const mask_med2: u8 = 0x40;
 pub const mask_global: u8 = 0x80;
 
 pub const Script = enum {
@@ -1025,8 +1029,11 @@ fn runStages(ctx: *Ctx, script: Script, stages: []const Stage) !void {
 const joining_stages = [_]Stage{
     .{ .features = &.{ "ccmp", "locl" } },
     .{ .features = &.{"isol"}, .mask = mask_isol },
-    .{ .features = &.{ "fina", "fin2", "fin3" }, .mask = mask_fina },
-    .{ .features = &.{ "medi", "med2" }, .mask = mask_medi },
+    .{ .features = &.{"fina"}, .mask = mask_fina },
+    .{ .features = &.{"fin2"}, .mask = mask_fin2 },
+    .{ .features = &.{"fin3"}, .mask = mask_fin3 },
+    .{ .features = &.{"medi"}, .mask = mask_medi },
+    .{ .features = &.{"med2"}, .mask = mask_med2 },
     .{ .features = &.{"init"}, .mask = mask_init },
     .{ .features = &.{"rlig"} },
     .{ .features = &.{"calt"} },
