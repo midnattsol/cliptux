@@ -62,219 +62,269 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []con
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
-    const layer = win.hasLayerShell();
-    // a layer surface is moved by hand: follow the pointer's own motion
-    win.track_relative = layer;
-    var margin: [4]i32 = .{ 120, 0, 0, 120 };
-    // first guess at scale 1; corrected once the real scale is known
-    var lw: u32 = img.width + 2 * pad;
-    var lh: u32 = img.height + 2 * pad;
-    if (layer) {
-        try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = lw, .height = lh, .layer = .{
-            .layer = wl.zwlr_layer_shell_v1.layer_top,
-            .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
-            .width = lw,
-            .height = lh,
-            .margin = margin,
-        } });
-    } else {
-        try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = lw, .height = lh });
-    }
-    win.report_leave = true;
-    win.setCursor(.arrow) catch {};
+    var pin: Pin = .{ .gpa = gpa, .win = &win, .img = img, .layer = win.hasLayerShell(), .born = sys.monoMs() };
+    defer gpa.free(pin.scaled);
+    try pin.open();
+    pin.hint = !pin.layer and gnome.isGnome() and needsTopHint(gpa, env);
+    std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (pin.layer) "layer shell" else if (pin.hint) "plain window" else "kept above by the GNOME extension" });
+    try pin.loop();
+    std.log.info("pin: closed", .{});
+}
 
-    var hint = false;
-    if (!layer and gnome.isGnome()) {
-        if (dbus.Connection.connectSession(gpa, env.bus_addr)) |bus_c| {
-            var bus = bus_c;
-            defer bus.deinit();
-            hint = !gnome.extensionActive(&bus);
-        } else |_| hint = true;
-    }
-    std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (layer) "layer shell" else if (hint) "plain window" else "kept above by the GNOME extension" });
+/// GNOME without the Shotlet extension cannot keep the pin on top: true
+/// when the pin should tell the person about "Always on Top".
+fn needsTopHint(gpa: std.mem.Allocator, env: Env) bool {
+    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return true;
+    defer bus.deinit();
+    return !gnome.extensionActive(&bus);
+}
 
-    var zoom: f64 = 1;
-    var scaled: []u32 = &.{};
-    defer gpa.free(scaled);
-    var scaled_w: u32 = 0;
-    var scaled_h: u32 = 0;
-    var hover = false;
-    var hover_close = false;
-    var dirty = true;
-    var scroll_acc: f64 = 0;
+/// One pin window: its placement, zoom, hover and drag state.
+const Pin = struct {
+    gpa: std.mem.Allocator,
+    win: *window.Window,
+    img: *const png.Image,
+    /// a layer-shell surface (moved by its margins) rather than a toplevel
+    layer: bool,
+    born: i64,
+    hint: bool = false,
+    margin: [4]i32 = .{ 120, 0, 0, 120 },
+    // window size in logical pixels; first guess at scale 1, corrected
+    // once the real scale is known
+    lw: u32 = 0,
+    lh: u32 = 0,
+    last_f: f64 = 0,
+    zoom: f64 = 1,
+    scaled: []u32 = &.{},
+    scaled_w: u32 = 0,
+    scaled_h: u32 = 0,
+    hover: bool = false,
+    hover_close: bool = false,
+    dirty: bool = true,
+    scroll_acc: f64 = 0,
     // layer shell: a drag in progress, from this pointer position (only
     // without relative pointer events), and the margins (top, left) it
     // has moved the pin to, unrounded
-    var drag_from: ?[2]f64 = null;
-    var drag_at: [2]f64 = .{ 0, 0 };
-    var drag_rel = false;
-    const born = sys.monoMs();
-    var last_f: f64 = 0;
+    drag_from: ?[2]f64 = null,
+    drag_at: [2]f64 = .{ 0, 0 },
+    drag_rel: bool = false,
 
-    while (true) {
-        const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
-        // the picture's size on screen: image pixels * zoom, in buffer pixels
-        const pw: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(img.width)) * zoom))));
-        const ph: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(img.height)) * zoom))));
-        const want_w: u32 = @as(u32, @intFromFloat(@ceil(@as(f64, @floatFromInt(pw)) / k))) + 2 * pad;
-        const want_h: u32 = @as(u32, @intFromFloat(@ceil(@as(f64, @floatFromInt(ph)) / k))) + 2 * pad;
-        if (want_w != lw or want_h != lh or k != last_f) {
-            lw = want_w;
-            lh = want_h;
-            last_f = k;
-            if (layer) try win.setLayerPlacement(0, lw, lh, margin) else try win.resizeTo(0, lw, lh);
-            try win.setWindowGeometry(0, .{ .x = pad, .y = pad, .w = @intCast(lw - 2 * pad), .h = @intCast(lh - 2 * pad) });
-            const p: i32 = pad;
-            try win.setInputRegion(0, &.{.{ .x = p, .y = p, .w = @intCast(lw - 2 * pad), .h = @intCast(lh - 2 * pad) }});
-            dirty = true;
+    fn open(p: *Pin) !void {
+        const win = p.win;
+        // a layer surface is moved by hand: follow the pointer's own motion
+        win.track_relative = p.layer;
+        p.lw = p.img.width + 2 * pad;
+        p.lh = p.img.height + 2 * pad;
+        if (p.layer) {
+            try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh, .layer = .{
+                .layer = wl.zwlr_layer_shell_v1.layer_top,
+                .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
+                .width = p.lw,
+                .height = p.lh,
+                .margin = p.margin,
+            } });
+        } else {
+            try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh });
         }
-        const show_hint = hint and sys.monoMs() - born < hint_ms;
+        win.report_leave = true;
+        win.setCursor(.arrow) catch {};
+    }
 
-        if (dirty and !win.frame_pending and win.width > 0) {
-            dirty = false;
-            if (scaled_w != pw or scaled_h != ph) {
-                gpa.free(scaled);
-                scaled = &.{};
-                scaled = try gpa.alloc(u32, @as(usize, pw) * ph);
-                keep.scaleInto(img.pixels, img.width, img.height, scaled, pw, ph);
-                scaled_w = pw;
-                scaled_h = ph;
+    fn loop(p: *Pin) !void {
+        while (true) {
+            const k = @as(f64, @floatFromInt(p.win.scale120)) / 120.0;
+            // the picture's size on screen: image pixels * zoom, in buffer pixels
+            const pw = zoomedSize(p.img.width, p.zoom);
+            const ph = zoomedSize(p.img.height, p.zoom);
+            try p.fitWindow(k, pw, ph);
+            const show_hint = p.hint and sys.monoMs() - p.born < hint_ms;
+            if (p.dirty and !p.win.frame_pending and p.win.width > 0) {
+                p.dirty = false;
+                try p.draw(k, pw, ph, show_hint);
             }
-            const px = try win.backBuffer();
-            const bw = win.width;
-            const bh = win.height;
-            @memset(px, 0);
-            const ox: i32 = @intFromFloat(@round(pad * k));
-            // the picture plus its chrome, opaque, then placed rounded
-            const card = try gpa.alloc(u32, @as(usize, pw) * ph);
-            defer gpa.free(card);
-            @memset(card, 0xFF000000);
-            for (card, scaled) |*d, s| d.* = effects.over(d.*, s);
-            var cv = fui.Canvas.init(card, pw, ph);
-            if (hover or show_hint) {
-                const r = 11 * k;
-                const cx = @as(f64, @floatFromInt(pw)) - 8 * k - r;
-                const cy = 8 * k + r;
-                if (hover) {
-                    cv.fillCircleAA(cx, cy, r, if (hover_close) 0xD0000000 else 0x99000000);
-                    fui.icon(&cv, .close, cx, cy, 12 * k, 0xFFFFFFFF);
-                    var zb: [16]u8 = undefined;
-                    const zs = std.fmt.bufPrint(&zb, "{d}%", .{@as(u32, @intFromFloat(@round(zoom * 100)))}) catch "";
-                    if (zoom != 1) {
-                        const tw = text.width(11 * k, zs) + @as(i32, @intFromFloat(12 * k));
-                        const th: i32 = @intFromFloat(20 * k);
-                        cv.fillRoundRectAA(@intFromFloat(8 * k), @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), tw, th, 10 * k, 0x99000000);
-                        fui.textCentered(&cv, .{ .x = @intFromFloat(8 * k), .y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, .regular, zs);
-                    }
+            const ev = (try p.win.nextEventTimeout(if (show_hint) 250 else 1000)) orelse {
+                if (p.hint and !show_hint) {
+                    p.hint = false;
+                    p.dirty = true;
                 }
-                if (show_hint) {
-                    const msg = "Right-click: Always on Top";
-                    const tw = text.width(11 * k, msg) + @as(i32, @intFromFloat(16 * k));
-                    const th: i32 = @intFromFloat(22 * k);
-                    const x = @divTrunc(@as(i32, @intCast(pw)) - tw, 2);
-                    const y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(10 * k));
-                    cv.fillRoundRectAA(x, y, tw, th, 11 * k, 0xCC000000);
-                    fui.textCentered(&cv, .{ .x = x, .y = y, .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, .regular, msg);
-                }
-            }
-            fui.placeCard(px, bw, bh, card, pw, ph, ox, ox, @intFromFloat(radius * k), @intFromFloat(@max(1, 10 * k)));
-            fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
-            try win.present();
-        }
-
-        const ev = (try win.nextEventTimeout(if (show_hint) 250 else 1000)) orelse {
-            if (hint and !show_hint) {
-                hint = false;
-                dirty = true;
-            }
-            continue;
-        };
-        const ox = pad * k;
-        switch (ev) {
-            .close => break,
-            .resize, .frame_done => dirty = true,
-            .key => |key| if (key.pressed) switch (key.code) {
-                window.KEY_ESC => break,
-                12, 74 => { // - zooms out
-                    zoom = zoomStep(zoom, 1);
-                    dirty = true;
-                },
-                13, 78 => { // = + zooms in
-                    zoom = zoomStep(zoom, -1);
-                    dirty = true;
-                },
-                11 => { // 0: 100%
-                    zoom = 1;
-                    dirty = true;
-                },
-                else => {},
-            },
-            .pointer_axis => |a| {
-                const v = if (a.value120) |n| @as(f64, @floatFromInt(n)) / 120.0 else a.value / 10.0;
-                scroll_acc += v;
-                const steps: i32 = @intFromFloat(@trunc(scroll_acc));
-                if (steps != 0) {
-                    scroll_acc -= @floatFromInt(steps);
-                    zoom = zoomStep(zoom, steps);
-                    dirty = true;
-                }
-            },
-            .pointer_motion => |m| {
-                const inside = m.x >= 0;
-                const r = 11 * k;
-                const cx = ox + @as(f64, @floatFromInt(scaled_w)) - 8 * k - r;
-                const cy = ox + 8 * k + r;
-                const hc = inside and (m.x - cx) * (m.x - cx) + (m.y - cy) * (m.y - cy) <= r * r * 1.4;
-                if (inside != hover or hc != hover_close) dirty = true;
-                hover = inside;
-                hover_close = hc;
-                // layer shell: follow the pointer by moving the margins.
-                // Positions on the pin cannot say how far the pointer went:
-                // the pin moves under it with a delay, and compositors
-                // differ on which place a held button's motion is relative
-                // to (sway: where the press happened). Relative pointer
-                // motion is the pointer's own.
-                if (drag_from) |from| {
-                    const rel = win.takeRelative() orelse .{ 0, 0 };
-                    // absolute devices (tablets; KWin's fake input) may
-                    // move the pointer without relative motion: then go by
-                    // positions, which KWin gives relative to where the
-                    // pin is now
-                    if (rel[0] != 0 or rel[1] != 0) drag_rel = true;
-                    if (drag_rel) {
-                        drag_at[0] += rel[1];
-                        drag_at[1] += rel[0];
-                    } else if (inside) {
-                        drag_at[0] += (m.y - from[1]) / k;
-                        drag_at[1] += (m.x - from[0]) / k;
-                    }
-                    const top: i32 = @intFromFloat(@round(drag_at[0]));
-                    const left: i32 = @intFromFloat(@round(drag_at[1]));
-                    if (top != margin[0] or left != margin[3]) {
-                        margin[0] = top;
-                        margin[3] = left;
-                        try win.setLayerPlacement(0, lw, lh, margin);
-                    }
-                }
-            },
-            .pointer_button => |b| {
-                if (b.button == window.BTN_LEFT and b.pressed) {
-                    if (hover_close) break;
-                    if (layer) {
-                        drag_from = .{ b.x, b.y };
-                        drag_at = .{ @floatFromInt(margin[0]), @floatFromInt(margin[3]) };
-                        drag_rel = false;
-                        _ = win.takeRelative();
-                    } else try win.startMoveOf(0);
-                } else if (b.button == window.BTN_LEFT) {
-                    drag_from = null;
-                } else if (b.button == window.BTN_RIGHT and b.pressed) {
-                    try win.showWindowMenu(0, @intFromFloat(b.x / k), @intFromFloat(b.y / k));
-                } else if (b.button == window.BTN_MIDDLE and b.pressed) {
-                    break;
-                }
-            },
+                continue;
+            };
+            if (try p.handle(ev, k)) break;
         }
     }
-    std.log.info("pin: closed", .{});
-}
+
+    fn zoomedSize(n: u32, zoom: f64) u32 {
+        return @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(n)) * zoom))));
+    }
+
+    /// Resizes the window around a `pw` x `ph` picture when it or the
+    /// scale changed.
+    fn fitWindow(p: *Pin, k: f64, pw: u32, ph: u32) !void {
+        const want_w: u32 = @as(u32, @intFromFloat(@ceil(@as(f64, @floatFromInt(pw)) / k))) + 2 * pad;
+        const want_h: u32 = @as(u32, @intFromFloat(@ceil(@as(f64, @floatFromInt(ph)) / k))) + 2 * pad;
+        if (want_w == p.lw and want_h == p.lh and k == p.last_f) return;
+        p.lw = want_w;
+        p.lh = want_h;
+        p.last_f = k;
+        const win = p.win;
+        if (p.layer) try win.setLayerPlacement(0, p.lw, p.lh, p.margin) else try win.resizeTo(0, p.lw, p.lh);
+        try win.setWindowGeometry(0, .{ .x = pad, .y = pad, .w = @intCast(p.lw - 2 * pad), .h = @intCast(p.lh - 2 * pad) });
+        const o: i32 = pad;
+        try win.setInputRegion(0, &.{.{ .x = o, .y = o, .w = @intCast(p.lw - 2 * pad), .h = @intCast(p.lh - 2 * pad) }});
+        p.dirty = true;
+    }
+
+    /// Rescales the cached picture when its size changed.
+    fn rescale(p: *Pin, pw: u32, ph: u32) !void {
+        if (p.scaled_w == pw and p.scaled_h == ph) return;
+        p.gpa.free(p.scaled);
+        p.scaled = &.{};
+        p.scaled = try p.gpa.alloc(u32, @as(usize, pw) * ph);
+        keep.scaleInto(p.img.pixels, p.img.width, p.img.height, p.scaled, pw, ph);
+        p.scaled_w = pw;
+        p.scaled_h = ph;
+    }
+
+    fn draw(p: *Pin, k: f64, pw: u32, ph: u32, show_hint: bool) !void {
+        try p.rescale(pw, ph);
+        const win = p.win;
+        const px = try win.backBuffer();
+        const bw = win.width;
+        const bh = win.height;
+        @memset(px, 0);
+        const ox: i32 = @intFromFloat(@round(pad * k));
+        // the picture plus its chrome, opaque, then placed rounded
+        const card = try p.gpa.alloc(u32, @as(usize, pw) * ph);
+        defer p.gpa.free(card);
+        @memset(card, 0xFF000000);
+        for (card, p.scaled) |*d, s| d.* = effects.over(d.*, s);
+        var cv = fui.Canvas.init(card, pw, ph);
+        if (p.hover) p.drawHoverChrome(&cv, k, pw, ph);
+        if (show_hint) drawTopHint(&cv, k, pw, ph);
+        fui.placeCard(px, bw, bh, card, pw, ph, ox, ox, @intFromFloat(radius * k), @intFromFloat(@max(1, 10 * k)));
+        fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
+        try win.present();
+    }
+
+    /// The close button and, away from 100%, the zoom level.
+    fn drawHoverChrome(p: *const Pin, cv: *fui.Canvas, k: f64, pw: u32, ph: u32) void {
+        const r = 11 * k;
+        const cx = @as(f64, @floatFromInt(pw)) - 8 * k - r;
+        const cy = 8 * k + r;
+        cv.fillCircleAA(cx, cy, r, if (p.hover_close) 0xD0000000 else 0x99000000);
+        fui.icon(cv, .close, cx, cy, 12 * k, 0xFFFFFFFF);
+        if (p.zoom == 1) return;
+        var zb: [16]u8 = undefined;
+        const zs = std.fmt.bufPrint(&zb, "{d}%", .{@as(u32, @intFromFloat(@round(p.zoom * 100)))}) catch "";
+        const tw = text.width(11 * k, zs) + @as(i32, @intFromFloat(12 * k));
+        const th: i32 = @intFromFloat(20 * k);
+        cv.fillRoundRectAA(@intFromFloat(8 * k), @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), tw, th, 10 * k, 0x99000000);
+        fui.textCentered(cv, .{ .x = @intFromFloat(8 * k), .y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, .regular, zs);
+    }
+
+    fn drawTopHint(cv: *fui.Canvas, k: f64, pw: u32, ph: u32) void {
+        const msg = "Right-click: Always on Top";
+        const tw = text.width(11 * k, msg) + @as(i32, @intFromFloat(16 * k));
+        const th: i32 = @intFromFloat(22 * k);
+        const x = @divTrunc(@as(i32, @intCast(pw)) - tw, 2);
+        const y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(10 * k));
+        cv.fillRoundRectAA(x, y, tw, th, 11 * k, 0xCC000000);
+        fui.textCentered(cv, .{ .x = x, .y = y, .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, .regular, msg);
+    }
+
+    /// Handles one event; true when the pin should close.
+    fn handle(p: *Pin, ev: window.InputEvent, k: f64) !bool {
+        switch (ev) {
+            .close => return true,
+            .resize, .frame_done => p.dirty = true,
+            .key => |key| if (key.pressed) return p.onKey(key.code),
+            .pointer_axis => |a| p.onAxis(if (a.value120) |n| @as(f64, @floatFromInt(n)) / 120.0 else a.value / 10.0),
+            .pointer_motion => |m| try p.onMotion(m.x, m.y, k),
+            .pointer_button => |b| return p.onButton(b.button, b.pressed, b.x, b.y, k),
+        }
+        return false;
+    }
+
+    fn setZoom(p: *Pin, z: f64) void {
+        p.zoom = z;
+        p.dirty = true;
+    }
+
+    fn onKey(p: *Pin, code: u32) bool {
+        switch (code) {
+            window.KEY_ESC => return true,
+            12, 74 => p.setZoom(zoomStep(p.zoom, 1)), // - zooms out
+            13, 78 => p.setZoom(zoomStep(p.zoom, -1)), // = + zooms in
+            11 => p.setZoom(1), // 0: 100%
+            else => {},
+        }
+        return false;
+    }
+
+    fn onAxis(p: *Pin, v: f64) void {
+        p.scroll_acc += v;
+        const steps: i32 = @intFromFloat(@trunc(p.scroll_acc));
+        if (steps == 0) return;
+        p.scroll_acc -= @floatFromInt(steps);
+        p.setZoom(zoomStep(p.zoom, steps));
+    }
+
+    fn onMotion(p: *Pin, x: f64, y: f64, k: f64) !void {
+        const inside = x >= 0;
+        const ox = pad * k;
+        const r = 11 * k;
+        const cx = ox + @as(f64, @floatFromInt(p.scaled_w)) - 8 * k - r;
+        const cy = ox + 8 * k + r;
+        const hc = inside and (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r * 1.4;
+        if (inside != p.hover or hc != p.hover_close) p.dirty = true;
+        p.hover = inside;
+        p.hover_close = hc;
+        if (p.drag_from) |from| try p.dragTo(from, inside, x, y, k);
+    }
+
+    /// Layer shell: follows the pointer by moving the margins. Positions
+    /// on the pin cannot say how far the pointer went: the pin moves under
+    /// it with a delay, and compositors differ on which place a held
+    /// button's motion is relative to (sway: where the press happened).
+    /// Relative pointer motion is the pointer's own.
+    fn dragTo(p: *Pin, from: [2]f64, inside: bool, x: f64, y: f64, k: f64) !void {
+        const rel = p.win.takeRelative() orelse .{ 0, 0 };
+        // absolute devices (tablets; KWin's fake input) may move the
+        // pointer without relative motion: then go by positions, which
+        // KWin gives relative to where the pin is now
+        if (rel[0] != 0 or rel[1] != 0) p.drag_rel = true;
+        if (p.drag_rel) {
+            p.drag_at[0] += rel[1];
+            p.drag_at[1] += rel[0];
+        } else if (inside) {
+            p.drag_at[0] += (y - from[1]) / k;
+            p.drag_at[1] += (x - from[0]) / k;
+        }
+        const top: i32 = @intFromFloat(@round(p.drag_at[0]));
+        const left: i32 = @intFromFloat(@round(p.drag_at[1]));
+        if (top != p.margin[0] or left != p.margin[3]) {
+            p.margin[0] = top;
+            p.margin[3] = left;
+            try p.win.setLayerPlacement(0, p.lw, p.lh, p.margin);
+        }
+    }
+
+    fn onButton(p: *Pin, button: u32, pressed: bool, x: f64, y: f64, k: f64) !bool {
+        if (button == window.BTN_LEFT and pressed) {
+            if (p.hover_close) return true;
+            if (p.layer) {
+                p.drag_from = .{ x, y };
+                p.drag_at = .{ @floatFromInt(p.margin[0]), @floatFromInt(p.margin[3]) };
+                p.drag_rel = false;
+                _ = p.win.takeRelative();
+            } else try p.win.startMoveOf(0);
+        } else if (button == window.BTN_LEFT) {
+            p.drag_from = null;
+        } else if (button == window.BTN_RIGHT and pressed) {
+            try p.win.showWindowMenu(0, @intFromFloat(x / k), @intFromFloat(y / k));
+        } else if (button == window.BTN_MIDDLE and pressed) {
+            return true;
+        }
+        return false;
+    }
+};
