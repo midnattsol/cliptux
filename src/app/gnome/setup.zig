@@ -5,7 +5,6 @@
 
 const std = @import("std");
 const dbus = @import("../../platform/dbus.zig");
-const sys = @import("../../platform/sys.zig");
 const gsettings = @import("../gsettings.zig");
 const Env = @import("../env.zig").Env;
 const extension = @import("extension.zig");
@@ -13,19 +12,29 @@ const capture = @import("capture.zig");
 const custom = @import("custom.zig");
 const screenshot_keys = @import("screenshot_keys.zig");
 const displayAccel = @import("../accel.zig").display;
+const ask = @import("ask.zig");
+const next_login = @import("next_login.zig");
+const pending_setup = @import("pending_setup.zig");
 
 const ext_schema_id = extension.ext_schema_id;
 const out = std.debug.print;
 
 /// What to do with custom shortcuts that run shotlet once the extension
 /// is active.
-pub const MoveShortcuts = enum { ask, yes, no };
+pub const MoveShortcuts = ask.Answer;
 
 /// Install and enable the extension (see gnome.zig); once it is active,
 /// set it up for prompt-free captures.
 pub fn install(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connection, move: MoveShortcuts) extension.InstallResult {
     const r = extension.installExtension(gpa, env, bus_opt);
-    if (r == .active) setUp(gpa, env, bus_opt.?, move);
+    switch (r) {
+        .active => {
+            pending_setup.clear(env.home);
+            setUp(gpa, env, bus_opt.?, move);
+        },
+        .installed_relogin => next_login.prepare(gpa, env, move),
+        .failed => {},
+    }
     return r;
 }
 
@@ -40,16 +49,13 @@ fn setNote(comptime fmt: []const u8, args: anytype) void {
     note_len = s.len;
 }
 
-fn askYes(question: []const u8) bool {
-    if (std.c.isatty(0) == 0) return true;
-    std.debug.print("{s} [Y/n] ", .{question});
-    var buf: [64]u8 = undefined;
-    const n = sys.read(0, &buf) catch return false;
-    const a = std.mem.trim(u8, buf[0..n], " \t\r\n");
-    return a.len == 0 or a[0] == 'y' or a[0] == 'Y';
+/// Point the extension at `exe` (this binary; nothing when unknown).
+pub fn pointAt(arena: std.mem.Allocator, env: Env, schemadir: []const u8, exe: []const u8) !void {
+    if (exe.len == 0) return;
+    try gsettings.set(arena, env, schemadir, ext_schema_id, "shotlet-path", try gsettings.formatString(arena, exe));
 }
 
-fn selfExe(buf: []u8) ![]const u8 {
+pub fn selfExe(buf: []u8) ![]const u8 {
     const rc = std.os.linux.readlinkat(std.os.linux.AT.FDCWD, "/proc/self/exe", buf.ptr, buf.len);
     if (std.os.linux.errno(rc) != .SUCCESS or rc >= buf.len) return error.NoExe;
     return buf[0..rc];
@@ -65,13 +71,10 @@ fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShor
     const schemadir = extension.schemaDir(gpa, env, bus, &sd_buf) catch return;
     var exe_buf: [1024]u8 = undefined;
     const exe = selfExe(&exe_buf) catch "";
-    if (exe.len > 0) {
-        const v = gsettings.formatString(arena, exe) catch return;
-        gsettings.set(arena, env, schemadir, ext_schema_id, "shotlet-path", v) catch |err| {
-            std.log.warn("could not configure the extension ({t}): it may be an older version", .{err});
-            return;
-        };
-    }
+    pointAt(arena, env, schemadir, exe) catch |err| {
+        std.log.warn("could not configure the extension ({t}): it may be an older version", .{err});
+        return;
+    };
     if (!offerCustomShortcuts(arena, env, schemadir, exe, move)) return;
     takeGnomeKey(arena, env, schemadir, move);
     var info = waitForShortcut(gpa, bus);
@@ -86,11 +89,7 @@ fn offerCustomShortcuts(arena: std.mem.Allocator, env: Env, schemadir: []const u
     var names: std.ArrayList(u8) = .empty;
     for (found, 0..) |c, i| names.print(arena, "{s}\u{201C}{s}\u{201D} ({s})", .{ if (i > 0) ", " else "", c.name, if (c.binding.len > 0) c.binding else "no key" }) catch {};
     out("Your custom shortcut {s} runs shotlet.\n", .{names.items});
-    const yes = switch (move) {
-        .yes => true,
-        .no => false,
-        .ask => askYes("Move it to the GNOME integration, so it captures straight away inside GNOME Shell?"),
-    };
+    const yes = ask.resolve(move, "Move it to the GNOME integration, so it captures straight away inside GNOME Shell?");
     if (yes) {
         custom.moveShortcuts(arena, env, schemadir, found) catch |err| {
             out("Could not move it ({t}); it keeps working as it is.\n", .{err});
@@ -134,11 +133,7 @@ fn takeGnomeKey(arena: std.mem.Allocator, env: Env, schemadir: []const u8, move:
     const key = displayAccel(&kb, ours[0]);
     const where = whereToolGoes(arena, taken, &mb) catch return;
     out("{s} opens GNOME's own screenshot tool.\n", .{key});
-    const yes = switch (move) {
-        .yes => true,
-        .no => false,
-        .ask => askYes(std.fmt.allocPrint(arena, "Give {s} to Shotlet? ({s}; uninstall puts it back)", .{ key, where }) catch return),
-    };
+    const yes = ask.resolve(move, std.fmt.allocPrint(arena, "Give {s} to Shotlet? ({s}; uninstall puts it back)", .{ key, where }) catch return);
     if (!yes) {
         out("Kept it: Shotlet's key {s} stays unbound (see `shotlet gnome-integration shortcut`).\n", .{key});
         return;

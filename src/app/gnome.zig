@@ -9,7 +9,9 @@
 //! (InstallRemoteExtension: GNOME asks for confirmation and loads it at
 //! once); when that is not possible it copies the bundled extension to
 //! ~/.local/share/gnome-shell/extensions and enables it. GNOME Shell on
-//! Wayland only discovers a newly copied extension at the next login.
+//! Wayland only discovers a newly copied extension at the next login:
+//! install then lists it in enabled-extensions itself, and the rest of
+//! the setup runs once it is loaded (gnome/next_login, pending_setup).
 //!
 //! The extension also captures without prompts (see its extension.js):
 //! its own shortcut, and dev.shotlet.Shell1.Capture() for Shotlet's tray
@@ -58,6 +60,8 @@ pub const install = setup.install;
 pub const note = setup.note;
 
 pub const runCli = cli.runCli;
+/// The extension runs: finish an install that waited for the next login.
+pub const finishPendingSetup = @import("gnome/pending_setup.zig").finish;
 
 comptime {
     _ = extension;
@@ -66,6 +70,8 @@ comptime {
     _ = @import("gnome/screenshot_keys.zig");
     _ = setup;
     _ = install_state;
+    _ = @import("gnome/pending_setup.zig");
+    _ = @import("gnome/next_login.zig");
     _ = @import("gnome/shell_settings.zig");
     _ = cli;
 }

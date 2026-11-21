@@ -86,7 +86,11 @@ fn dispatch(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void 
     // starts a capture: `shotlet shot --from-shell ID ...`
     const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
     const cmd = if (shell_launch) "shot" else if (args.len > 1) args[1] else "shot";
-    if (shell_launch) launch.takeHandOff(env.runtime_dir);
+    if (shell_launch) {
+        launch.takeHandOff(env.runtime_dir);
+        // the extension runs: an install that waited for it can finish
+        @import("app/gnome.zig").finishPendingSetup(env);
+    }
     // `shotlet text` is a capture whose region's text is copied
     if (std.mem.eql(u8, cmd, "text")) launch.text_capture = true;
     const eql = std.mem.eql;

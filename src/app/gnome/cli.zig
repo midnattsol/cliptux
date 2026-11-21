@@ -38,7 +38,9 @@ fn runInstall(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, rest: []c
     }
     switch (setup.install(gpa, env, bus, move)) {
         .active => out("GNOME integration is active: captures need no permission prompt.\n", .{}),
-        .installed_relogin => out("Installed and enabled {s}.\nGNOME Shell loads newly copied extensions at login: log out and back in once,\nthen run `shotlet gnome-integration install` again to set up its shortcut.\n(If user extensions are disabled: gsettings set org.gnome.shell disable-user-extensions false)\n", .{extension.uuid}),
+        .installed_relogin => out("Installed {s}. It loads at your next login (GNOME Shell only finds new\n" ++
+            "extensions then). Shotlet finishes the setup with your answer the first time it\n" ++
+            "runs through it; `shotlet gnome-integration install` after logging in does it at once.\n", .{extension.uuid}),
         .failed => {
             out("Could not install the GNOME integration (see the messages above).\n", .{});
             return error.InstallFailed;
@@ -49,6 +51,7 @@ fn runInstall(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, rest: []c
 /// Give back what install took, reset the extension's settings, disable
 /// it and remove its files.
 fn runUninstall(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) !void {
+    @import("pending_setup.zig").clear(env.home);
     restoreTakenShortcuts(gpa, env);
     var sd_buf: [1100]u8 = undefined;
     if (extension.schemaDir(gpa, env, bus, &sd_buf)) |sd| {

@@ -27,6 +27,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
         return;
     }
     portal.registerApp(gpa, &conn);
+    if (gnome.isGnome() and gnome.extensionActive(&conn)) gnome.finishPendingSetup(env);
 
     const icon22 = try tray_mod.drawIcon(gpa, 22);
     defer gpa.free(icon22);
