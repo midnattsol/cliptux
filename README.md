@@ -45,20 +45,30 @@ xdg-desktop-portal (PipeWire recommended for fast capture).
 
 ```sh
 zig build -Doptimize=safe
-install -Dm755 zig-out/bin/shotlet ~/.local/bin/shotlet
-install -Dm644 shotlet.desktop ~/.local/share/applications/shotlet.desktop
-install -Dm644 shotlet.svg ~/.local/share/icons/hicolor/scalable/apps/shotlet.svg
+./install.sh               # into ~/.local; --autostart starts the tray at login
+./uninstall.sh             # removes it again (settings and history are kept)
 ```
 
-Or grab a prebuilt binary (x86_64 / arm64) from the
-[releases](../../releases) page — built against glibc 2.31, so they run on
-any distro from around 2020 onward (Ubuntu 20.04+, Debian 11+, etc.).
+`install.sh` puts `shotlet` in `~/.local/bin`, its desktop entry
+(`io.github.midnattsol.Shotlet.desktop`) and icon in `~/.local/share`, and
+on GNOME offers the Shell integration (`--gnome-extension` /
+`--no-gnome-extension` to answer up front). Or grab a prebuilt binary
+(x86_64 / arm64) from the [releases](../../releases) page — built against
+glibc 2.31, so they run on any distro from around 2020 onward (Ubuntu
+20.04+, Debian 11+, etc.); the tarball has the same `install.sh`.
+
+Shotlet's app id is `io.github.midnattsol.Shotlet`. It tells
+xdg-desktop-portal so at start (the portal's `Registry`, 1.19 and later;
+older portals learn it from a systemd scope), which is what lets GNOME
+remember the screen-sharing and screenshot consent however Shotlet is
+started. Consent given to versions before this id is not carried over:
+expect to be asked once more after updating.
 
 ## Usage
 
 ```sh
 shotlet            # capture + editor
-shotlet --daemon   # tray icon (autostart: copy shotlet.desktop to ~/.config/autostart)
+shotlet --daemon   # tray icon (autostart: ./install.sh --autostart)
 shotlet settings   # preferences and shortcut bindings
 ```
 
