@@ -508,6 +508,8 @@ pub const Editor = struct {
             self.drag = .none;
         } else if (self.sel != null) {
             self.sel = null;
+            // a drag in progress refers to the selection just dropped
+            self.drag = .none;
         }
         self.needs_render = true;
     }

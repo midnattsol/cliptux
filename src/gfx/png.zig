@@ -51,7 +51,7 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
             if (chunk[12] != 0) return error.InterlacedUnsupported;
             if (bit_depth != 8) return error.BitDepthUnsupported;
         } else if (std.mem.eql(u8, chunk_type, "PLTE")) {
-            palette_len = chunk.len / 3;
+            palette_len = @min(palette.len, chunk.len / 3);
             for (0..palette_len) |i| {
                 palette[i] = 0xFF000000 |
                     (@as(u32, chunk[i * 3]) << 16) |
