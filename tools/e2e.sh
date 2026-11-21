@@ -1,0 +1,350 @@
+#!/bin/bash
+# End-to-end tests: real shotlet, real portals, real PipeWire, driven by a
+# virtual keyboard and pointer, inside a private headless GNOME session
+# (tools/e2e/session.sh). Nothing touches the desktop you are logged into.
+#
+# usage: tools/e2e.sh [SHOTLET DRIVE] [SCENARIO...]
+#        zig build e2e [-- SCENARIO...]
+# SHOTLET/DRIVE default to zig-out/bin/shotlet and zig-out/bin/shotlet-drive
+# (zig build e2e-driver). Scenarios: see `scenarios` below; default all.
+# Prints PASS/FAIL/SKIP per check; exits 1 when anything failed. Skips
+# (exit 0) when gnome-shell, PipeWire or the portals are not installed.
+# Env: E2E_OUT=dir keeps logs and screenshots there (default: a temp dir,
+#      removed when everything passed).
+set -u
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime"
+
+# ---------------------------------------------------------------- inner side
+if [ "${1:-}" = "--inner" ]; then
+    scenario=$2
+    BIN=$E2E_BIN DRIVE=$E2E_DRIVE OUT=$E2E_OUT/$scenario
+    mkdir -p "$OUT"
+    cd "$HOME"
+    failed=0
+    pass() { echo "PASS $scenario: $*"; }
+    fail() { echo "FAIL $scenario: $*"; failed=1; }
+    skip() { echo "SKIP $scenario: $*"; }
+    check() { # check DESCRIPTION COMMAND...
+        local what=$1; shift
+        if "$@"; then pass "$what"; else fail "$what"; fi
+    }
+
+    # --- the input driver, as a coprocess (mutter ends its session on exit)
+    DRV_PID=
+    drv_start() {
+        coproc DRV { "$DRIVE" "$@" 2>>"$OUT/drive.log"; }
+        DRV_PID=$DRV_PID
+        local ans
+        read -r -t 20 ans <&"${DRV[0]}" || ans="err no answer"
+        [ "$ans" = "ok ready" ] || { echo "driver: $ans" >&2; return 1; }
+    }
+    # drv CMD...: run one driver command; its value lands in $VAL
+    VAL=
+    drv() {
+        local ans
+        echo "$*" >&"${DRV[1]}"
+        read -r -t 30 ans <&"${DRV[0]}" || ans="err no answer"
+        echo "> $* -> $ans" >>"$OUT/drive.log"
+        case $ans in
+            ok*) VAL=${ans#ok}; VAL=${VAL# }; return 0 ;;
+            *) VAL=; echo "driver: $* -> $ans" >&2; return 1 ;;
+        esac
+    }
+    drv_stop() { drv quit >/dev/null 2>&1; wait "$DRV_PID" 2>/dev/null; }
+    keys() { local k; for k in "$@"; do drv key "$k" || return 1; done; }
+    click() { drv move "$1" "$2" "$3" && drv sleep 120 && drv click "${4:-left}"; }
+    drag() { # drag MON X0 Y0 [MON] X1 Y1 ...: press, visit each point, release
+        local mon=$1
+        drv move "$mon" "$2" "$3" && drv sleep 100 && drv down || return 1
+        shift 3
+        while [ $# -ge 3 ]; do drv move "$1" "$2" "$3" || return 1; shift 3; done
+        drv sleep 100 && drv up
+    }
+    shot() { drv shot "$1" "$OUT/$2.png" >/dev/null; }
+
+    # --- shotlet
+    SHOT_PID=
+    run_shotlet() { # run_shotlet NAME ARGS...: start in the background
+        local name=$1; shift
+        SHOT_LOG=$OUT/$name.log
+        SHOTLET_EDITOR_DUMP=$OUT/$name "$BIN" "$@" >"$SHOT_LOG" 2>&1 &
+        SHOT_PID=$!
+    }
+    alive() { kill -0 "$SHOT_PID" 2>/dev/null; }
+    wait_exit() { # wait_exit SECONDS: true when shotlet exited; status in $RC
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            alive || { wait "$SHOT_PID"; RC=$?; return 0; }
+            sleep 0.1
+        done
+        RC=; return 1
+    }
+    wait_log() { # wait_log SECONDS PATTERN
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            grep -qE "$2" "$SHOT_LOG" 2>/dev/null && return 0
+            sleep 0.1
+        done
+        return 1
+    }
+    # the editor is up once every surface has keyboard or pointer input
+    wait_editor() { wait_log "${1:-10}" "startup: capture=" && sleep 0.8; }
+    stop_shotlet() { alive && kill "$SHOT_PID" 2>/dev/null; wait "$SHOT_PID" 2>/dev/null; }
+    png_size() { drv png "$1" && echo "$VAL"; }
+    clip_png() { # clip_png FILE: the clipboard's image/png into FILE
+        timeout 5 wl-paste -n -t image/png >"$1" 2>/dev/null &&
+            [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
+    }
+    not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
+    no_find() { ! drv find "$1" "$2" 2>/dev/null; }
+    eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
+
+    # --- the ScreenCast portal dialog (xdg-desktop-portal-gnome)
+    accent=3584e4 # Adwaita's accent: the Share button, the checkbox
+    # share_dialog MON [TILES]: wait for the dialog on MON, tick TILES
+    # monitor tiles (indexes in the dialog, for multi-monitor pickers), Share
+    share_dialog() {
+        local mon=$1 tiles=${2:-} sc=${3:-1} i
+        for i in $(seq 1 50); do
+            drv find "$mon" "$accent" 2>/dev/null && break
+            sleep 0.2
+        done
+        [ -n "$VAL" ] || { echo "  no share dialog" >&2; return 1; }
+        sleep 0.3
+        if [ -n "$tiles" ]; then
+            # with several monitors nothing is preselected: the first accent
+            # blob is the "Remember" checkbox; tiles sit below it
+            drv find "$mon" "$accent" || return 1
+            local cx cy
+            read -r cx cy _ <<<"$VAL"
+            for t in $tiles; do
+                case $t in
+                    0) click "$mon" $((cx - 42 * sc)) $((cy + 193 * sc)) ;;
+                    1) click "$mon" $((cx + 240 * sc)) $((cy + 173 * sc)) ;;
+                esac || return 1
+            done
+            sleep 0.3
+        fi
+        drv find "$mon" "$accent" || return 1 # now the enabled Share button
+        local sx sy
+        read -r sx sy _ <<<"$VAL"
+        shot "$mon" dialog
+        click "$mon" "$sx" "$sy"
+    }
+
+    case $scenario in
+    capture)
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc # leave the overview the session starts in
+        drv move 0 800 450
+        run_shotlet first
+        check "portal dialog shown and accepted" share_dialog 0
+        check "editor opened after Share" wait_editor 10
+        shot 0 editor
+        # the editor shows the captured desktop dimmed: not a flat colour
+        drv pixel "$OUT/editor.png" 400 300; a=$VAL
+        drv pixel "$OUT/editor.png" 1300 700; b=$VAL
+        check "editor shows the real desktop" test "$a" != "$b"
+        drag 0 200 200 0 400 350 0 600 500
+        drv key enter
+        sleep 0.5
+        shot 0 closed
+        drv pixel "$OUT/closed.png" 400 300
+        check "Enter closes the editor" test "$VAL" != "$a"
+        check "clipboard holds a PNG while shotlet serves it" clip_png "$OUT/clip.png"
+        check "copied PNG has the selection's size" eq "$(png_size "$OUT/clip.png")" 400x300
+        check "shotlet keeps serving the clipboard" alive
+        check "restore token stored" grep -q screencast_restore_token "$HOME/.config/shotlet/config"
+        first_pid=$SHOT_PID
+        t0=$(date +%s%N)
+        run_shotlet second
+        check "second capture is silent (restore token)" wait_editor 5
+        t1=$(date +%s%N)
+        echo "  second capture: $(((t1 - t0) / 1000000)) ms to editor"
+        drv key esc
+        check "Esc with nothing to cancel quits" wait_exit 5
+        check "  ... with status 0" eq "$RC" 0
+        SHOT_PID=$first_pid
+        check "first instance still owns the clipboard" clip_png "$OUT/clip2.png"
+        # copying again hands the clipboard over; the old server exits
+        run_shotlet third
+        wait_editor 5
+        prev=$first_pid
+        drag 0 100 100 0 300 200
+        drv key ctrl+c
+        sleep 1
+        check "Ctrl+C copies too" eq "$(clip_png "$OUT/clip3.png" && png_size "$OUT/clip3.png")" 200x100
+        SHOT_PID=$prev
+        check "previous clipboard server exits when replaced" wait_exit 5
+        ;;
+    cancel)
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet cancel
+        for i in $(seq 1 50); do drv find 0 "$accent" 2>/dev/null && break; sleep 0.2; done
+        sleep 0.3
+        shot 0 dialog
+        drv key esc
+        check "Esc in the dialog ends shotlet" wait_exit 5
+        check "  ... with status 0" eq "$RC" 0
+        check "  ... saying it was cancelled" grep -q "capture cancelled" "$SHOT_LOG"
+        check "  ... without trying the Screenshot portal" not_grep screenshot "$SHOT_LOG"
+        sleep 1
+        shot 0 after
+        check "no further dialog appears" no_find 0 "$accent"
+        check "no restore token stored" not_grep screencast_restore_token "$HOME/.config/shotlet/config"
+        ;;
+    multimon)
+        drv_start Meta-0 Meta-1 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        run_shotlet multi
+        check "picker shows both monitors; both shared" share_dialog 0 "0 1"
+        check "editor opened" wait_editor 10
+        check "  ... capturing both monitors" grep -q "monitors=2" "$SHOT_LOG"
+        shot 0 editor0
+        shot 1 editor1
+        # 1400..1800 x 300..500 in desktop coordinates: across the seam
+        drag 0 1400 300 0 1599 400 1 100 450 1 200 500
+        sleep 0.3
+        shot 0 sel0
+        shot 1 sel1
+        drv key enter
+        sleep 1
+        check "selection across both monitors is copied whole" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
+        check "one editor surface per monitor (first)" eq "$(png_size "$OUT/multi-frame.png")" 1600x900
+        check "one editor surface per monitor (second)" eq "$(png_size "$OUT/multi-frame-1.png")" 1280x720
+        ;;
+    mixed)
+        # Meta-0 2560x1440 at 2 (1280x720 logical), Meta-1 1280x720 at 1
+        "$ROOT/tools/e2e/monitors.sh" Meta-0=2 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
+        drv_start Meta-0 Meta-1 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 1280 720
+        run_shotlet mixed
+        check "both monitors shared" share_dialog 0 "0 1" 2
+        check "editor opened" wait_editor 10
+        # the stitched image uses the sharpest density (2): the 1x monitor
+        # is upscaled, so 480x300 logical across the seam is 960x600
+        # (the driver addresses a monitor in its physical pixels)
+        drag 0 2000 400 0 2550 700 1 100 450 1 200 500
+        sleep 0.3
+        shot 0 sel0
+        shot 1 sel1
+        drv key ctrl+c
+        sleep 1
+        check "mixed-scale selection exported at 2x" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 960x600
+        ;;
+    fractional | integer)
+        # Meta-0 2560x1440 at 1.5 (mutter's nearest: 1.4953) or 2
+        if [ "$scenario" = integer ]; then
+            "$ROOT/tools/e2e/monitors.sh" Meta-0=2 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
+            export SHOTLET_NO_FRACTIONAL=1 # wl_output.scale + set_buffer_scale
+        else
+            "$ROOT/tools/e2e/monitors.sh" Meta-0=1.5 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
+        fi
+        drv_start Meta-0 Meta-1 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 1280 720
+        run_shotlet hidpi
+        check "both monitors shared" share_dialog 0 "0 1" "$([ "$scenario" = integer ] && echo 2 || echo 1)"
+        check "editor opened" wait_editor 10
+        drag 0 300 300 0 900 700 0 1500 900
+        sleep 0.3
+        shot 0 sel
+        drv key ctrl+c
+        sleep 0.5
+        check "selection maps 1:1 to physical pixels" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 1200x600
+        check "buffer covers the panel exactly" eq "$(png_size "$OUT/hidpi-frame.png")" 2560x1440
+        check "the 1x monitor keeps a 1x buffer" eq "$(png_size "$OUT/hidpi-frame-1.png")" 1280x720
+        # the toolbar's close button, found by its colour, closes on click
+        run_shotlet close
+        wait_editor 5
+        drag 0 300 300 0 1500 900
+        sleep 0.3
+        shot 0 toolbar
+        cx=
+        drv find 0 ff6b6b 8 && read -r cx cy _ <<<"$VAL"
+        check "toolbar close button found" test -n "$cx"
+        click 0 "$cx" "$cy"
+        check "a click on a toolbar button hits it" wait_exit 5
+        check "  ... with status 0" eq "$RC" 0
+        ;;
+    *)
+        skip "unknown scenario"
+        ;;
+    esac
+    stop_shotlet
+    pkill -P $$ 2>/dev/null
+    exit $failed
+fi
+
+# ---------------------------------------------------------------- outer side
+BIN=${1:-}
+if [ -n "$BIN" ] && [ -x "$BIN" ] && [ -n "${2:-}" ] && [ -x "$2" ]; then
+    DRIVE=$2; shift 2
+else
+    BIN=$ROOT/zig-out/bin/shotlet DRIVE=$ROOT/zig-out/bin/shotlet-drive
+fi
+want=${*:-$scenarios}
+
+missing=
+for t in gnome-shell dbus-run-session pipewire wireplumber gdbus wl-paste wl-copy; do
+    command -v "$t" >/dev/null || missing="$missing $t"
+done
+for f in /usr/libexec/xdg-desktop-portal /usr/libexec/xdg-desktop-portal-gnome; do
+    [ -x "$f" ] || missing="$missing ${f##*/}"
+done
+if [ -n "$missing" ]; then
+    echo "SKIP e2e: missing$missing"
+    exit 0
+fi
+for f in "$BIN" "$DRIVE"; do
+    [ -x "$f" ] || { echo "e2e: $f not built (zig build e2e-driver)" >&2; exit 2; }
+done
+BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE")
+
+keep=${E2E_OUT:+1}
+E2E_OUT=${E2E_OUT:-$(mktemp -d -t shotlet-e2e-out.XXXXXX)}
+mkdir -p "$E2E_OUT"
+E2E_OUT=$(realpath "$E2E_OUT")
+rm -f "$E2E_OUT/results.txt"
+export E2E_BIN=$BIN E2E_DRIVE=$DRIVE E2E_OUT
+
+total_fail=0
+for s in $want; do
+    # each scenario gets a fresh session: its own HOME, portal state,
+    # monitors and keyboard layout
+    mons="1600x900" layout=""
+    case $s in
+        multimon) mons="1600x900 1280x720" ;;
+        mixed | fractional | integer) mons="2560x1440 1280x720" ;;
+        keyboard | clipboard) layout=es ;;
+    esac
+    HL_MONITORS=$mons HL_LAYOUT=$layout timeout 300 \
+        "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
+        2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
+        while IFS= read -r line; do
+            # session services print to the same stream; keep results only
+            case $line in
+                PASS* | FAIL* | SKIP* | "  "*) echo "$line" | tee -a "$E2E_OUT/results.txt" ;;
+                *) echo "$line" >>"$E2E_OUT/stderr.log" ;;
+            esac
+        done
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" = 77 ]; then
+        echo "SKIP $s: no headless session (see $E2E_OUT/stderr.log)"
+    elif [ "$rc" != 0 ]; then
+        total_fail=1
+        grep -q "^FAIL $s" "$E2E_OUT/results.txt" || echo "FAIL $s: exit status $rc" | tee -a "$E2E_OUT/results.txt"
+    fi
+done
+
+passed=$(grep -c '^PASS' "$E2E_OUT/results.txt" 2>/dev/null)
+failed=$(grep -c '^FAIL' "$E2E_OUT/results.txt" 2>/dev/null)
+echo "e2e: ${passed:-0} passed, ${failed:-0} failed (logs: $E2E_OUT)"
+if [ "$total_fail" = 0 ] && [ -z "$keep" ]; then rm -rf "$E2E_OUT"; fi
+exit $total_fail

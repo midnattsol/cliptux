@@ -34,4 +34,33 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
+
+    // end-to-end suite: shotlet driven by a virtual keyboard and pointer in
+    // a private headless GNOME session (tools/e2e.sh skips without one)
+    const drive = b.addExecutable(.{
+        .name = "shotlet-drive",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/e2e/drive.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
+                .root_source_file = b.path("src/testkit.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }) }},
+        }),
+    });
+    // compiled with the tests so it cannot rot unnoticed
+    test_step.dependOn(&drive.step);
+    const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});
+    run_e2e.addArtifactArg(exe);
+    run_e2e.addArtifactArg(drive);
+    run_e2e.addPassthruArgs();
+    run_e2e.has_side_effects = true;
+    const e2e_step = b.step("e2e", "Run the end-to-end suite (private headless GNOME session)");
+    e2e_step.dependOn(&run_e2e.step);
+    const drive_step = b.step("e2e-driver", "Install the e2e input driver (zig-out/bin/shotlet-drive)");
+    drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
 }
