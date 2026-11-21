@@ -3,22 +3,24 @@
 //! outlines. Covers name-keyed and CID-keyed fonts (FDArray/FDSelect), which
 //! is what Noto CJK, Cantarell and Source fonts use. CFF2 (variable) is not
 //! supported. Every read is bounds-checked: font files are untrusted input.
+//! The charstring interpreter lives in cff/machine.zig.
 
 const std = @import("std");
+const Machine = @import("cff/machine.zig").Machine;
 
 pub const Error = error{BadCff};
 
-fn rd8(d: []const u8, off: usize) Error!u8 {
+pub fn rd8(d: []const u8, off: usize) Error!u8 {
     if (off >= d.len) return error.BadCff;
     return d[off];
 }
 
-fn rd16(d: []const u8, off: usize) Error!u16 {
+pub fn rd16(d: []const u8, off: usize) Error!u16 {
     if (off > d.len or d.len - off < 2) return error.BadCff;
     return std.mem.readInt(u16, d[off..][0..2], .big);
 }
 
-fn rdN(d: []const u8, off: usize, n: u8) Error!u32 {
+pub fn rdN(d: []const u8, off: usize, n: u8) Error!u32 {
     if (off > d.len or d.len - off < n) return error.BadCff;
     var v: u32 = 0;
     for (d[off..][0..n]) |b| v = (v << 8) | b;
@@ -229,270 +231,6 @@ fn privateSubrs(d: []const u8, dict: []const u8) Error!Index {
     const subrs = (try dictInt(pd, 19, 1)) orelse return .{};
     const idx, _ = try Index.parse(d, @as(usize, off) + subrs[0]);
     return idx;
-}
-
-fn bias(n: u32) i32 {
-    return if (n < 1240) 107 else if (n < 33900) 1131 else 32768;
-}
-
-fn Machine(comptime Sink: type) type {
-    return struct {
-        cff: *const Cff,
-        lsubrs: Index,
-        sink: Sink,
-        stack: [48]f64 = undefined,
-        sp: usize = 0,
-        x: f64 = 0,
-        y: f64 = 0,
-        nstems: usize = 0,
-        seen_width: bool = false,
-        open: bool = false,
-        ops: u32 = 0,
-        done: bool = false,
-
-        const Self = @This();
-        const max_ops = 200_000;
-
-        fn push(self: *Self, v: f64) !void {
-            if (self.sp >= self.stack.len) return error.BadCff;
-            self.stack[self.sp] = v;
-            self.sp += 1;
-        }
-
-        /// The first stack-clearing operator may carry the advance width as
-        /// an extra leading operand; drop it (we use hmtx).
-        fn args(self: *Self, odd_means_width: bool) []const f64 {
-            var s: []const f64 = self.stack[0..self.sp];
-            if (!self.seen_width) {
-                self.seen_width = true;
-                if (odd_means_width and s.len > 0) s = s[1..];
-            }
-            return s;
-        }
-
-        fn closePath(self: *Self) !void {
-            if (self.open) try self.sink.close();
-            self.open = false;
-        }
-
-        fn moveTo(self: *Self, dx: f64, dy: f64) !void {
-            try self.closePath();
-            self.x += dx;
-            self.y += dy;
-            try self.sink.moveTo(self.x, self.y);
-            self.open = true;
-        }
-
-        fn lineTo(self: *Self, dx: f64, dy: f64) !void {
-            if (!self.open) try self.moveTo(0, 0);
-            self.x += dx;
-            self.y += dy;
-            try self.sink.lineTo(self.x, self.y);
-        }
-
-        fn curveTo(self: *Self, dx1: f64, dy1: f64, dx2: f64, dy2: f64, dx3: f64, dy3: f64) !void {
-            if (!self.open) try self.moveTo(0, 0);
-            const x1 = self.x + dx1;
-            const y1 = self.y + dy1;
-            const x2 = x1 + dx2;
-            const y2 = y1 + dy2;
-            self.x = x2 + dx3;
-            self.y = y2 + dy3;
-            try self.sink.cubicTo(x1, y1, x2, y2, self.x, self.y);
-        }
-
-        fn stems(self: *Self) void {
-            const s = self.args(self.sp % 2 == 1);
-            self.nstems += s.len / 2;
-            self.sp = 0;
-        }
-
-        /// Sinks may fail with BadGlyph (too complex) or OutOfMemory.
-        const RunError = error{ BadCff, BadGlyph, OutOfMemory };
-
-        fn run(self: *Self, code: []const u8, depth: u8) RunError!void {
-            if (depth > 10) return error.BadCff;
-            var i: usize = 0;
-            while (i < code.len and !self.done) {
-                self.ops += 1;
-                if (self.ops > max_ops) return error.BadCff;
-                const b = code[i];
-                i += 1;
-                if (b >= 32) {
-                    if (b <= 246) {
-                        try self.push(@floatFromInt(@as(i32, b) - 139));
-                    } else if (b <= 250) {
-                        try self.push(@floatFromInt((@as(i32, b) - 247) * 256 + @as(i32, try rd8(code, i)) + 108));
-                        i += 1;
-                    } else if (b <= 254) {
-                        try self.push(@floatFromInt(-(@as(i32, b) - 251) * 256 - @as(i32, try rd8(code, i)) - 108));
-                        i += 1;
-                    } else {
-                        const v: i32 = @bitCast(try rdN(code, i, 4));
-                        try self.push(@as(f64, @floatFromInt(v)) / 65536.0);
-                        i += 4;
-                    }
-                    continue;
-                }
-                if (b == 28) {
-                    try self.push(@floatFromInt(@as(i16, @bitCast(try rd16(code, i)))));
-                    i += 2;
-                    continue;
-                }
-                const s = self.stack[0..self.sp];
-                switch (b) {
-                    1, 3, 18, 23 => self.stems(), // hstem vstem hstemhm vstemhm
-                    19, 20 => { // hintmask cntrmask: implicit vstem first
-                        if (self.sp > 0) self.stems();
-                        self.seen_width = true;
-                        i += (self.nstems + 7) / 8;
-                        if (i > code.len) return error.BadCff;
-                    },
-                    21 => { // rmoveto
-                        const a = self.args(self.sp > 2);
-                        if (a.len < 2) return error.BadCff;
-                        try self.moveTo(a[0], a[1]);
-                    },
-                    22 => { // hmoveto
-                        const a = self.args(self.sp > 1);
-                        if (a.len < 1) return error.BadCff;
-                        try self.moveTo(a[0], 0);
-                    },
-                    4 => { // vmoveto
-                        const a = self.args(self.sp > 1);
-                        if (a.len < 1) return error.BadCff;
-                        try self.moveTo(0, a[0]);
-                    },
-                    5 => { // rlineto
-                        var k: usize = 0;
-                        while (k + 1 < s.len) : (k += 2) try self.lineTo(s[k], s[k + 1]);
-                    },
-                    6, 7 => { // hlineto vlineto: alternating
-                        var horiz = b == 6;
-                        for (s) |v| {
-                            if (horiz) try self.lineTo(v, 0) else try self.lineTo(0, v);
-                            horiz = !horiz;
-                        }
-                    },
-                    8 => { // rrcurveto
-                        var k: usize = 0;
-                        while (k + 5 < s.len) : (k += 6) try self.curveTo(s[k], s[k + 1], s[k + 2], s[k + 3], s[k + 4], s[k + 5]);
-                    },
-                    24 => { // rcurveline
-                        if (s.len < 8) return error.BadCff;
-                        var k: usize = 0;
-                        while (k + 5 < s.len - 2) : (k += 6) try self.curveTo(s[k], s[k + 1], s[k + 2], s[k + 3], s[k + 4], s[k + 5]);
-                        try self.lineTo(s[s.len - 2], s[s.len - 1]);
-                    },
-                    25 => { // rlinecurve
-                        if (s.len < 8) return error.BadCff;
-                        var k: usize = 0;
-                        while (k + 1 < s.len - 6) : (k += 2) try self.lineTo(s[k], s[k + 1]);
-                        const c = s[s.len - 6 ..];
-                        try self.curveTo(c[0], c[1], c[2], c[3], c[4], c[5]);
-                    },
-                    26 => { // vvcurveto
-                        var k: usize = 0;
-                        var f: f64 = 0;
-                        if (s.len % 2 == 1) {
-                            f = s[0];
-                            k = 1;
-                        }
-                        while (k + 3 < s.len) : (k += 4) {
-                            try self.curveTo(f, s[k], s[k + 1], s[k + 2], 0, s[k + 3]);
-                            f = 0;
-                        }
-                    },
-                    27 => { // hhcurveto
-                        var k: usize = 0;
-                        var f: f64 = 0;
-                        if (s.len % 2 == 1) {
-                            f = s[0];
-                            k = 1;
-                        }
-                        while (k + 3 < s.len) : (k += 4) {
-                            try self.curveTo(s[k], f, s[k + 1], s[k + 2], s[k + 3], 0);
-                            f = 0;
-                        }
-                    },
-                    30, 31 => { // vhcurveto hvcurveto: alternating
-                        var horiz = b == 31;
-                        var k: usize = 0;
-                        while (k + 3 < s.len) : (k += 4) {
-                            const last: f64 = if (s.len - k == 5) s[k + 4] else 0;
-                            if (horiz) {
-                                try self.curveTo(s[k], 0, s[k + 1], s[k + 2], last, s[k + 3]);
-                            } else {
-                                try self.curveTo(0, s[k], s[k + 1], s[k + 2], s[k + 3], last);
-                            }
-                            horiz = !horiz;
-                        }
-                    },
-                    10, 29 => { // callsubr callgsubr
-                        if (self.sp < 1) return error.BadCff;
-                        self.sp -= 1;
-                        const idx = if (b == 10) self.lsubrs else self.cff.gsubrs;
-                        const n = self.stack[self.sp];
-                        if (!(n > -40000 and n < 40000)) return error.BadCff;
-                        const k = @as(i32, @intFromFloat(n)) + bias(idx.count);
-                        if (k < 0) return error.BadCff;
-                        try self.run(try idx.get(@intCast(k)), depth + 1);
-                        continue; // operands left by the subr stay on the stack
-                    },
-                    11 => return, // return
-                    14 => { // endchar
-                        _ = self.args(self.sp == 1 or self.sp == 5);
-                        try self.closePath();
-                        self.done = true;
-                    },
-                    12 => {
-                        const op2 = try rd8(code, i);
-                        i += 1;
-                        try self.escape(op2, s);
-                    },
-                    else => {}, // reserved
-                }
-                self.sp = 0;
-            }
-        }
-
-        fn escape(self: *Self, op: u8, s: []const f64) RunError!void {
-            switch (op) {
-                35 => { // flex
-                    if (s.len < 12) return error.BadCff;
-                    try self.curveTo(s[0], s[1], s[2], s[3], s[4], s[5]);
-                    try self.curveTo(s[6], s[7], s[8], s[9], s[10], s[11]);
-                },
-                34 => { // hflex
-                    if (s.len < 7) return error.BadCff;
-                    try self.curveTo(s[0], 0, s[1], s[2], s[3], 0);
-                    try self.curveTo(s[4], 0, s[5], -s[2], s[6], 0);
-                },
-                36 => { // hflex1
-                    if (s.len < 9) return error.BadCff;
-                    try self.curveTo(s[0], s[1], s[2], s[3], s[4], 0);
-                    try self.curveTo(s[5], 0, s[6], s[7], s[8], -(s[1] + s[3] + s[7]));
-                },
-                37 => { // flex1
-                    if (s.len < 11) return error.BadCff;
-                    var dx: f64 = 0;
-                    var dy: f64 = 0;
-                    var k: usize = 0;
-                    while (k < 10) : (k += 2) {
-                        dx += s[k];
-                        dy += s[k + 1];
-                    }
-                    try self.curveTo(s[0], s[1], s[2], s[3], s[4], s[5]);
-                    if (@abs(dx) > @abs(dy)) {
-                        try self.curveTo(s[6], s[7], s[8], s[9], s[10], -dy);
-                    } else {
-                        try self.curveTo(s[6], s[7], s[8], s[9], -dx, s[10]);
-                    }
-                },
-                else => {}, // arithmetic and storage operators: unused in practice
-            }
-        }
-    };
 }
 
 test "cff index and dict parsing reject garbage" {
