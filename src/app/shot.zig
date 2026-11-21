@@ -157,7 +157,7 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         switch (screencast(gpa, env, conn, cfg)) {
             .granted => |cap| return cap,
             .cancelled => return null,
-            .timeout => return error.PortalTimeout,
+            .timeout => return dialogTimedOut(),
             .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
             .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
@@ -170,12 +170,19 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         // headless first run is denied; ask again from a focused window
         .denied => (try firstRunPermissionFlow(gpa, env, conn)) orelse return null,
         .unavailable => return error.NoScreenshotPortal,
-        .timeout => return error.PortalTimeout,
+        .timeout => return dialogTimedOut(),
     };
     defer gpa.free(png_data);
     var img = try png.decode(gpa, png_data);
     errdefer img.deinit(gpa);
     return try capture.Capture.single(gpa, img);
+}
+
+/// Nobody answered a consent dialog for timeout_dialog_ms: it was closed;
+/// end quietly, like a cancel.
+fn dialogTimedOut() ?capture.Capture {
+    std.log.info("the permission dialog got no answer; closed it and stopped", .{});
+    return null;
 }
 
 /// ScreenCast + PipeWire: one frame from every monitor, stitched. Errors
