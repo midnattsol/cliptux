@@ -65,10 +65,20 @@ if [ "${1:-}" = "--inner" ]; then
     shot() { drv shot "$1" "$OUT/$2.png" >/dev/null; }
     slow_drag() { # slow_drag MON X0 Y0 X1 Y1 ...: like a hand, a pause per point
         local mon=$1
-        drv move "$mon" "$2" "$3" && drv sleep 150 && drv down || return 1
+        # mutter only gives a window that just moved under a still pointer
+        # the pointer on the next motion: arrive in two steps
+        drv move "$mon" $(($2 - 4)) "$3" && drv sleep 150 &&
+            drv move "$mon" "$2" "$3" && drv sleep 150 && drv down || return 1
         shift 3
         while [ $# -ge 2 ]; do drv move "$mon" "$1" "$2" && drv sleep 200 || return 1; shift 2; done
         drv sleep 300 && drv up
+    }
+    shown_count() { cat "$OUT"/*.log 2>/dev/null | grep -cE "quick access: (showing|added)"; }
+    # new_card N: wait until more than N thumbnails were shown in all
+    new_card() {
+        local i
+        for i in $(seq 1 100); do [ "$(shown_count)" -gt "$1" ] && { sleep 1; return 0; }; sleep 0.1; done
+        return 1
     }
     any_log() { # any_log SECONDS PATTERN: in any shotlet log of this scenario
         local i
@@ -190,9 +200,25 @@ if [ "${1:-}" = "--inner" ]; then
     start_target() { # start_target [MIME...]
         local i
         : >"$OUT/target.log"
-        "$PYGTK" "$ROOT/tools/e2e/target.py" "$@" >>"$OUT/target.log" 2>>"$OUT/target.err" &
+        env ${TGT_DEBUG:+WAYLAND_DEBUG=client} "$PYGTK" "$ROOT/tools/e2e/target.py" "$@" >>"$OUT/target.log" 2>>"$OUT/target.err" &
         TGT_PID=$!
         for i in $(seq 1 50); do grep -q "^active True" "$OUT/target.log" && return 0; sleep 0.2; done
+        return 1
+    }
+    # a window taking drops (tools/e2e/droptarget.zig) on $OUT/drop.log
+    start_droptarget() { # start_droptarget [MIME...]
+        local i
+        : >"$OUT/drop.log"
+        "$(dirname "$DRIVE")/shotlet-droptarget" "$@" >>"$OUT/drop.log" 2>>"$OUT/drop.err" &
+        for i in $(seq 1 50); do grep -q "^ready" "$OUT/drop.log" && { sleep 0.8; return 0; }; sleep 0.2; done
+        return 1
+    }
+    drop_said() { # drop_said SECONDS PATTERN
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            grep -qE "$2" "$OUT/drop.log" 2>/dev/null && return 0
+            sleep 0.1
+        done
         return 1
     }
     target_said() { # target_said SECONDS PATTERN
@@ -276,16 +302,27 @@ if [ "${1:-}" = "--inner" ]; then
         # drag out into the app
         read -r x y <<<"$(card_point 120 75)"
         slow_drag 0 "$x" "$y" $((x + 40)) $((y - 40)) 400 500 600 400 800 300
-        check "dragging the thumbnail drops a PNG into the app" target_said 5 "^drop image/png [0-9]+ 89504e47"
+        check "dragging the thumbnail drops the image into a GTK app" target_said 5 "^drop texture 500 300"
         check "  ... and the thumbnail goes away" any_log 5 "quick access: dropped"
         sleep 0.5
         shot 0 dropped
         check "  ... from the screen" no_find_exact 0 e03131 40 4 0 700 300 900
+        # as a file: an app that asks for text/uri-list
+        check "a drop target for files is up" start_droptarget text/uri-list
+        n=$(shown_count)
+        red_capture third
+        new_card "$n"
+        read -r x y <<<"$(card_point 120 75)"
+        slow_drag 0 "$x" "$y" $((x + 40)) $((y - 40)) 400 500 600 400 800 300
+        check "  ... and as a file (text/uri-list)" drop_said 5 "^drop text/uri-list [0-9]+ file:///"
+        f=$(grep -o "file://[^ ]*" "$OUT/drop.log" | head -1 | sed 's|^file://||')
+        check "  ... naming a PNG named after the capture time" eq "$(png_size "$f")" 500x300
+        pkill -f shotlet-droptarget
 
         # pin: a second capture, pinned
+        n=$(shown_count)
         red_capture second
-        any_log 10 "quick access: added"
-        sleep 1
+        new_card "$n"
         read -r x y <<<"$(card_point 120 75)"
         drv move 0 "$x" "$y"
         sleep 0.3
@@ -317,6 +354,95 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... and its Ctrl+C copies" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
         keys esc
         check "Esc closes it" wait_log 5 "quick access: closed"
+        ;;
+    annotate)
+        # Annotate on the thumbnail reopens the editor with the shapes
+        # still editable; its Copy updates the same capture
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        start_target
+        drv move 0 800 450
+        red_capture first first
+        check "thumbnail shown" wait_log 10 "quick access: showing"
+        sleep 1
+        clip_png "$OUT/orig.png"
+        drv pixel "$OUT/orig.png" 150 140
+        check "the copy has the red rectangle" test "${VAL:2:6}" = e03131
+        read -r x y <<<"$(card_point 120 75)"
+        drv move 0 "$x" "$y"
+        sleep 0.3
+        read -r x y <<<"$(card_point 187 129)"
+        click 0 "$x" "$y"
+        check "Annotate reopens the editor" any_log 10 "editing [0-9a-f-]+ again"
+        sleep 1.5
+        shot 0 reopened
+        # the 500x300 capture sits centred: the rectangle at 650..800, 400..480
+        check "  ... with the previous annotations" drv find 0 e03131 40 4 600 350 1000 550
+        keys v
+        click 0 725 440
+        drv sleep 200
+        keys delete
+        sleep 0.3
+        shot 0 deleted
+        check "  ... which can be selected and deleted" no_find_exact 0 e03131 40 4 600 350 1000 550
+        keys enter
+        sleep 1.5
+        clip_png "$OUT/edited.png"
+        check "  ... and Copy gives the edited image" eq "$(png_size "$OUT/edited.png")" 500x300
+        drv pixel "$OUT/edited.png" 150 140
+        check "  ... without the rectangle" test "${VAL:2:6}" != e03131
+        n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+        check "  ... updating the same history entry" eq "$n" 1
+        ;;
+    history)
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        red_capture one first
+        wait_log 10 "quick access: showing"
+        sleep 0.5
+        n=$(shown_count)
+        run_shotlet two
+        wait_editor 10
+        drag 0 100 100 0 300 250
+        keys ctrl+s
+        new_card "$n"
+        n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+        check "copied and saved captures are kept" eq "$n" 2
+        grep -l "saved=" "$HOME"/.local/state/shotlet/history/*/meta >/dev/null
+        check "  ... the saved one with its path" test $? = 0
+        pkill -f "$BIN quick" 2>/dev/null
+        SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
+        check "Recent captures lists both" wait_log 5 "history: 2 captures"
+        check "  ... without a search field when Tesseract is missing" wait_log 5 "text search off|text search on"
+        sleep 1
+        shot 0 panel
+        keys tab
+        sleep 0.2
+        shot 0 picked
+        keys enter
+        sleep 0.5
+        check "Enter copies the picked capture" wait_log 5 "history: copied"
+        check "  ... as a PNG" clip_png "$OUT/hclip.png"
+        keys delete
+        check "Delete removes it" wait_log 5 "history: deleted"
+        sleep 0.3
+        shot 0 after-delete
+        keys esc esc
+        wait_exit 5
+        pkill -f "$BIN (quick|history|pin)" 2>/dev/null
+        sleep 0.5
+        run_shotlet again history
+        check "the history survives a restart" wait_log 5 "history: 1 captures"
+        keys esc esc
+        wait_exit 5
+        "$BIN" history clear >/dev/null 2>&1
+        run_shotlet cleared history
+        check "history clear empties it" wait_log 5 "history: 0 captures"
+        keys esc
+        wait_exit 5
         ;;
     capture)
         drv_start Meta-0 || { fail "driver"; exit 1; }

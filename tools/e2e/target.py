@@ -5,14 +5,15 @@
 #   active True|False      window focus changed
 #   text STRING            the entry's text changed
 #   click X Y              a primary click on the window
-#   drop MIME BYTES HEAD   a drop was read (HEAD: first bytes, hex or text)
+#   drop texture W H       an image was dropped (read as image/png)
+#   drop files PATH...     files were dropped (text/uri-list)
 # usage: target.py [MIME...]   types to ask for on drop, best first
 import sys
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 PREFER = sys.argv[1:] or ["image/png", "text/uri-list"]
 
@@ -39,11 +40,10 @@ class Target(Gtk.Application):
         click.connect("pressed", self.on_click, win)
         win.add_controller(click)
 
-        formats = Gdk.ContentFormats.new(PREFER)
-        drop = Gtk.DropTargetAsync.new(formats, Gdk.DragAction.COPY)
-        drop.connect("accept", lambda t, d: True)
-        drop.connect("drag-enter", lambda t, d, x, y: Gdk.DragAction.COPY)
-        drop.connect("drag-motion", lambda t, d, x, y: Gdk.DragAction.COPY)
+        # the way apps take dropped images: as a texture or as files
+        drop = Gtk.DropTarget.new(GObject.TYPE_NONE, Gdk.DragAction.COPY)
+        types = {"image/png": Gdk.Texture, "text/uri-list": Gdk.FileList}
+        drop.set_gtypes([types[m].__gtype__ for m in PREFER if m in types])
         drop.connect("drop", self.on_drop)
         win.add_controller(drop)
 
@@ -56,24 +56,13 @@ class Target(Gtk.Application):
         # translate to window coordinates (the window is maximized)
         out("click", int(x), int(y))
 
-    def on_drop(self, _target, drop, _x, _y):
-        def got(d, res):
-            try:
-                stream, mime = d.read_finish(res)
-                data = b""
-                while True:
-                    chunk = stream.read_bytes(65536, None).get_data()
-                    if not chunk:
-                        break
-                    data += chunk
-                head = data[:8].hex() if mime == "image/png" else data.decode(errors="replace").strip()
-                out("drop", mime, len(data), head)
-                d.finish(Gdk.DragAction.COPY)
-            except GLib.Error as e:
-                out("drop-error", e.message)
-                d.finish(0)
-
-        drop.read_async(PREFER, GLib.PRIORITY_DEFAULT, None, got)
+    def on_drop(self, _target, value, _x, _y):
+        if isinstance(value, Gdk.Texture):
+            out("drop texture", value.get_width(), value.get_height())
+        elif isinstance(value, Gdk.FileList):
+            out("drop files", " ".join(f.get_path() or "" for f in value.get_files()))
+        else:
+            out("drop other", type(value).__name__)
         return True
 
 
