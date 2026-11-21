@@ -61,6 +61,23 @@ pub fn stitch(alloc: std.mem.Allocator, parts: []const Part) !Capture {
     const mons = try alloc.alloc(Monitor, parts.len);
     errdefer alloc.free(mons);
 
+    // per-monitor pixel rects and whether each needs resampling
+    const native = try alloc.alloc(bool, parts.len);
+    defer alloc.free(native);
+    if (try hasLayout(parts)) placeByLayout(parts, mons, native) else placeInRow(parts, mons, native);
+    const width, const height = try canvasSize(mons);
+
+    const px = try alloc.alloc(u32, @as(usize, width) * height);
+    errdefer alloc.free(px);
+    if (parts.len > 1) @memset(px, 0xFF000000);
+    for (parts, mons, native) |p, m, nat| {
+        if (nat) copyNative(p, m, px, width, height) else resampleBilinear(p.pixels, p.width, p.height, px, width, m);
+    }
+    return .{ .image = .{ .width = width, .height = height, .pixels = px }, .monitors = mons };
+}
+
+/// True when every part has a usable logical rect; fails on empty frames.
+fn hasLayout(parts: []const Part) !bool {
     var have_layout = true;
     for (parts) |p| {
         if (p.width == 0 or p.height == 0) return error.EmptyFrame;
@@ -70,41 +87,47 @@ pub fn stitch(alloc: std.mem.Allocator, parts: []const Part) !Capture {
         };
         if (l.w == 0 or l.h == 0) have_layout = false;
     }
+    return have_layout;
+}
 
-    // per-monitor pixel rects and whether each needs resampling
-    const native = try alloc.alloc(bool, parts.len);
-    defer alloc.free(native);
-    if (have_layout) {
-        var scale: f64 = 0;
-        var min_x: i64 = std.math.maxInt(i64);
-        var min_y: i64 = std.math.maxInt(i64);
-        for (parts) |p| {
-            const l = p.logical.?;
-            scale = @max(scale, @as(f64, @floatFromInt(p.width)) / @as(f64, @floatFromInt(l.w)));
-            min_x = @min(min_x, l.x);
-            min_y = @min(min_y, l.y);
-        }
-        for (parts, mons, native) |p, *m, *nat| {
-            const l = p.logical.?;
-            const own = @as(f64, @floatFromInt(p.width)) / @as(f64, @floatFromInt(l.w));
-            nat.* = @abs(own - scale) / scale < 0.005;
-            m.* = .{
-                .x = toPx(@as(f64, @floatFromInt(l.x - min_x)) * scale),
-                .y = toPx(@as(f64, @floatFromInt(l.y - min_y)) * scale),
-                .w = if (nat.*) p.width else @max(1, toPx(@as(f64, @floatFromInt(l.w)) * scale)),
-                .h = if (nat.*) p.height else @max(1, toPx(@as(f64, @floatFromInt(l.h)) * scale)),
-                .logical = l,
-            };
-        }
-    } else {
-        var x: u32 = 0;
-        for (parts, mons, native) |p, *m, *nat| {
-            nat.* = true;
-            m.* = .{ .x = x, .y = 0, .w = p.width, .h = p.height };
-            x +|= p.width;
-        }
+/// Monitors where the compositor has them, at the highest pixel scale
+/// among them; `native` marks those already at that scale.
+fn placeByLayout(parts: []const Part, mons: []Monitor, native: []bool) void {
+    var scale: f64 = 0;
+    var min_x: i64 = std.math.maxInt(i64);
+    var min_y: i64 = std.math.maxInt(i64);
+    for (parts) |p| {
+        const l = p.logical.?;
+        scale = @max(scale, @as(f64, @floatFromInt(p.width)) / @as(f64, @floatFromInt(l.w)));
+        min_x = @min(min_x, l.x);
+        min_y = @min(min_y, l.y);
     }
+    for (parts, mons, native) |p, *m, *nat| {
+        const l = p.logical.?;
+        const own = @as(f64, @floatFromInt(p.width)) / @as(f64, @floatFromInt(l.w));
+        nat.* = @abs(own - scale) / scale < 0.005;
+        m.* = .{
+            .x = toPx(@as(f64, @floatFromInt(l.x - min_x)) * scale),
+            .y = toPx(@as(f64, @floatFromInt(l.y - min_y)) * scale),
+            .w = if (nat.*) p.width else @max(1, toPx(@as(f64, @floatFromInt(l.w)) * scale)),
+            .h = if (nat.*) p.height else @max(1, toPx(@as(f64, @floatFromInt(l.h)) * scale)),
+            .logical = l,
+        };
+    }
+}
 
+/// Without a full layout: left to right at native size.
+fn placeInRow(parts: []const Part, mons: []Monitor, native: []bool) void {
+    var x: u32 = 0;
+    for (parts, mons, native) |p, *m, *nat| {
+        nat.* = true;
+        m.* = .{ .x = x, .y = 0, .w = p.width, .h = p.height };
+        x +|= p.width;
+    }
+}
+
+/// The stitched image's size: the monitors' bounding box, within limits.
+fn canvasSize(mons: []const Monitor) ![2]u32 {
     var cw: u64 = 0;
     var ch: u64 = 0;
     for (mons) |m| {
@@ -112,25 +135,16 @@ pub fn stitch(alloc: std.mem.Allocator, parts: []const Part) !Capture {
         ch = @max(ch, @as(u64, m.y) + m.h);
     }
     if (cw == 0 or ch == 0 or cw * ch > max_pixels or cw > 65535 or ch > 65535) return error.CaptureTooLarge;
-    const width: u32 = @intCast(cw);
-    const height: u32 = @intCast(ch);
+    return .{ @intCast(cw), @intCast(ch) };
+}
 
-    const px = try alloc.alloc(u32, @as(usize, width) * height);
-    errdefer alloc.free(px);
-    if (parts.len > 1) @memset(px, 0xFF000000);
-
-    for (parts, mons, native) |p, m, nat| {
-        if (nat) {
-            const w = @min(p.width, width - m.x);
-            const h = @min(p.height, height - m.y);
-            for (0..h) |row| {
-                @memcpy(px[(m.y + row) * width + m.x ..][0..w], p.pixels[row * p.width ..][0..w]);
-            }
-        } else {
-            resampleBilinear(p.pixels, p.width, p.height, px, width, m);
-        }
+/// Copies a part at its own scale into `m` of the image, clipped.
+fn copyNative(p: Part, m: Monitor, px: []u32, width: u32, height: u32) void {
+    const w = @min(p.width, width - m.x);
+    const h = @min(p.height, height - m.y);
+    for (0..h) |row| {
+        @memcpy(px[(m.y + row) * width + m.x ..][0..w], p.pixels[row * p.width ..][0..w]);
     }
-    return .{ .image = .{ .width = width, .height = height, .pixels = px }, .monitors = mons };
 }
 
 fn toPx(v: f64) u32 {
