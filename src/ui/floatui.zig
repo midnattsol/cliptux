@@ -37,6 +37,24 @@ pub const Theme = struct {
     line: u32,
     hover: u32,
 
+    accent: u32 = accent,
+
+    /// From the desktop's preferences (ui/theme.zig): the Glass panel
+    /// made opaque (there is no backdrop blur for a client to use).
+    pub fn fromPrefs(p: @import("theme.zig").Prefs) Theme {
+        const t = p.theme();
+        const panel = effects.over(t.window_bg, t.panel);
+        return .{
+            .panel = panel,
+            .fg = t.fg,
+            .muted = effects.over(panel, t.muted),
+            .field = effects.over(panel, t.field),
+            .line = effects.over(panel, t.hairline),
+            .hover = effects.over(panel, t.hover),
+            .accent = t.accent,
+        };
+    }
+
     pub const dark: Theme = .{ .panel = 0xFF242426, .fg = 0xFFF5F5F7, .muted = 0xFF9E9EA6, .field = 0xFF323235, .line = 0xFF3A3A3D, .hover = 0xFF2F2F33 };
     pub const light: Theme = .{ .panel = 0xFFFAFAFC, .fg = 0xFF1D1D1F, .muted = 0xFF6E6E73, .field = 0xFFEDEDF0, .line = 0xFFDCDCE0, .hover = 0xFFF0F0F3 };
 };

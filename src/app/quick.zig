@@ -246,6 +246,8 @@ const Quick = struct {
     focus: ?Hit = null,
     dirty: bool = true,
     dragging: ?usize = null,
+    /// the desktop's accent, for keyboard focus rings
+    accent: u32 = fui.accent,
 
     fn f(self: *const Quick) f64 {
         return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
@@ -816,14 +818,14 @@ const Quick = struct {
                     else => .pin,
                 };
                 fui.icon(&cv, ic, cx, cy, 14 * k, if (dim) 0x80FFFFFF else fui.white);
-                if (fo == ctl) cv.ringAA(cx, cy, 15 * k, 2 * k, fui.accent);
+                if (fo == ctl) cv.ringAA(cx, cy, 15 * k, 2 * k, self.accent);
             }
             for ([_]Control{ .copy, .save }) |ctl| {
                 const cr = controlRect(ctl);
                 const rr: Rect = .{ .x = sc(cr.x, k), .y = sc(cr.y, k), .w = sc(cr.w, k), .h = sc(cr.h, k) };
                 cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (hv == ctl) fui.pill_hover else fui.pill);
                 fui.textCentered(&cv, rr, 13 * k, fui.pill_text, .bold, if (ctl == .copy) "Copy" else "Save");
-                if (fo == ctl) @import("../ui/shapes.zig").roundRectRing(&cv, .{ .x = rr.x - sc(2, k), .y = rr.y - sc(2, k), .w = rr.w + sc(4, k), .h = rr.h + sc(4, k) }, 10 * k, 2 * k, fui.accent);
+                if (fo == ctl) @import("../ui/shapes.zig").roundRectRing(&cv, .{ .x = rr.x - sc(2, k), .y = rr.y - sc(2, k), .w = rr.w + sc(4, k), .h = rr.h + sc(4, k) }, 10 * k, 2 * k, self.accent);
             }
         }
         if (c.notice.len > 0) {
@@ -895,6 +897,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
             _ = history.prune(gpa, cache, 30, 512 * 1024 * 1024) catch 0;
         } else |_| {}
     }
+    if (q.bus_()) |b| q.accent = @import("../ui/theme.zig").readPrefs(b, 500).theme().accent;
     if (!q.win.hasLayerShell() and gnome.isGnome()) {
         q.hint = if (q.bus_()) |b| !gnome.extensionActive(b) else true;
         if (q.hint) std.log.info("quick access: no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});

@@ -282,8 +282,8 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... placed by the GNOME extension" grep -q "placed by the GNOME extension" "$SHOT_LOG"
         sleep 1.5
         shot 0 thumb
-        check "thumbnail shows bottom-left" drv find 0 e03131 40 4 0 700 300 900
-        check "  ... above the other app (not covered)" drv find 0 e03131 40 4 0 700 300 900
+        check "thumbnail shows bottom-left" drv find 0 ff453a 40 4 0 700 300 900
+        check "  ... above the other app (not covered)" drv find 0 ff453a 40 4 0 700 300 900
         keys a b c
         check "the other app keeps the keyboard focus (typing reaches it)" target_said 3 "^text abc"
         # hover: the veil and buttons; Copy
@@ -308,7 +308,7 @@ if [ "${1:-}" = "--inner" ]; then
         click 0 800 300
         sleep 0.8
         shot 0 after-click
-        check "  ... and the thumbnail stays above it" drv find 0 e03131 40 4 0 700 300 900
+        check "  ... and the thumbnail stays above it" drv find 0 ff453a 40 4 0 700 300 900
         # drag out into the app
         read -r x y <<<"$(card_point 120 75)"
         slow_drag 0 "$x" "$y" $((x + 40)) $((y - 40)) 400 500 600 400 800 300
@@ -316,7 +316,7 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... and the thumbnail goes away" any_log 5 "quick access: dropped"
         sleep 0.5
         shot 0 dropped
-        check "  ... from the screen" no_find_exact 0 e03131 40 4 0 700 300 900
+        check "  ... from the screen" no_find_exact 0 ff453a 40 4 0 700 300 900
         # as a file: an app that asks for text/uri-list
         check "a drop target for files is up" start_droptarget text/uri-list
         n=$(shown_count)
@@ -344,7 +344,7 @@ if [ "${1:-}" = "--inner" ]; then
         click 0 1500 100
         sleep 0.8
         shot 0 pinned-after-click
-        check "  ... that stays above after clicking the app" drv find 0 e03131 40 4
+        check "  ... that stays above after clicking the app" drv find 0 ff453a 40 4
         ;;
     quick-plain)
         # no extension: the thumbnail is an ordinary window, still usable
@@ -357,7 +357,7 @@ if [ "${1:-}" = "--inner" ]; then
         check "thumbnail shown without the extension" wait_log 10 "quick access: showing .*plain window"
         sleep 1.5
         shot 0 thumb
-        check "  ... somewhere on screen" drv find 0 e03131 40 4
+        check "  ... somewhere on screen" drv find 0 ff453a 40 4
         check "  ... with the integration hint" grep -q "no Shotlet GNOME Shell extension" "$SHOT_LOG"
         keys ctrl+c
         sleep 1
@@ -378,7 +378,7 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 1
         clip_png "$OUT/orig.png"
         drv pixel "$OUT/orig.png" 150 140
-        check "the copy has the red rectangle" test "${VAL:2:6}" = e03131
+        check "the copy has the red rectangle" test "${VAL:2:6}" = ff453a
         read -r x y <<<"$(card_point 120 75)"
         drv move 0 "$x" "$y"
         sleep 0.3
@@ -388,20 +388,20 @@ if [ "${1:-}" = "--inner" ]; then
         sleep 1.5
         shot 0 reopened
         # the 500x300 capture sits centred: the rectangle at 650..800, 400..480
-        check "  ... with the previous annotations" drv find 0 e03131 40 4 600 350 1000 550
+        check "  ... with the previous annotations" drv find 0 ff453a 40 4 600 350 1000 550
         keys v
         click 0 725 440
         drv sleep 200
         keys delete
         sleep 0.3
         shot 0 deleted
-        check "  ... which can be selected and deleted" no_find_exact 0 e03131 40 4 600 350 1000 550
+        check "  ... which can be selected and deleted" no_find_exact 0 ff453a 40 4 600 350 1000 550
         keys enter
         sleep 1.5
         clip_png "$OUT/edited.png"
         check "  ... and Copy gives the edited image" eq "$(png_size "$OUT/edited.png")" 500x300
         drv pixel "$OUT/edited.png" 150 140
-        check "  ... without the rectangle" test "${VAL:2:6}" != e03131
+        check "  ... without the rectangle" test "${VAL:2:6}" != ff453a
         n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
         check "  ... updating the same history entry" eq "$n" 1
         ;;

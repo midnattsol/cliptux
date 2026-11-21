@@ -529,7 +529,7 @@ const Panel = struct {
         text.drawStyled(&cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .bold, "Recent captures");
         if (self.items.items.len > 0) {
             const cr = self.clearRect();
-            fui.textCentered(&cv, .{ .x = s(cr.x, kk), .y = s(cr.y, kk), .w = s(cr.w, kk), .h = s(cr.h, kk) }, 12 * kk, if (self.hover_clear) fui.accent else th.muted, .regular, "Clear");
+            fui.textCentered(&cv, .{ .x = s(cr.x, kk), .y = s(cr.y, kk), .w = s(cr.w, kk), .h = s(cr.h, kk) }, 12 * kk, if (self.hover_clear) th.accent else th.muted, .regular, "Clear");
         }
         const xr = self.closeRect();
         const xcx = (@as(f64, @floatFromInt(xr.x)) + 11) * kk;
@@ -594,7 +594,7 @@ const Panel = struct {
             const sel = self.selected == idx;
             const hov = self.hover_item == idx;
             if (sel or hov) {
-                shapes.roundRectRing(&gc, .{ .x = rx - s(2, kk), .y = ry - s(2, kk), .w = rw + s(4, kk), .h = rh + s(4, kk) }, 10 * kk, if (sel) 2.5 * kk else 1.5 * kk, if (sel) fui.accent else th.line);
+                shapes.roundRectRing(&gc, .{ .x = rx - s(2, kk), .y = ry - s(2, kk), .w = rw + s(4, kk), .h = rh + s(4, kk) }, 10 * kk, if (sel) 2.5 * kk else 1.5 * kk, if (sel) th.accent else th.line);
             }
             var tb: [32]u8 = undefined;
             const then = @divFloor(it.entry.meta.time_ms, 1000);
@@ -620,7 +620,7 @@ const Panel = struct {
                 const r = self.actionRect(i);
                 const cx = (@as(f64, @floatFromInt(r.x)) + @as(f64, @floatFromInt(r.w)) / 2) * kk;
                 const dim = i == 2 and !it.entry.editable;
-                const color = if (dim) th.line else if (self.hover_action == i) fui.accent else th.fg;
+                const color = if (dim) th.line else if (self.hover_action == i) th.accent else th.fg;
                 fui.icon(&cv, action_icons[i], cx, (@as(f64, @floatFromInt(r.y)) + 13) * kk, 16 * kk, color);
                 fui.textCentered(&cv, .{ .x = s(r.x, kk), .y = s(r.y + 24, kk), .w = s(r.w, kk), .h = s(14, kk) }, 10 * kk, if (dim) th.line else th.muted, .regular, name);
             }
@@ -668,7 +668,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     };
     defer p.deinit();
     p.root_len = (try history.historyRoot(&p.root_buf, env.home)).len;
-    if (p.bus_()) |b| p.theme = if (prefersLight(gpa, b)) fui.Theme.light else fui.Theme.dark;
+    if (p.bus_()) |b| p.theme = fui.Theme.fromPrefs(@import("../ui/theme.zig").readPrefs(b, 1000));
     try p.load();
     p.searchable = ocr.available();
     std.log.info("history: text search {s}", .{if (p.searchable) "on (tesseract)" else "off (no libtesseract)"});
@@ -698,23 +698,4 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     }
     p.win.closeWindow();
     if (p.win.hasClipboard()) try p.win.serveClipboard();
-}
-
-/// org.freedesktop.appearance color-scheme from the Settings portal: 2
-/// means the person prefers light (1 dark, 0 no preference: dark here,
-/// like the editor).
-fn prefersLight(gpa: std.mem.Allocator, bus: *dbus.Connection) bool {
-    var m = dbus.Marshal.init(gpa);
-    defer m.deinit();
-    m.putString("org.freedesktop.appearance") catch return false;
-    m.putString("color-scheme") catch return false;
-    const serial = bus.callMethod("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", "ReadOne", "ss", m.buf.items) catch return false;
-    var reply = bus.waitReplyTimeout(serial, 1000) catch return false;
-    defer reply.deinit(gpa);
-    var r = reply.reader();
-    const v = r.readVariant() catch return false;
-    return switch (v) {
-        .u32_ => |x| x == 2,
-        else => false,
-    };
 }
