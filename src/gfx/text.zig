@@ -172,9 +172,18 @@ var state: ?State = null;
 /// Find and load the system UI font once at startup. Safe to call
 /// repeatedly. Bold, monospace and fallback faces load on first use.
 pub fn init(alloc: std.mem.Allocator) void {
+    initWith(alloc, null);
+}
+
+/// init, with `font_path` (when given and loadable) as the regular face
+/// instead of the system UI font; for development tools and tests.
+pub fn initWith(alloc: std.mem.Allocator, font_path: ?[]const u8) void {
     if (state != null) return;
     var st: State = .{ .alloc = alloc, .db = fontdb.Db.init(alloc) };
-    st.regular = st.loadQuery(.sans);
+    if (font_path) |fp| if (alloc.dupe(u8, fp)) |path| {
+        st.regular = st.add(.{ .path = path }) orelse no_font;
+    } else |_| {};
+    if (st.regular == no_font) st.regular = st.loadQuery(.sans);
     if (st.regular == no_font) {
         // any face at all beats the bitmap font
         var k: usize = 0;
