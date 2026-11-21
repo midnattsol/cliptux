@@ -33,23 +33,47 @@ const Mock = struct {
 
     fn handle(self: *Mock, msg: *const dbus.Message) !void {
         if (msg.type != .method_call) return;
-        const a = self.conn.alloc;
-        if (msg.isCall("org.freedesktop.portal.Request", "Close")) {
-            _ = self.closed_requests.fetchAdd(1, .release);
-            try self.conn.replyTo(msg, "", &.{});
-            return;
-        }
-        if (msg.isCall("org.freedesktop.portal.Session", "Close")) {
-            try self.conn.replyTo(msg, "", &.{});
-            return;
-        }
-        if (msg.isCall("org.freedesktop.portal.ScreenCast", "OpenPipeWireRemote")) {
-            try self.conn.replyError(msg, "org.freedesktop.portal.Error.Failed", "no pipewire here");
-            return;
-        }
+        if (try self.handlePlainCall(msg)) return;
 
         // request-style calls: find the options dict and its handle_token
         const member = msg.member orelse return;
+        const token = try self.readOptions(msg);
+        var path_buf: [256]u8 = undefined;
+        const path = try requestPath(&path_buf, msg.sender orelse return, token);
+        // a hung portal: not even the method reply
+        if (self.mode.load(.acquire) == @backingInt(Mode.mute)) return;
+        try self.replyRequestPath(msg, path);
+
+        const mode: Mode = @fromBackingInt(@intCast(self.mode.load(.acquire)));
+        switch (mode) {
+            .silent, .mute => return,
+            .vanish => return self.releasePortalName(),
+            else => {},
+        }
+        try self.emitResponse(path, member, mode);
+    }
+
+    /// Calls answered directly, without a Request; true when handled.
+    fn handlePlainCall(self: *Mock, msg: *const dbus.Message) !bool {
+        if (msg.isCall("org.freedesktop.portal.Request", "Close")) {
+            _ = self.closed_requests.fetchAdd(1, .release);
+            try self.conn.replyTo(msg, "", &.{});
+            return true;
+        }
+        if (msg.isCall("org.freedesktop.portal.Session", "Close")) {
+            try self.conn.replyTo(msg, "", &.{});
+            return true;
+        }
+        if (msg.isCall("org.freedesktop.portal.ScreenCast", "OpenPipeWireRemote")) {
+            try self.conn.replyError(msg, "org.freedesktop.portal.Error.Failed", "no pipewire here");
+            return true;
+        }
+        return false;
+    }
+
+    /// Walk the trailing a{sv} options: return the handle_token and
+    /// record SaveFile's current_name and current_folder.
+    fn readOptions(self: *Mock, msg: *const dbus.Message) ![]const u8 {
         const sig = msg.signature orelse "";
         var r = msg.reader();
         var idx: usize = 0;
@@ -74,41 +98,43 @@ const Mock = struct {
                 try r.skipValue(e.sig);
             }
         }
+        return token;
+    }
 
-        var path_buf: [256]u8 = undefined;
+    /// The Request object path the portal spec predicts for sender + token.
+    fn requestPath(buf: []u8, sender: []const u8, token: []const u8) ![]u8 {
         var sender_buf: [64]u8 = undefined;
         var n: usize = 0;
-        for (msg.sender orelse return) |c| {
+        for (sender) |c| {
             if (c == ':') continue;
             sender_buf[n] = if (c == '.') '_' else c;
             n += 1;
         }
-        const path = try std.fmt.bufPrint(&path_buf, "/org/freedesktop/portal/desktop/request/{s}/{s}", .{ sender_buf[0..n], token });
-        // a hung portal: not even the method reply
-        if (self.mode.load(.acquire) == @backingInt(Mode.mute)) return;
-        {
-            var m = dbus.Marshal.init(a);
-            defer m.deinit();
-            try m.putObjectPath(path);
-            try self.conn.replyTo(msg, "o", m.buf.items);
-        }
+        return std.fmt.bufPrint(buf, "/org/freedesktop/portal/desktop/request/{s}/{s}", .{ sender_buf[0..n], token });
+    }
 
-        const mode: Mode = @fromBackingInt(@intCast(self.mode.load(.acquire)));
-        switch (mode) {
-            .silent, .mute => return,
-            .vanish => {
-                var m = dbus.Marshal.init(a);
-                defer m.deinit();
-                try m.putString(portal.bus_name);
-                const serial = try self.conn.callMethod("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ReleaseName", "s", m.buf.items);
-                var reply = try self.conn.waitReply(serial);
-                reply.deinit(a);
-                return;
-            },
-            else => {},
-        }
+    fn replyRequestPath(self: *Mock, msg: *const dbus.Message, path: []const u8) !void {
+        var m = dbus.Marshal.init(self.conn.alloc);
+        defer m.deinit();
+        try m.putObjectPath(path);
+        try self.conn.replyTo(msg, "o", m.buf.items);
+    }
 
+    /// Give up the portal's bus name, as a crashing portal would.
+    fn releasePortalName(self: *Mock) !void {
+        const a = self.conn.alloc;
         var m = dbus.Marshal.init(a);
+        defer m.deinit();
+        try m.putString(portal.bus_name);
+        const serial = try self.conn.callMethod("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ReleaseName", "s", m.buf.items);
+        var reply = try self.conn.waitReply(serial);
+        reply.deinit(a);
+    }
+
+    /// The Response signal: cancelled in cancel mode, else granted with
+    /// the results `member` returns.
+    fn emitResponse(self: *Mock, path: []const u8, member: []const u8, mode: Mode) !void {
+        var m = dbus.Marshal.init(self.conn.alloc);
         defer m.deinit();
         try m.putU32(if (mode == .cancel) 1 else 0);
         const dict = try m.beginArray(8);
@@ -117,49 +143,57 @@ const Mock = struct {
             try m.putString("session_handle");
             try m.putVariantString("/org/freedesktop/portal/desktop/session/1/s");
         } else if (std.mem.eql(u8, member, "Start")) {
-            try m.beginStruct();
-            try m.putString("streams");
-            try m.putSignature("a(ua{sv})");
-            const streams = try m.beginArray(8);
-            for ([_][3]i32{ .{ 50, 0, 0 }, .{ 51, 1280, 0 } }) |st| {
-                try m.beginStruct();
-                try m.putU32(@intCast(st[0]));
-                const props = try m.beginArray(8);
-                try m.beginStruct();
-                try m.putString("position");
-                try m.putSignature("(ii)");
-                try m.beginStruct();
-                try m.putI32(st[1]);
-                try m.putI32(st[2]);
-                try m.beginStruct();
-                try m.putString("size");
-                try m.putSignature("(ii)");
-                try m.beginStruct();
-                try m.putI32(1280);
-                try m.putI32(720);
-                m.endArray(props);
-            }
-            m.endArray(streams);
-            try m.beginStruct();
-            try m.putString("restore_token");
-            try m.putVariantString("mock-token");
+            try putStartResults(&m);
         } else if (std.mem.eql(u8, member, "OpenFile")) {
-            try m.beginStruct();
-            try m.putString("uris");
-            try m.putSignature("as");
-            const uris = try m.beginArray(4);
-            try m.putString("file:///home/u/Im%C3%A1genes/Shots");
-            m.endArray(uris);
+            try putUris(&m, "file:///home/u/Im%C3%A1genes/Shots");
         } else if (std.mem.eql(u8, member, "SaveFile")) {
-            try m.beginStruct();
-            try m.putString("uris");
-            try m.putSignature("as");
-            const uris = try m.beginArray(4);
-            try m.putString("file:///tmp/Im%C3%A1genes/my%20shot.png");
-            m.endArray(uris);
+            try putUris(&m, "file:///tmp/Im%C3%A1genes/my%20shot.png");
         }
         m.endArray(dict);
         try self.conn.emitSignal(path, "org.freedesktop.portal.Request", "Response", "ua{sv}", m.buf.items);
+    }
+
+    /// Start's results: two 1280x720 monitors side by side and a token.
+    fn putStartResults(m: *dbus.Marshal) !void {
+        try m.beginStruct();
+        try m.putString("streams");
+        try m.putSignature("a(ua{sv})");
+        const streams = try m.beginArray(8);
+        for ([_][3]i32{ .{ 50, 0, 0 }, .{ 51, 1280, 0 } }) |st| try putStream(m, st);
+        m.endArray(streams);
+        try m.beginStruct();
+        try m.putString("restore_token");
+        try m.putVariantString("mock-token");
+    }
+
+    /// One stream: node id, then position (x, y) and size 1280x720.
+    fn putStream(m: *dbus.Marshal, st: [3]i32) !void {
+        try m.beginStruct();
+        try m.putU32(@intCast(st[0]));
+        const props = try m.beginArray(8);
+        try m.beginStruct();
+        try m.putString("position");
+        try m.putSignature("(ii)");
+        try m.beginStruct();
+        try m.putI32(st[1]);
+        try m.putI32(st[2]);
+        try m.beginStruct();
+        try m.putString("size");
+        try m.putSignature("(ii)");
+        try m.beginStruct();
+        try m.putI32(1280);
+        try m.putI32(720);
+        m.endArray(props);
+    }
+
+    /// A FileChooser result: "uris" holding one URI.
+    fn putUris(m: *dbus.Marshal, uri: []const u8) !void {
+        try m.beginStruct();
+        try m.putString("uris");
+        try m.putSignature("as");
+        const uris = try m.beginArray(4);
+        try m.putString(uri);
+        m.endArray(uris);
     }
 };
 
@@ -182,8 +216,22 @@ const Bus = struct {
             sys.removeTree(dir);
             alloc.free(dir);
         }
-        const conf_path = try std.fmt.allocPrintSentinel(alloc, "{s}/bus.conf", .{dir}, 0);
+        const conf_path = try writeConfig(alloc, dir);
         defer alloc.free(conf_path);
+        const arg = try std.fmt.allocPrintSentinel(alloc, "--config-file={s}", .{conf_path}, 0);
+        defer alloc.free(arg);
+
+        const pid = try spawnDaemon(daemon, arg);
+        errdefer stopPid(pid);
+        try waitForSocket(alloc, dir);
+        return .{ .dir = dir, .pid = pid, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
+    }
+
+    /// Write a permissive session bus config listening in `dir`; returns
+    /// its path (owned).
+    fn writeConfig(alloc: std.mem.Allocator, dir: []const u8) ![:0]u8 {
+        const conf_path = try std.fmt.allocPrintSentinel(alloc, "{s}/bus.conf", .{dir}, 0);
+        errdefer alloc.free(conf_path);
         const conf = try std.fmt.allocPrint(alloc,
             \\<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
             \\ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -201,10 +249,12 @@ const Bus = struct {
         , .{dir});
         defer alloc.free(conf);
         try sys.writeFile(conf_path, conf);
-        const arg = try std.fmt.allocPrintSentinel(alloc, "--config-file={s}", .{conf_path}, 0);
-        defer alloc.free(arg);
+        return conf_path;
+    }
 
-        const argv = [_:null]?[*:0]const u8{ daemon.ptr, arg.ptr, "--nofork", "--nopidfile" };
+    /// Fork and exec dbus-daemon in the foreground, its output silenced.
+    fn spawnDaemon(daemon: [:0]const u8, config_arg: [:0]const u8) !linux.pid_t {
+        const argv = [_:null]?[*:0]const u8{ daemon.ptr, config_arg.ptr, "--nofork", "--nopidfile" };
         const envp = [_:null]?[*:0]const u8{};
         const rc = linux.fork();
         if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest;
@@ -217,9 +267,11 @@ const Bus = struct {
             _ = linux.execve(daemon.ptr, &argv, &envp);
             linux.exit(127);
         }
-        const pid: linux.pid_t = @intCast(rc);
-        errdefer stopPid(pid);
+        return @intCast(rc);
+    }
 
+    /// Wait up to 5 s for the bus socket to appear (else skip the test).
+    fn waitForSocket(alloc: std.mem.Allocator, dir: []const u8) !void {
         const sock = try std.fmt.allocPrint(alloc, "{s}/bus", .{dir});
         defer alloc.free(sock);
         const deadline = sys.monoMs() + 5000;
@@ -229,7 +281,6 @@ const Bus = struct {
             var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
             _ = linux.nanosleep(&ts, null);
         }
-        return .{ .dir = dir, .pid = pid, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
     }
 
     fn stop(self: *Bus, alloc: std.mem.Allocator) void {
@@ -267,8 +318,25 @@ test "portal round trips against a private bus and a mock portal" {
     var conn = try dbus.Connection.connectSession(alloc, bus.addr);
     defer conn.deinit();
 
-    // ScreenCast: create, select + start with two monitors and a token
-    const session = switch (try portal.scCreateSession(alloc, &conn)) {
+    try checkScreenCast(alloc, &conn);
+    try checkSaveFile(alloc, &conn, &mock);
+    try checkChooseFolder(alloc, &conn);
+
+    // the person cancels the dialog
+    mock.mode.store(@backingInt(Mode.cancel), .release);
+    switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
+        .cancelled => {},
+        else => return error.TestUnexpectedResult,
+    }
+
+    try checkSilentPortal(alloc, &conn, &mock);
+    try checkMutePortal(alloc, &conn, &mock);
+    try checkVanishingPortal(alloc, &conn, &mock);
+}
+
+/// ScreenCast: create, select + start with two monitors and a token.
+fn checkScreenCast(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
+    const session = switch (try portal.scCreateSession(alloc, conn)) {
         .granted => |s| s,
         else => |o| {
             std.debug.print("CreateSession: {t}\n", .{o});
@@ -277,7 +345,7 @@ test "portal round trips against a private bus and a mock portal" {
     };
     defer alloc.free(session);
     try std.testing.expectEqualStrings("/org/freedesktop/portal/desktop/session/1/s", session);
-    var started = switch (try portal.scSelectAndStart(alloc, &conn, session, "old-token")) {
+    var started = switch (try portal.scSelectAndStart(alloc, conn, session, "old-token")) {
         .granted => |s| s,
         else => return error.TestUnexpectedResult,
     };
@@ -287,10 +355,12 @@ test "portal round trips against a private bus and a mock portal" {
     try std.testing.expectEqual([2]i32{ 1280, 0 }, started.streams[1].position.?);
     try std.testing.expectEqualStrings("mock-token", started.restore_token.?);
     // a method error is reported as an error, not a hang
-    try std.testing.expectError(error.DBusError, portal.scOpenRemote(alloc, &conn, session));
+    try std.testing.expectError(error.DBusError, portal.scOpenRemote(alloc, conn, session));
+}
 
-    // FileChooser: the chosen URI comes back as a decoded path
-    switch (try portal.saveFile(alloc, &conn, .{ .current_name = "shotlet-x.png", .current_folder = "/home/u/Pictures" })) {
+/// FileChooser: the chosen URI comes back as a decoded path.
+fn checkSaveFile(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *const Mock) !void {
+    switch (try portal.saveFile(alloc, conn, .{ .current_name = "shotlet-x.png", .current_folder = "/home/u/Pictures" })) {
         .granted => |p| {
             defer alloc.free(p);
             try std.testing.expectEqualStrings("/tmp/Imágenes/my shot.png", p);
@@ -300,82 +370,75 @@ test "portal round trips against a private bus and a mock portal" {
     try std.testing.expectEqualStrings("shotlet-x.png", mock.save_name[0..mock.save_name_len]);
     // current_folder travels as NUL-terminated bytes
     try std.testing.expectEqualStrings("/home/u/Pictures\x00", mock.save_folder[0..mock.save_folder_len]);
+}
 
-    // a folder, asked for without blocking (the Settings window)
-    {
-        var req = try portal.beginChooseFolder(alloc, &conn, .{ .current_folder = "/home/u" });
-        defer req.deinit(alloc);
-        const deadline = sys.monoMs() + 5000;
-        while (!req.done() and sys.monoMs() < deadline) {
-            var msg = (try conn.nextMessageDeadline(sys.monoMs() + 50)) orelse continue;
-            if (!(try req.handle(alloc, &msg))) msg.deinit(alloc);
-        }
-        try std.testing.expectEqual(portal.Outcome.granted, req.outcome.?);
-        const p = try portal.chosenPath(alloc, &req);
-        defer alloc.free(p);
-        try std.testing.expectEqualStrings("/home/u/Imágenes/Shots", p);
+/// A folder, asked for without blocking (the Settings window).
+fn checkChooseFolder(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
+    var req = try portal.beginChooseFolder(alloc, conn, .{ .current_folder = "/home/u" });
+    defer req.deinit(alloc);
+    const deadline = sys.monoMs() + 5000;
+    while (!req.done() and sys.monoMs() < deadline) {
+        var msg = (try conn.nextMessageDeadline(sys.monoMs() + 50)) orelse continue;
+        if (!(try req.handle(alloc, &msg))) msg.deinit(alloc);
     }
+    try std.testing.expectEqual(portal.Outcome.granted, req.outcome.?);
+    const p = try portal.chosenPath(alloc, &req);
+    defer alloc.free(p);
+    try std.testing.expectEqualStrings("/home/u/Imágenes/Shots", p);
+}
 
-    // the person cancels the dialog
-    mock.mode.store(@backingInt(Mode.cancel), .release);
-    switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
-        .cancelled => {},
-        else => return error.TestUnexpectedResult,
-    }
+/// A Screenshot call body: no parent window, just the handle_token.
+fn screenshotBody(m: *dbus.Marshal, token: []const u8) !void {
+    try m.putString("");
+    const arr = try m.beginArray(8);
+    try m.beginStruct();
+    try m.putString("handle_token");
+    try m.putVariantString(token);
+    m.endArray(arr);
+}
 
-    // nobody answers: the deadline ends the wait and closes the request
+/// Nobody answers: the deadline ends the wait and closes the request.
+fn checkSilentPortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mock) !void {
     mock.mode.store(@backingInt(Mode.silent), .release);
-    {
-        var m = dbus.Marshal.init(alloc);
-        defer m.deinit();
-        try m.putString("");
-        const arr = try m.beginArray(8);
-        try m.beginStruct();
-        try m.putString("handle_token");
-        try m.putVariantString("silent1");
-        m.endArray(arr);
-        const t0 = sys.monoMs();
-        var req = try portal.call(alloc, &conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "silent1", 300);
-        defer req.deinit(alloc);
-        try std.testing.expectEqual(portal.Outcome.timeout, req.outcome.?);
-        try std.testing.expect(sys.monoMs() - t0 < 3000);
-        const close_deadline = sys.monoMs() + 2000;
-        while (mock.closed_requests.load(.acquire) == 0 and sys.monoMs() < close_deadline) {
-            var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
-            _ = linux.nanosleep(&ts, null);
-        }
-        try std.testing.expectEqual(@as(u32, 1), mock.closed_requests.load(.acquire));
+    var m = dbus.Marshal.init(alloc);
+    defer m.deinit();
+    try screenshotBody(&m, "silent1");
+    const t0 = sys.monoMs();
+    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "silent1", 300);
+    defer req.deinit(alloc);
+    try std.testing.expectEqual(portal.Outcome.timeout, req.outcome.?);
+    try std.testing.expect(sys.monoMs() - t0 < 3000);
+    const close_deadline = sys.monoMs() + 2000;
+    while (mock.closed_requests.load(.acquire) == 0 and sys.monoMs() < close_deadline) {
+        var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
+        _ = linux.nanosleep(&ts, null);
     }
+    try std.testing.expectEqual(@as(u32, 1), mock.closed_requests.load(.acquire));
+}
 
-    // the portal never even accepts the call: no dialog can be up, so it
-    // counts as unavailable (the caller can fall back) and fails fast
+/// The portal never even accepts the call: no dialog can be up, so it
+/// counts as unavailable (the caller can fall back) and fails fast.
+fn checkMutePortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mock) !void {
     mock.mode.store(@backingInt(Mode.mute), .release);
-    {
-        var m = dbus.Marshal.init(alloc);
-        defer m.deinit();
-        try m.putString("");
-        const arr = try m.beginArray(8);
-        try m.beginStruct();
-        try m.putString("handle_token");
-        try m.putVariantString("mute1");
-        m.endArray(arr);
-        var req = try portal.call(alloc, &conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "mute1", 300);
-        defer req.deinit(alloc);
-        try std.testing.expectEqual(portal.Outcome.unavailable, req.outcome.?);
-    }
+    var m = dbus.Marshal.init(alloc);
+    defer m.deinit();
+    try screenshotBody(&m, "mute1");
+    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "mute1", 300);
+    defer req.deinit(alloc);
+    try std.testing.expectEqual(portal.Outcome.unavailable, req.outcome.?);
+}
 
-    // the portal goes away mid-request: unavailable at once, not at the
-    // dialog deadline
+/// The portal goes away mid-request: unavailable at once, not at the
+/// dialog deadline.
+fn checkVanishingPortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mock) !void {
     mock.mode.store(@backingInt(Mode.vanish), .release);
-    {
-        const t0 = sys.monoMs();
-        switch (try portal.screenshot(alloc, &conn, false, portal.timeout_dialog_ms)) {
-            .unavailable => {},
-            else => |o| {
-                std.debug.print("vanish: {t}\n", .{o});
-                return error.TestUnexpectedResult;
-            },
-        }
-        try std.testing.expect(sys.monoMs() - t0 < 5000);
+    const t0 = sys.monoMs();
+    switch (try portal.screenshot(alloc, conn, false, portal.timeout_dialog_ms)) {
+        .unavailable => {},
+        else => |o| {
+            std.debug.print("vanish: {t}\n", .{o});
+            return error.TestUnexpectedResult;
+        },
     }
+    try std.testing.expect(sys.monoMs() - t0 < 5000);
 }
