@@ -27,6 +27,9 @@ pub const Line = struct {
     rtl: bool,
     /// ends at a wrap rather than at a newline or the end of the text
     soft: bool,
+    /// the paragraph (hard line) it belongs to: it is shaped as a whole
+    para_start: usize,
+    para_end: usize,
 
     pub fn dir(self: Line) bidi.Direction {
         return if (self.rtl) .rtl else .ltr;
@@ -100,7 +103,7 @@ pub const Layout = struct {
             if (fixed) {
                 var tmp: std.ArrayList(text.Line) = .empty;
                 defer tmp.deinit(alloc);
-                try text.wrapLines(alloc, fs, .regular, para, self.w, &tmp);
+                try text.wrapLines(alloc, fs, .regular, para, self.w, if (rtl) .rtl else .ltr, &tmp);
                 try self.lines.ensureUnusedCapacity(alloc, tmp.items.len);
                 for (tmp.items) |l| self.lines.appendAssumeCapacity(.{
                     .start = start + l.start,
@@ -108,6 +111,8 @@ pub const Layout = struct {
                     .vis_end = start + l.vis_end,
                     .rtl = rtl,
                     .soft = true,
+                    .para_start = start,
+                    .para_end = nl,
                 });
                 // the last line of a paragraph ends at the newline and
                 // keeps its trailing spaces
@@ -115,7 +120,7 @@ pub const Layout = struct {
                 last.soft = false;
                 last.vis_end = last.end;
             } else {
-                try self.lines.append(alloc, .{ .start = start, .end = nl, .vis_end = nl, .rtl = rtl, .soft = false });
+                try self.lines.append(alloc, .{ .start = start, .end = nl, .vis_end = nl, .rtl = rtl, .soft = false, .para_start = start, .para_end = nl });
             }
             if (nl == str.len) break;
             start = nl + 1;
@@ -136,12 +141,25 @@ pub const Layout = struct {
         return str[l.start..l.vis_end];
     }
 
+    /// The paragraph line `i` belongs to, and the line's visible part as
+    /// a byte range of it.
+    pub fn paraOf(self: *const Layout, str: []const u8, i: usize) struct { []const u8, usize, usize } {
+        const l = self.lines.items[i];
+        return .{ str[l.para_start..l.para_end], l.start - l.para_start, l.vis_end - l.para_start };
+    }
+
+    /// Width of line `i` drawn at font size `fs`.
+    pub fn lineWidth(self: *const Layout, str: []const u8, i: usize, fs: f64) i32 {
+        const para, const a, const b = self.paraOf(str, i);
+        return text.widthRange(fs, .regular, para, a, b, self.lines.items[i].dir());
+    }
+
     /// Where line `i` starts inside a box `w` wide when drawn at font size
     /// `fs` (right-to-left paragraphs hug the right edge).
     pub fn indentAt(self: *const Layout, str: []const u8, i: usize, fs: f64, w: i32) i32 {
         const l = self.lines.items[i];
         if (!l.rtl) return 0;
-        return @max(0, w - text.widthDir(fs, .regular, str[l.start..l.vis_end], .rtl));
+        return @max(0, w - self.lineWidth(str, i, fs));
     }
 
     pub fn indent(self: *const Layout, str: []const u8, i: usize) i32 {
@@ -162,9 +180,9 @@ pub const Layout = struct {
     /// x of caret `off` on line `i`, from the box's left edge.
     fn xOn(self: *const Layout, str: []const u8, i: usize, off: usize) i32 {
         const l = self.lines.items[i];
-        const vis = str[l.start..l.vis_end];
-        const rel = std.math.clamp(off, l.start, l.vis_end) - l.start;
-        return self.indent(str, i) + text.xForOffsetDir(self.fs, .regular, vis, rel, l.dir());
+        const para, const a, const b = self.paraOf(str, i);
+        const rel = std.math.clamp(off, l.start, l.vis_end) - l.para_start;
+        return self.indent(str, i) + text.xForOffsetRange(self.fs, .regular, para, a, b, rel, l.dir());
     }
 
     /// Top-left of the caret, relative to the box.
@@ -176,9 +194,9 @@ pub const Layout = struct {
     /// Caret nearest to `x` on line `i`.
     fn hitOn(self: *const Layout, str: []const u8, i: usize, x: i32) Hit {
         const l = self.lines.items[i];
-        const vis = str[l.start..l.vis_end];
-        const rel = text.offsetForXDir(self.fs, .regular, vis, x - self.indent(str, i), l.dir());
-        const off = l.start + @min(rel, vis.len);
+        const para, const a, const b = self.paraOf(str, i);
+        const rel = text.offsetForXRange(self.fs, .regular, para, a, b, x - self.indent(str, i), l.dir());
+        const off = l.para_start + rel;
         return .{ .off = off, .upstream = off == l.end and l.soft };
     }
 
@@ -255,7 +273,7 @@ test "fixed width wraps; caret moves across wrapped lines" {
     try std.testing.expectEqualStrings("gamma delta", got[1]);
     try std.testing.expectEqualStrings("zeta", got[2]);
     try std.testing.expect(l.lines.items[0].soft and !l.lines.items[1].soft);
-    for (l.lines.items, 0..) |_, i| try std.testing.expect(text.width(fs, l.visible(s, i)) <= w);
+    for (l.lines.items, 0..) |_, i| try std.testing.expect(l.lineWidth(s, i, fs) <= w);
     // the offset at the wrap belongs to the next line, unless upstream
     try std.testing.expectEqual(@as(usize, 1), l.lineOf(.{ .off = 11 }));
     try std.testing.expectEqual(@as(usize, 0), l.lineOf(.{ .off = 11, .upstream = true }));
@@ -321,7 +339,7 @@ test "rtl paragraphs wrap with one direction, right-aligned" {
         const ind = l.indent(s, k);
         try std.testing.expect(ind >= 0);
         // right-aligned: ends at the box's right edge
-        try std.testing.expect(@abs(ind + text.widthDir(fs, .regular, l.visible(s, k), .rtl) - l.w) <= 1);
+        try std.testing.expect(@abs(ind + l.lineWidth(s, k, fs) - l.w) <= 1);
     }
     try std.testing.expect(!lines[lines.len - 1].rtl);
     try std.testing.expectEqual(@as(i32, 0), l.indent(s, lines.len - 1));

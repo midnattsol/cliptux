@@ -481,7 +481,9 @@ fn drawText(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xfor
     var y: i32 = @intFromFloat(@round(xf.fy(s.p0.y)));
     const caret_line: ?usize = if (cursor) |c| lay.lineOf(.{ .off = c.caret, .upstream = c.upstream }) else null;
     for (lay.lines.items, 0..) |l, i| {
-        const vis = str[l.start..l.vis_end];
+        // each line is a slice of its paragraph, shaped as a whole
+        const para, const la, const lb = lay.paraOf(str, i);
+        const ps = l.para_start;
         const dir = l.dir();
         const x0 = box_x + lay.indentAt(str, i, fs, box_w);
         if (cursor) |cur| if (cur.sel) |sel| {
@@ -493,21 +495,21 @@ fn drawText(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xfor
                 // the glyphs' own extents, so a range across both
                 // directions highlights each part where it is drawn
                 var spans: [16][2]i32 = undefined;
-                const ns = text_mod.rangeSpans(fs, .regular, vis, @min(a, l.vis_end) - l.start, @min(b, l.vis_end) - l.start, dir, &spans);
+                const ns = text_mod.rangeSpansLine(fs, .regular, para, la, lb, @min(a, l.vis_end) - ps, @min(b, l.vis_end) - ps, dir, &spans);
                 for (spans[0..ns]) |sp| canvas.fillRect(x0 + sp[0], y, sp[1] - sp[0], lh, selection_color);
                 if (b > l.vis_end) {
                     // a sliver for the newline or the hanging spaces, at
                     // the paragraph's end side
                     const sliver: i32 = @intFromFloat(@round(fs * 0.25));
-                    const ex = if (l.rtl) x0 - sliver else x0 + text_mod.widthDir(fs, .regular, vis, dir);
+                    const ex = if (l.rtl) x0 - sliver else x0 + lay.lineWidth(str, i, fs);
                     canvas.fillRect(ex, y, sliver, lh, selection_color);
                 }
             }
         };
-        text_mod.drawDir(canvas, x0, y, fs, fg, .regular, vis, dir);
+        text_mod.drawRange(canvas, x0, y, fs, fg, .regular, para, la, lb, dir);
         if (caret_line == i) {
             const c = std.math.clamp(cursor.?.caret, l.start, l.vis_end);
-            const cx = x0 + text_mod.xForOffsetDir(fs, .regular, vis, c - l.start, dir);
+            const cx = x0 + text_mod.xForOffsetRange(fs, .regular, para, la, lb, c - ps, dir);
             const cw: i32 = @max(1, @as(i32, @intFromFloat(@round(fs / 14.0))));
             canvas.fillRect(cx, y, cw, lh, fg);
         }

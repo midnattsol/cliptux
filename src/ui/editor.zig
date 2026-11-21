@@ -1531,6 +1531,8 @@ pub const Editor = struct {
         if (txt.len == 0) return;
         t.upstream = false;
         t.goal_x = null;
+        // typing ends a double-click chain (the next press is a new click)
+        self.last_click_ms = 0;
         try t.te.insert(self.alloc, &self.doc.shapes.items[t.idx].str, txt);
     }
 
