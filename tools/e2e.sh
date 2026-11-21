@@ -423,7 +423,7 @@ if [ "${1:-}" = "--inner" ]; then
         check "copied and saved captures are kept" eq "$n" 2
         grep -l "saved=" "$HOME"/.local/state/shotlet/history/*/meta >/dev/null
         check "  ... the saved one with its path" test $? = 0
-        pkill -f "$BIN quick" 2>/dev/null
+        pkill -f "shotlet quick" 2>/dev/null
         SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
         check "Recent captures lists both" wait_log 5 "history: 2 captures"
         check "  ... without a search field when Tesseract is missing" wait_log 5 "text search off|text search on"
@@ -442,7 +442,7 @@ if [ "${1:-}" = "--inner" ]; then
         shot 0 after-delete
         keys esc esc
         wait_exit 5
-        pkill -f "$BIN (quick|history|pin)" 2>/dev/null
+        pkill -f "shotlet (quick|history|pin)" 2>/dev/null
         sleep 0.5
         run_shotlet again history
         check "the history survives a restart" wait_log 5 "history: 1 captures"
