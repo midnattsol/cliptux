@@ -52,14 +52,18 @@ pub fn main(init: std.process.Init) !void {
 
     if (std.mem.eql(u8, cmd, "shot")) {
         // dev/testing flags: --from FILE (skip portal), --sel X,Y,W,H
-        // (preset selection), --smoke MS (auto-cancel, for leak runs)
+        // (preset selection), --smoke MS (auto-cancel, for leak runs),
+        // --from-monitors A.png,B.png (one image per monitor, side by side)
         var from: ?[]const u8 = null;
+        var from_monitors: ?[]const u8 = null;
         var sel: ?[4]i32 = null;
         var smoke_ms: i64 = 0;
         var i: usize = 2;
         while (i + 1 < args.len) : (i += 2) {
             if (std.mem.eql(u8, args[i], "--from")) {
                 from = args[i + 1];
+            } else if (std.mem.eql(u8, args[i], "--from-monitors")) {
+                from_monitors = args[i + 1];
             } else if (std.mem.eql(u8, args[i], "--smoke")) {
                 smoke_ms = std.fmt.parseInt(i64, args[i + 1], 10) catch 0;
             } else if (std.mem.eql(u8, args[i], "--sel")) {
@@ -71,7 +75,7 @@ pub fn main(init: std.process.Init) !void {
                 sel = vals;
             }
         }
-        try shot.run(gpa, env, from, sel, smoke_ms);
+        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors }, sel, smoke_ms);
     } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
             (std.mem.eql(u8, args[2], "--foreground") or std.mem.eql(u8, args[2], "-f"));

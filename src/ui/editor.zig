@@ -128,16 +128,17 @@ const KEY_RIGHT = 106;
 const KEY_END = 107;
 const KEY_DOWN = 108;
 
-pub const Editor = struct {
-    alloc: std.mem.Allocator,
-    win: *Window,
-    img: *const png.Image,
-    doc: doc_mod.Document,
+pub const max_panes = 8;
 
-    // --- render caches ---
+/// What one surface shows: a View of the document and its caches. With
+/// one surface per monitor, each pane maps its monitor's image rect.
+pub const Pane = struct {
+    alive: bool = false,
+    /// buffer size and scale of the surface
+    width: u32 = 0,
+    height: u32 = 0,
+    scale120: u32 = 120,
     view: View = .{},
-    /// image + committed shapes at native resolution (minus `lifted`)
-    layer: []u32 = &.{},
     /// layer as shown through `view`, buffer-sized, and a dimmed copy
     viewc: []u32 = &.{},
     viewc_dim: []u32 = &.{},
@@ -154,6 +155,40 @@ pub const Editor = struct {
     content_dirty: RectList = .{},
     overlays: RectList = .{},
     last_frame: []u32 = &.{},
+    /// needs a frame once its surface is free
+    due: bool = true,
+
+    fn release(self: *Pane, alloc: std.mem.Allocator) void {
+        alloc.free(self.viewc);
+        self.viewc = &.{};
+        alloc.free(self.viewc_dim);
+        self.viewc_dim = &.{};
+        alloc.free(self.stroke_mask);
+        self.stroke_mask = &.{};
+        alloc.free(self.live_cov);
+        self.live_cov = &.{};
+        alloc.free(self.bcache);
+        self.bcache = &.{};
+        self.bcache_valid = false;
+        self.last_frame = &.{};
+    }
+};
+
+pub const Editor = struct {
+    alloc: std.mem.Allocator,
+    win: *Window,
+    img: *const png.Image,
+    doc: doc_mod.Document,
+
+    /// image + committed shapes at native resolution (minus `lifted`)
+    layer: []u32 = &.{},
+    /// one per window surface (monitor); `cur` is the one being handled
+    panes: [max_panes]Pane = @splat(.{}),
+    n_panes: u8 = 1,
+    pane_i: u8 = 0,
+    /// surface under the pointer, and the one showing the toolbar
+    mouse_pane: u8 = 0,
+    tb_pane: u8 = 0,
 
     // --- tool state ---
     tool: Tool = .select,
@@ -200,6 +235,7 @@ pub const Editor = struct {
     preset_sel: ?[4]i32 = null,
     script: ?[]const u8 = null,
     script_pos: usize = 0,
+    script_surface: u8 = 0,
 
     /// where each captured monitor lies inside `img`; set by the caller
     monitors: []const capture.Monitor = &.{},
@@ -228,18 +264,20 @@ pub const Editor = struct {
     /// Free the window-sized caches. Call after the editing session ends
     /// while the process stays alive (e.g. serving the clipboard).
     pub fn releaseCaches(self: *Editor) void {
-        self.alloc.free(self.viewc);
-        self.viewc = &.{};
-        self.alloc.free(self.viewc_dim);
-        self.viewc_dim = &.{};
-        self.alloc.free(self.stroke_mask);
-        self.stroke_mask = &.{};
-        self.alloc.free(self.live_cov);
-        self.live_cov = &.{};
-        self.alloc.free(self.bcache);
-        self.bcache = &.{};
-        self.bcache_valid = false;
-        self.last_frame = &.{};
+        for (&self.panes) |*p| p.release(self.alloc);
+    }
+
+    /// The pane being handled (mouse input, or the one rendering).
+    pub fn pn(self: anytype) @TypeOf(&self.panes[0]) {
+        return &self.panes[self.pane_i];
+    }
+
+    pub fn isTbPane(self: *const Editor) bool {
+        return self.pane_i == self.tb_pane;
+    }
+
+    pub fn isMousePane(self: *const Editor) bool {
+        return self.pane_i == self.mouse_pane;
     }
 
     pub fn color(self: *const Editor) u32 {
@@ -248,7 +286,7 @@ pub const Editor = struct {
 
     /// UI scale factor from the window's fractional scale (1.0 at 100%).
     pub fn uf(self: *const Editor) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+        return @as(f64, @floatFromInt(self.pn().scale120)) / 120.0;
     }
 
     /// Scale a logical UI length to physical pixels.
@@ -257,22 +295,22 @@ pub const Editor = struct {
     }
 
     pub fn screenRect(self: *const Editor) Rect {
-        return .{ .x = 0, .y = 0, .w = @intCast(self.win.width), .h = @intCast(self.win.height) };
+        return .{ .x = 0, .y = 0, .w = @intCast(self.pn().width), .h = @intCast(self.pn().height) };
     }
 
     /// Stroke width in image pixels for the current thickness.
     pub fn imgThickness(self: *const Editor) i32 {
-        const t = @as(f64, @floatFromInt(self.thickness)) * self.uf() / self.view.scale;
+        const t = @as(f64, @floatFromInt(self.thickness)) * self.uf() / self.pn().view.scale;
         return @max(1, @as(i32, @intFromFloat(@round(t))));
     }
 
     fn logicalThickness(self: *const Editor, img_t: i32) i32 {
-        const t = @as(f64, @floatFromInt(img_t)) * self.view.scale / self.uf();
+        const t = @as(f64, @floatFromInt(img_t)) * self.pn().view.scale / self.uf();
         return std.math.clamp(@as(i32, @intFromFloat(@round(t))), 1, 32);
     }
 
     pub fn imgAt(self: *const Editor, b: Point) Point {
-        return self.view.toImgEdge(b);
+        return self.pn().view.toImgEdge(b);
     }
 
     fn clampImg(self: *const Editor, p: Point) Point {
@@ -285,12 +323,12 @@ pub const Editor = struct {
     /// The selection on screen (buffer pixels).
     pub fn selBuf(self: *const Editor) ?Rect {
         const s = self.doc.sel orelse return null;
-        return self.view.rectToBuf(s.normalized());
+        return self.pn().view.rectToBuf(s.normalized());
     }
 
     /// Image-pixel tolerance for clicking on shapes.
     fn hitTol(self: *const Editor) f64 {
-        return self.view.lenToImg(@floatFromInt(self.sc(5)));
+        return self.pn().view.lenToImg(@floatFromInt(self.sc(5)));
     }
 
     pub fn handleRadius(self: *const Editor) i32 {
@@ -311,21 +349,20 @@ pub const Editor = struct {
                 self.copy_notice_hide_at_ms = 0;
                 self.needs_render = true;
             }
-            const scripted = self.script != null and self.script_pos < self.script.?.len and self.viewc.len > 0;
+            const scripted = self.script != null and self.script_pos < self.script.?.len and self.panes[0].viewc.len > 0;
             if (try self.win.nextEventTimeout(self.win.pollTimeoutMs(if (scripted) 5 else 100))) |ev| {
                 try self.handle(ev);
                 while (self.win.queue.items.len > 0) {
                     try self.handle(try self.win.nextEvent());
                 }
             }
-            if (self.needs_render and !self.win.frame_pending) {
+            if (self.renderReady()) {
                 // drain buffered Wayland events to get latest pointer position
                 try self.win.drainPending();
                 while (self.win.queue.items.len > 0) {
                     try self.handle(try self.win.nextEvent());
                 }
                 try self.renderFrame();
-                self.needs_render = false;
             }
             if (scripted and !self.needs_render) try self.scriptStep();
         }
@@ -336,38 +373,73 @@ pub const Editor = struct {
 
     // --- caches ---
 
-    fn onResize(self: *Editor) !void {
+    /// The view for surface `idx`: its monitor's pixel rect of the image
+    /// when there is one surface per monitor, else the image fit to it.
+    fn viewFor(self: *Editor, idx: u8) View {
+        const surfs = self.win.surfaceList();
+        if (self.monitors.len > 1 and surfs.len > 1 and idx < surfs.len) {
+            const sf = surfs[idx];
+            var mon: ?capture.Monitor = null;
+            for (self.monitors) |m| {
+                const l = m.logical orelse continue;
+                if (l.x == sf.x and l.y == sf.y and l.w == sf.out_w and l.h == sf.out_h) mon = m;
+            }
+            if (mon == null and idx < self.monitors.len) mon = self.monitors[idx];
+            if (mon) |m| return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, sf.width, sf.height);
+        }
+        return View.fit(self.img.width, self.img.height, self.screenRect(), 1.0);
+    }
+
+    fn onResize(self: *Editor, idx: u8, w: u32, h: u32) !void {
+        if (idx >= max_panes) return;
+        const p = &self.panes[idx];
+        if (w == 0 or h == 0) {
+            // the surface went away (output unplugged)
+            p.release(self.alloc);
+            p.alive = false;
+            for (self.panes[0..self.n_panes], 0..) |q, i| {
+                if (!q.alive) continue;
+                if (!self.panes[self.mouse_pane].alive) self.mouse_pane = @intCast(i);
+                if (!self.panes[self.tb_pane].alive) self.tb_pane = @intCast(i);
+                if (!self.panes[self.pane_i].alive) self.pane_i = @intCast(i);
+            }
+            self.needs_render = true;
+            return;
+        }
         if (!self.ui_init) {
             self.ui_init = true;
             self.thickness = std.math.clamp(self.cfg_thickness, 1, 32);
         }
-        const w = self.win.width;
-        const h = self.win.height;
+        self.n_panes = @max(self.n_panes, idx + 1);
+        const saved = self.pane_i;
+        defer self.pane_i = if (self.panes[saved].alive) saved else idx;
+        self.pane_i = idx;
+        const sf = self.win.surfaceList()[idx];
+        p.release(self.alloc);
+        p.* = .{ .alive = true, .width = w, .height = h, .scale120 = sf.scale120 };
         const n: usize = @as(usize, w) * h;
-        self.view = View.fit(self.img.width, self.img.height, self.screenRect(), 1.0);
-        self.releaseCaches();
-        self.viewc = try self.alloc.alloc(u32, n);
-        self.viewc_dim = try self.alloc.alloc(u32, n);
-        self.stroke_mask = try self.alloc.alloc(u8, n);
-        @memset(self.stroke_mask, 0);
-        self.live_cov = try self.alloc.alloc(u8, n);
-        @memset(self.live_cov, 0);
-        self.live_bbox = Rect.empty;
+        p.view = self.viewFor(idx);
+        p.viewc = try self.alloc.alloc(u32, n);
+        p.viewc_dim = try self.alloc.alloc(u32, n);
+        p.stroke_mask = try self.alloc.alloc(u8, n);
+        @memset(p.stroke_mask, 0);
+        p.live_cov = try self.alloc.alloc(u8, n);
+        @memset(p.live_cov, 0);
         if (self.layer.len == 0) {
             self.layer = try self.alloc.alloc(u32, self.img.pixels.len);
             try doc_mod.composeRegion(self.alloc, self.layer, self.img.pixels, self.img.width, self.img.height, self.doc.shapes.items, self.lifted, self.doc.imageRect());
         }
-        if (self.preset_sel) |v| {
+        if (idx == 0) if (self.preset_sel) |v| {
             self.preset_sel = null;
             const a = self.clampImg(self.imgAt(.{ .x = v[0], .y = v[1] }));
             const b = self.clampImg(self.imgAt(.{ .x = v[0] + v[2], .y = v[1] + v[3] }));
             const r = Rect.fromCorners(a, b);
             if (!r.isEmpty()) self.doc.sel = r;
-        }
+        };
         self.refreshView(self.screenRect());
-        for (&self.pending) |*p| {
-            p.len = 0;
-            p.add(self.screenRect());
+        for (&p.pending) |*q| {
+            q.len = 0;
+            q.add(self.screenRect());
         }
         self.needs_render = true;
     }
@@ -375,18 +447,40 @@ pub const Editor = struct {
     /// Re-render `b` (buffer pixels) of the view caches from the layer.
     fn refreshView(self: *Editor, b: Rect) void {
         const r = Rect.intersect(b, self.screenRect()) orelse return;
-        view_mod.resample(self.layer, self.img.width, self.img.height, self.view, self.viewc, self.win.width, self.win.height, r);
+        view_mod.resample(self.layer, self.img.width, self.img.height, self.pn().view, self.pn().viewc, self.pn().width, self.pn().height, r);
         const keep: u32 = 255 - (dim_color >> 24);
-        const w: usize = self.win.width;
+        const w: usize = self.pn().width;
         var y: usize = @intCast(r.y);
         while (y < @as(usize, @intCast(r.bottom()))) : (y += 1) {
             const off = y * w + @as(usize, @intCast(r.x));
-            dimRow(self.viewc[off..][0..@intCast(r.w)], self.viewc_dim[off..][0..@intCast(r.w)], keep);
+            dimRow(self.pn().viewc[off..][0..@intCast(r.w)], self.pn().viewc_dim[off..][0..@intCast(r.w)], keep);
         }
-        self.content_dirty.add(r);
+        self.pn().content_dirty.add(r);
         if (self.selBuf()) |s| {
-            if (Rect.intersect(s, r) != null) self.bcache_valid = false;
+            if (Rect.intersect(s, r) != null) self.pn().bcache_valid = false;
         }
+    }
+
+    /// Re-render image rect `r` on every pane.
+    fn refreshAll(self: *Editor, r: Rect) void {
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |*p, i| {
+            if (!p.alive or p.viewc.len == 0) continue;
+            self.pane_i = @intCast(i);
+            self.refreshView(p.view.rectToBufOuter(r));
+        }
+        self.needs_render = true;
+    }
+
+    /// Mark buffer rect `r` dirty (or the whole screen when null) on every pane.
+    fn dirtyAll(self: *Editor, comptime whole: bool) void {
+        for (self.panes[0..self.n_panes]) |*p| {
+            if (!p.alive) continue;
+            if (whole) p.content_dirty.add(.{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) });
+            p.bcache_valid = false;
+        }
+        self.needs_render = true;
     }
 
     /// Recompose image rect `r` of the layer and everything derived.
@@ -396,8 +490,7 @@ pub const Editor = struct {
         for (self.doc.shapes.items) |*s| margin += s.readMargin();
         const reg = r.expand(margin);
         try doc_mod.composeRegion(self.alloc, self.layer, self.img.pixels, self.img.width, self.img.height, self.doc.shapes.items, self.lifted, reg);
-        if (self.viewc.len > 0) self.refreshView(self.view.rectToBufOuter(reg));
-        self.needs_render = true;
+        self.refreshAll(reg);
     }
 
     /// Shape `i` changed and is the topmost one: paint just it.
@@ -407,8 +500,7 @@ pub const Editor = struct {
         }
         const s = &self.doc.shapes.items[i];
         try doc_mod.paintOnTop(self.alloc, self.layer, self.img.width, self.img.height, s);
-        if (self.viewc.len > 0) self.refreshView(self.view.rectToBufOuter(s.bounds()));
-        self.needs_render = true;
+        self.refreshAll(s.bounds());
     }
 
     fn recomposeAll(self: *Editor) !void {
@@ -426,8 +518,14 @@ pub const Editor = struct {
 
     /// Mark the on-screen selection area (or its beautify frame) dirty.
     fn selDirty(self: *Editor) void {
-        if (self.selBuf()) |s| self.content_dirty.add(self.frameRect(s).expand(2));
-        self.bcache_valid = false;
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |*p, i| {
+            if (!p.alive) continue;
+            self.pane_i = @intCast(i);
+            if (self.selBuf()) |sb| p.content_dirty.add(self.frameRect(sb).expand(2));
+            p.bcache_valid = false;
+        }
         self.needs_render = true;
     }
 
@@ -436,53 +534,53 @@ pub const Editor = struct {
         if (!self.beautify.enabled) return s;
         const sel = self.doc.sel.?.normalized();
         const g = self.beautify.geometry(@intCast(@max(1, sel.w)), @intCast(@max(1, sel.h)));
-        const pad: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(g.pad)) * self.view.scale));
+        const pad: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(g.pad)) * self.pn().view.scale));
         return s.expand(pad);
     }
 
     fn ensureBeautyCache(self: *Editor) !void {
-        if (!self.beautify.enabled or self.bcache_valid) return;
+        if (!self.beautify.enabled or self.pn().bcache_valid) return;
         const s = self.selBuf() orelse return;
         if (s.w < 2 or s.h < 2) return;
         const fr = self.frameRect(s);
-        const old = self.bcache_rect;
-        self.bcache_valid = true;
-        self.bcache_rect = fr;
+        const old = self.pn().bcache_rect;
+        self.pn().bcache_valid = true;
+        self.pn().bcache_rect = fr;
         const fw: u32 = @intCast(fr.w);
         const fh: u32 = @intCast(fr.h);
-        self.alloc.free(self.bcache);
-        self.bcache = &.{};
-        self.bcache = try self.alloc.alloc(u32, @as(usize, fw) * fh);
+        self.alloc.free(self.pn().bcache);
+        self.pn().bcache = &.{};
+        self.pn().bcache = try self.alloc.alloc(u32, @as(usize, fw) * fh);
         // the shot as shown (clipped to the screen; off-screen parts are dim)
         const sw: u32 = @intCast(s.w);
         const sh: u32 = @intCast(s.h);
         const shot = try self.alloc.alloc(u32, @as(usize, sw) * sh);
         defer self.alloc.free(shot);
-        const ww: i32 = @intCast(self.win.width);
-        const wh: i32 = @intCast(self.win.height);
+        const ww: i32 = @intCast(self.pn().width);
+        const wh: i32 = @intCast(self.pn().height);
         for (0..sh) |yy| {
             const by = std.math.clamp(s.y + @as(i32, @intCast(yy)), 0, wh - 1);
             for (0..sw) |xx| {
                 const bx = std.math.clamp(s.x + @as(i32, @intCast(xx)), 0, ww - 1);
-                shot[yy * sw + xx] = self.viewc[@as(usize, @intCast(by)) * self.win.width + @as(usize, @intCast(bx))];
+                shot[yy * sw + xx] = self.pn().viewc[@as(usize, @intCast(by)) * self.pn().width + @as(usize, @intCast(bx))];
             }
         }
         const b = self.beautify;
         // scale the frame like the export: same proportions, view pixels
         const sel = self.doc.sel.?.normalized();
         const g_img = b.geometry(@intCast(@max(1, sel.w)), @intCast(@max(1, sel.h)));
-        const k = self.view.scale;
+        const k = self.pn().view.scale;
         const effects = @import("../gfx/effects.zig");
         const bg = b.background();
-        effects.gradient(self.bcache, fw, fh, .{ .x = 0, .y = 0, .w = fr.w, .h = fr.h }, bg.from, bg.to);
+        effects.gradient(self.pn().bcache, fw, fh, .{ .x = 0, .y = 0, .w = fr.w, .h = fr.h }, bg.from, bg.to);
         const pad = s.x - fr.x;
         const inner: effects.Rect = .{ .x = pad, .y = s.y - fr.y, .w = s.w, .h = s.h };
         const blur: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_blur)) * k));
-        if (blur > 0) effects.dropShadow(self.bcache, fw, fh, inner, blur, @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_dy)) * k)), 0x70000000);
+        if (blur > 0) effects.dropShadow(self.pn().bcache, fw, fh, inner, blur, @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_dy)) * k)), 0x70000000);
         const rad: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(g_img.radius)) * k));
-        effects.blitRounded(self.bcache, fw, fh, shot, sw, sh, inner.x, inner.y, rad);
-        self.content_dirty.add(old);
-        self.content_dirty.add(fr);
+        effects.blitRounded(self.pn().bcache, fw, fh, shot, sw, sh, inner.x, inner.y, rad);
+        self.pn().content_dirty.add(old);
+        self.pn().content_dirty.add(fr);
     }
 
     // --- event handling ---
@@ -490,22 +588,19 @@ pub const Editor = struct {
     pub fn handle(self: *Editor, ev: window.InputEvent) !void {
         switch (ev) {
             // other surfaces are the integrator's (one view per monitor)
-            .resize => |r| if (r.surface == 0 and r.w > 0) try self.onResize(),
-            .frame_done => {
-                if (self.needs_render) {
-                    try self.renderFrame();
-                    self.needs_render = false;
-                }
-            },
+            .resize => |r| try self.onResize(r.surface, r.w, r.h),
+            .frame_done => if (self.renderReady()) try self.renderFrame(),
             .close => {
                 self.action = .cancel;
                 self.running = false;
             },
-            .pointer_motion => |m| if (m.surface == 0) {
+            .pointer_motion => |m| {
+                self.pointerOn(m.surface);
                 self.mouse = .{ .x = @intFromFloat(@round(m.x)), .y = @intFromFloat(@round(m.y)) };
                 try self.onMotion();
             },
             .pointer_button => |b| {
+                self.pointerOn(b.surface);
                 self.mouse = .{ .x = @intFromFloat(@round(b.x)), .y = @intFromFloat(@round(b.y)) };
                 if (b.button == window.BTN_LEFT) {
                     if (b.pressed) try self.onPress() else try self.onRelease();
@@ -525,6 +620,18 @@ pub const Editor = struct {
                 } else if (k.pressed) try self.onKey(k);
             },
         }
+    }
+
+    /// Is buffer point `m` of the pointer's pane on the toolbar's pane at all?
+    fn onToolbar(self: *const Editor, m: Point) bool {
+        return self.mouse_pane == self.tb_pane and self.toolbar_rect.contains(m.x, m.y);
+    }
+
+    fn pointerOn(self: *Editor, surface: u8) void {
+        if (surface >= self.n_panes or !self.panes[surface].alive) return;
+        if (surface != self.mouse_pane) self.needs_render = true;
+        self.mouse_pane = surface;
+        self.pane_i = surface;
     }
 
     fn onScroll(self: *Editor, value: f64) !void {
@@ -574,7 +681,7 @@ pub const Editor = struct {
             .none => {
                 try self.win.setCursor(self.cursorFor(m));
                 var hover: i32 = -1;
-                if (self.toolbar_rect.contains(m.x, m.y)) {
+                if (self.onToolbar(m)) {
                     for (self.buttons.items, 0..) |btn, bi| {
                         if (btn.rect.contains(m.x, m.y)) {
                             hover = @intCast(bi);
@@ -638,8 +745,8 @@ pub const Editor = struct {
     }
 
     fn cursorFor(self: *Editor, m: Point) window.Cursor {
-        if (self.toolbar_rect.contains(m.x, m.y) or self.help_open) return .arrow;
-        if (self.picker.open and self.picker.rect.contains(m.x, m.y)) return .crosshair;
+        if (self.onToolbar(m) or self.help_open) return .arrow;
+        if (self.picker.open and (self.mouse_pane == self.tb_pane and self.picker.rect.contains(m.x, m.y))) return .crosshair;
         if (self.selected) |i| {
             if (self.shapeHandleAt(i, m) != null) return .move;
         }
@@ -666,13 +773,13 @@ pub const Editor = struct {
             .none => return null,
             .endpoints => {
                 for ([_]Point{ s.p0, s.p1 }, 0..) |p, k| {
-                    const b = self.view.toBuf(p);
+                    const b = self.pn().view.toBuf(p);
                     if (@abs(b.x - m.x) <= r and @abs(b.y - m.y) <= r) return @intCast(k);
                 }
                 return null;
             },
             .box => {
-                const f = self.view.rectToBuf(s.frame());
+                const f = self.pn().view.rectToBuf(s.frame());
                 // a press inside a small shape moves it rather than resizing
                 if (f.w < 4 * r or f.h < 4 * r) {
                     if (f.contains(m.x, m.y)) return null;
@@ -691,19 +798,19 @@ pub const Editor = struct {
             return;
         }
         if (self.picker.open) {
-            if (ui.pickPartAt(self, m)) |part| {
+            if (if (self.mouse_pane == self.tb_pane) ui.pickPartAt(self, m) else null) |part| {
                 self.drag = .{ .picking = part };
                 ui.pickAt(self, part, m);
                 try self.applyPickerColor();
                 return;
             }
-            if (self.picker.rect.contains(m.x, m.y)) return;
+            if ((self.mouse_pane == self.tb_pane and self.picker.rect.contains(m.x, m.y))) return;
             self.picker.open = false;
             self.needs_render = true;
         }
 
         // toolbar gets priority
-        if (self.toolbar_rect.contains(m.x, m.y)) {
+        if (self.onToolbar(m)) {
             for (self.buttons.items) |b| {
                 if (b.rect.contains(m.x, m.y)) {
                     try self.onButton(b.kind);
@@ -720,7 +827,7 @@ pub const Editor = struct {
 
         if (self.text) |*t| {
             const s = &self.doc.shapes.items[t.idx];
-            if (self.view.rectToBuf(s.frame()).expand(self.sc(4)).contains(m.x, m.y)) {
+            if (self.pn().view.rectToBuf(s.frame()).expand(self.sc(4)).contains(m.x, m.y)) {
                 t.te.caret = caretAt(s, ip);
                 self.needs_render = true;
                 return;
@@ -833,7 +940,7 @@ pub const Editor = struct {
                 const last = s.points.items[s.points.items.len - 1];
                 const dx: f64 = @floatFromInt(ip.x - last.x);
                 const dy: f64 = @floatFromInt(ip.y - last.y);
-                const min_step = self.view.lenToImg(2.0);
+                const min_step = self.pn().view.lenToImg(2.0);
                 if (dx * dx + dy * dy >= min_step * min_step) {
                     try s.points.append(self.alloc, ip);
                     self.liveSegment(s, last, ip);
@@ -847,15 +954,25 @@ pub const Editor = struct {
     /// Rasterize one new freehand segment into the live coverage mask: the
     /// stroke being drawn costs O(segment) per motion, not O(stroke).
     fn liveSegment(self: *Editor, s: *const Shape, a_img: Point, b_img: Point) void {
-        if (self.live_cov.len == 0) return;
-        const xf = self.view.xform();
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |p, i| {
+            if (!p.alive) continue;
+            self.pane_i = @intCast(i);
+            self.liveSegmentPane(s, a_img, b_img);
+        }
+    }
+
+    fn liveSegmentPane(self: *Editor, s: *const Shape, a_img: Point, b_img: Point) void {
+        if (self.pn().live_cov.len == 0) return;
+        const xf = self.pn().view.xform();
         const a = xf.pt(a_img);
         const b = xf.pt(b_img);
-        var half = @max(0.5, @as(f64, @floatFromInt(s.thickness)) * self.view.scale / 2.0);
+        var half = @max(0.5, @as(f64, @floatFromInt(s.thickness)) * self.pn().view.scale / 2.0);
         if (s.tool == .highlight) half *= 3.0;
         const pad: i32 = @as(i32, @intFromFloat(@ceil(half))) + 2;
         const bb = Rect.intersect(Rect.fromCorners(a, b).expand(pad), self.screenRect()) orelse return;
-        const w: usize = self.win.width;
+        const w: usize = self.pn().width;
         const ax: f64 = @floatFromInt(a.x);
         const ay: f64 = @floatFromInt(a.y);
         const abx = @as(f64, @floatFromInt(b.x)) - ax;
@@ -874,23 +991,33 @@ pub const Editor = struct {
                 if (cov <= 0.003) continue;
                 const cv: u8 = @intFromFloat(cov * 255.0);
                 const idx = @as(usize, @intCast(y)) * w + @as(usize, @intCast(x));
-                if (cv > self.live_cov[idx]) self.live_cov[idx] = cv;
+                if (cv > self.pn().live_cov[idx]) self.pn().live_cov[idx] = cv;
             }
         }
-        self.live_bbox = Rect.unite(self.live_bbox, bb);
-        self.content_dirty.add(bb);
+        self.pn().live_bbox = Rect.unite(self.pn().live_bbox, bb);
+        self.pn().content_dirty.add(bb);
     }
 
     fn clearLive(self: *Editor) void {
-        if (self.live_bbox.isEmpty()) return;
-        const w: usize = self.win.width;
-        const r = self.live_bbox;
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        for (self.panes[0..self.n_panes], 0..) |p, i| {
+            if (!p.alive) continue;
+            self.pane_i = @intCast(i);
+            self.clearLivePane();
+        }
+    }
+
+    fn clearLivePane(self: *Editor) void {
+        if (self.pn().live_bbox.isEmpty()) return;
+        const w: usize = self.pn().width;
+        const r = self.pn().live_bbox;
         var y: usize = @intCast(r.y);
         while (y < @as(usize, @intCast(r.bottom()))) : (y += 1) {
-            @memset(self.live_cov[y * w + @as(usize, @intCast(r.x)) ..][0..@intCast(r.w)], 0);
+            @memset(self.pn().live_cov[y * w + @as(usize, @intCast(r.x)) ..][0..@intCast(r.w)], 0);
         }
-        self.content_dirty.add(r);
-        self.live_bbox = Rect.empty;
+        self.pn().content_dirty.add(r);
+        self.pn().live_bbox = Rect.empty;
     }
 
     fn onRelease(self: *Editor) !void {
@@ -899,7 +1026,7 @@ pub const Editor = struct {
         switch (drag) {
             .selecting => {
                 const s = self.doc.sel.?.normalized();
-                const min = self.view.lenToImg(4.0);
+                const min = self.pn().view.lenToImg(4.0);
                 self.selDirty();
                 if (@as(f64, @floatFromInt(s.w)) < min or @as(f64, @floatFromInt(s.h)) < min) {
                     // a click: pick the monitor under it when there are several
@@ -941,7 +1068,7 @@ pub const Editor = struct {
         self.cur = null;
         self.clearLive();
         const f = s.frame();
-        const min = self.view.lenToImg(3.0);
+        const min = self.pn().view.lenToImg(3.0);
         const tiny = switch (s.tool) {
             .pen, .highlight => false,
             .line, .arrow => @abs(s.p1.x - s.p0.x) < @as(i32, @intFromFloat(min)) + 1 and @abs(s.p1.y - s.p0.y) < @as(i32, @intFromFloat(min)) + 1,
@@ -1168,7 +1295,7 @@ pub const Editor = struct {
             .beautify => {
                 self.beautify.enabled = !self.beautify.enabled;
                 self.selDirty();
-                self.content_dirty.add(self.screenRect());
+                self.dirtyAll(true);
             },
             .background => {
                 self.beautify.bg = @intCast((self.beautify.bg + 1) % doc_mod.backgrounds.len);
@@ -1370,7 +1497,7 @@ pub const Editor = struct {
         try self.settle();
         const i = self.selected orelse return;
         try self.doc.checkpoint();
-        const off: i32 = @max(4, @as(i32, @intFromFloat(@round(self.view.lenToImg(@floatFromInt(self.sc(14)))))));
+        const off: i32 = @max(4, @as(i32, @intFromFloat(@round(self.pn().view.lenToImg(@floatFromInt(self.sc(14)))))));
         const n = try self.doc.duplicate(i, off, off);
         self.selected = n;
         try self.paintTop(n);
@@ -1410,10 +1537,7 @@ pub const Editor = struct {
 
     fn copyToClipboard(self: *Editor) !void {
         self.showCopyNotice(.copying, 0);
-        if (!self.win.frame_pending) {
-            try self.renderFrame();
-            self.needs_render = false;
-        }
+        if (self.renderReady()) try self.renderFrame();
         const exported = try self.exportPixels();
         self.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
             self.alloc.free(exported.pixels);
@@ -1432,46 +1556,101 @@ pub const Editor = struct {
 
     // --- rendering ---
 
-    fn renderFrame(self: *Editor) !void {
-        if (self.viewc.len == 0) return;
-        try self.ensureBeautyCache();
-        try ui.layoutToolbar(self);
-        self.overlays.len = 0;
-        ui.collectOverlays(self, &self.overlays);
-        for (&self.pending) |*p| {
-            p.addAll(&self.content_dirty);
-            p.addAll(&self.overlays);
+    /// Is some pane due for a frame and free to take one?
+    fn renderReady(self: *Editor) bool {
+        if (self.needs_render) {
+            for (self.panes[0..self.n_panes]) |*p| p.due = p.alive;
+            self.needs_render = false;
         }
-        self.content_dirty.len = 0;
+        const surfs = self.win.surfaceList();
+        for (self.panes[0..self.n_panes], 0..) |p, i| {
+            if (p.alive and p.due and i < surfs.len and !surfs[i].frame_pending) return true;
+        }
+        return false;
+    }
 
-        if (self.caretRect()) |cr| self.win.setTextInput(true, .{ .x = cr.x, .y = cr.y, .w = cr.w, .h = cr.h }) catch {};
-        const px = try self.win.backBuffer();
-        const bi = self.win.surfaceList()[0].cur_buf;
-        const p = &self.pending[bi];
+    /// The pane that shows the toolbar: the pointer's when it shows part
+    /// of the selection, else the one showing most of it.
+    fn chooseTbPane(self: *Editor) void {
+        const saved = self.pane_i;
+        defer self.pane_i = saved;
+        var best: u8 = self.mouse_pane;
+        var best_area: i64 = -1;
+        for (self.panes[0..self.n_panes], 0..) |p, i| {
+            if (!p.alive) continue;
+            self.pane_i = @intCast(i);
+            const sb = self.selBuf() orelse continue;
+            const vis = Rect.intersect(sb, self.screenRect()) orelse continue;
+            var area = @as(i64, vis.w) * vis.h;
+            if (i == self.mouse_pane) area = std.math.maxInt(i64);
+            if (area > best_area) {
+                best_area = area;
+                best = @intCast(i);
+            }
+        }
+        if (best != self.tb_pane) {
+            self.tb_pane = best;
+            for (self.panes[0..self.n_panes]) |*p| p.due = p.alive;
+        }
+    }
+
+    /// Render every due pane whose surface is free.
+    fn renderFrame(self: *Editor) !void {
+        _ = self.renderReady();
+        defer self.pane_i = self.mouse_pane;
+        self.chooseTbPane();
+        self.pane_i = self.tb_pane;
+        try ui.layoutToolbar(self);
+        if (self.caretRect()) |cr| {
+            self.pane_i = self.mouse_pane;
+            self.win.setTextInput(true, .{ .x = cr.x, .y = cr.y, .w = cr.w, .h = cr.h }) catch {};
+        }
+        const surfs = self.win.surfaceList();
+        for (self.panes[0..self.n_panes], 0..) |*p, i| {
+            if (!p.alive or !p.due or p.viewc.len == 0 or i >= surfs.len or surfs[i].frame_pending) continue;
+            self.pane_i = @intCast(i);
+            try self.renderPane(@intCast(i));
+            p.due = false;
+        }
+    }
+
+    fn renderPane(self: *Editor, idx: u8) !void {
+        try self.ensureBeautyCache();
+        self.pn().overlays.len = 0;
+        ui.collectOverlays(self, &self.pn().overlays);
+        for (&self.pn().pending) |*p| {
+            p.addAll(&self.pn().content_dirty);
+            p.addAll(&self.pn().overlays);
+        }
+        self.pn().content_dirty.len = 0;
+
+        const px = try self.win.backBufferOf(idx);
+        const bi = self.win.surfaceList()[idx].cur_buf;
+        const p = &self.pn().pending[bi];
         // past ~half the screen one full pass beats many partial ones
-        if (p.area() * 2 > @as(i64, self.win.width) * self.win.height) {
+        if (p.area() * 2 > @as(i64, self.pn().width) * self.pn().height) {
             self.composeRegion(px, self.screenRect());
         } else {
             for (p.slice()) |r| self.composeRegion(px, r);
         }
-        var canvas = Canvas.init(px, self.win.width, self.win.height);
-        canvas.mask = self.stroke_mask;
+        var canvas = Canvas.init(px, self.pn().width, self.pn().height);
+        canvas.mask = self.pn().stroke_mask;
         self.drawLiveShapes(&canvas);
         ui.drawChrome(self, &canvas);
         p.len = 0;
-        p.addAll(&self.overlays);
-        self.last_frame = px;
-        try self.win.present();
+        p.addAll(&self.pn().overlays);
+        self.pn().last_frame = px;
+        try self.win.presentSurface(idx);
     }
 
     /// Paint the background for buffer rect `region`: the dimmed view, the
     /// bright selection (or its beautify frame) and the live stroke.
     fn composeRegion(self: *Editor, px: []u32, region: Rect) void {
         const r = Rect.intersect(region, self.screenRect()) orelse return;
-        const w: usize = self.win.width;
+        const w: usize = self.pn().width;
         const sel = self.selBuf();
-        const beauty = self.beautify.enabled and self.bcache_valid and sel != null;
-        const bright: ?Rect = if (beauty) self.bcache_rect else sel;
+        const beauty = self.beautify.enabled and self.pn().bcache_valid and sel != null;
+        const bright: ?Rect = if (beauty) self.pn().bcache_rect else sel;
         var y = r.y;
         while (y < r.bottom()) : (y += 1) {
             const row = @as(usize, @intCast(y)) * w;
@@ -1491,24 +1670,24 @@ pub const Editor = struct {
             const sa: usize = @intCast(x0);
             const sb: usize = @intCast(x1);
             const e: usize = @intCast(r.right());
-            if (sa > a) @memcpy(px[row + a .. row + sa], self.viewc_dim[row + a .. row + sa]);
+            if (sa > a) @memcpy(px[row + a .. row + sa], self.pn().viewc_dim[row + a .. row + sa]);
             if (sb > sa) {
                 if (beauty) {
-                    const b = self.bcache_rect;
+                    const b = self.pn().bcache_rect;
                     const bw: usize = @intCast(b.w);
                     const by: usize = @intCast(y - b.y);
                     const bx: usize = @intCast(x0 - b.x);
-                    @memcpy(px[row + sa .. row + sb], self.bcache[by * bw + bx ..][0 .. sb - sa]);
+                    @memcpy(px[row + sa .. row + sb], self.pn().bcache[by * bw + bx ..][0 .. sb - sa]);
                 } else {
-                    @memcpy(px[row + sa .. row + sb], self.viewc[row + sa .. row + sb]);
+                    @memcpy(px[row + sa .. row + sb], self.pn().viewc[row + sa .. row + sb]);
                 }
             }
-            if (e > sb) @memcpy(px[row + sb .. row + e], self.viewc_dim[row + sb .. row + e]);
+            if (e > sb) @memcpy(px[row + sb .. row + e], self.pn().viewc_dim[row + sb .. row + e]);
         }
         // the freehand stroke being drawn
         const s = &(self.cur orelse return);
         if (s.tool != .pen and s.tool != .highlight) return;
-        const lr = Rect.intersect(r, self.live_bbox) orelse return;
+        const lr = Rect.intersect(r, self.pn().live_bbox) orelse return;
         const col = if (s.tool == .highlight) (s.color & 0x00FFFFFF) | 0x66000000 else s.color;
         const ca: u32 = col >> 24;
         var dimmed: [1]u32 = undefined;
@@ -1518,7 +1697,7 @@ pub const Editor = struct {
             var x = lr.x;
             while (x < lr.right()) : (x += 1) {
                 const idx = @as(usize, @intCast(y)) * w + @as(usize, @intCast(x));
-                const cv: u32 = self.live_cov[idx];
+                const cv: u32 = self.pn().live_cov[idx];
                 if (cv == 0) continue;
                 const inside = if (bright) |b| b.contains(x, y) else false;
                 const c = if (inside) col else dimmed[0];
@@ -1539,13 +1718,13 @@ pub const Editor = struct {
         for (str[0..ls]) |c| line += @intFromBool(c == '\n');
         const lh = text_mod.height(fs);
         const p = Point{ .x = s.p0.x + text_mod.width(fs, str[ls..t.te.caret]), .y = s.p0.y + line * lh };
-        const b = self.view.toBuf(p);
-        return .{ .x = b.x, .y = b.y, .w = @max(1, self.sc(2)), .h = @max(1, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(lh)) * self.view.scale)))) };
+        const b = self.pn().view.toBuf(p);
+        return .{ .x = b.x, .y = b.y, .w = @max(1, self.sc(2)), .h = @max(1, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(lh)) * self.pn().view.scale)))) };
     }
 
     /// Shapes not in the layer: the one being drawn and the lifted one.
     fn drawLiveShapes(self: *Editor, canvas: *Canvas) void {
-        const xf = self.view.xform();
+        const xf = self.pn().view.xform();
         if (self.cur) |*s| {
             if (s.tool != .pen and s.tool != .highlight) shapes_mod.drawShape(canvas, self.alloc, s, xf, null);
         }
@@ -1563,7 +1742,7 @@ pub const Editor = struct {
         }
         if (self.lifted) |i| r = Rect.unite(r, self.doc.shapes.items[i].bounds().expand(4));
         if (r.isEmpty()) return r;
-        return self.view.rectToBufOuter(r).expand(2);
+        return self.pn().view.rectToBufOuter(r).expand(2);
     }
 
     // --- export ---
@@ -1583,16 +1762,22 @@ pub const Editor = struct {
 
     fn dumpAtExit(self: *Editor, prefix: []const u8) void {
         var buf: [1024]u8 = undefined;
-        const frame_path = std.fmt.bufPrint(&buf, "{s}-frame.png", .{prefix}) catch return;
-        self.dumpFrame(frame_path);
+        for (0..self.n_panes) |i| {
+            self.pane_i = @intCast(i);
+            const frame_path = (if (i == 0)
+                std.fmt.bufPrint(&buf, "{s}-frame.png", .{prefix})
+            else
+                std.fmt.bufPrint(&buf, "{s}-frame-{d}.png", .{ prefix, i })) catch return;
+            self.dumpFrame(frame_path);
+        }
         var buf2: [1024]u8 = undefined;
         const export_path = std.fmt.bufPrint(&buf2, "{s}-export.png", .{prefix}) catch return;
         self.dumpExport(export_path);
     }
 
     fn dumpFrame(self: *Editor, path: []const u8) void {
-        if (self.last_frame.len == 0) return;
-        const data = png.encode(self.alloc, self.last_frame, self.win.width, self.win.height) catch return;
+        if (self.pn().last_frame.len == 0) return;
+        const data = png.encode(self.alloc, self.pn().last_frame, self.pn().width, self.pn().height) catch return;
         defer self.alloc.free(data);
         sys.writeFile(path, data) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
     }
@@ -1621,32 +1806,32 @@ pub const Editor = struct {
         const eql = std.mem.eql;
         if (eql(u8, op, "move")) {
             const p = try parsePoint(arg);
-            try self.handle(.{ .pointer_motion = .{ .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) } });
+            try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) } });
         } else if (eql(u8, op, "down") or eql(u8, op, "up")) {
             const p = try parsePoint(arg);
-            try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = eql(u8, op, "down"), .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = eql(u8, op, "down"), .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) } });
         } else if (eql(u8, op, "click") or eql(u8, op, "rclick")) {
             const p = try parsePoint(arg);
             const btn = if (eql(u8, op, "click")) window.BTN_LEFT else window.BTN_RIGHT;
             const fx: f64 = @floatFromInt(p.x);
             const fy: f64 = @floatFromInt(p.y);
-            try self.handle(.{ .pointer_motion = .{ .x = fx, .y = fy } });
-            try self.handle(.{ .pointer_button = .{ .button = btn, .pressed = true, .x = fx, .y = fy } });
-            try self.handle(.{ .pointer_button = .{ .button = btn, .pressed = false, .x = fx, .y = fy } });
+            try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = fx, .y = fy } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = btn, .pressed = true, .x = fx, .y = fy } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = btn, .pressed = false, .x = fx, .y = fy } });
         } else if (eql(u8, op, "drag")) {
             var pts = std.mem.tokenizeScalar(u8, arg, ' ');
             const a = try parsePoint(pts.next() orelse return error.BadScript);
             const b = try parsePoint(pts.next() orelse return error.BadScript);
-            try self.handle(.{ .pointer_motion = .{ .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) } });
-            try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = true, .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) } });
+            try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = true, .x = @floatFromInt(a.x), .y = @floatFromInt(a.y) } });
             for (1..13) |i| {
                 const t = @as(f64, @floatFromInt(i)) / 12.0;
                 const x = @as(f64, @floatFromInt(a.x)) + @as(f64, @floatFromInt(b.x - a.x)) * t;
                 const y = @as(f64, @floatFromInt(a.y)) + @as(f64, @floatFromInt(b.y - a.y)) * t + @sin(t * std.math.pi) * 20;
-                try self.handle(.{ .pointer_motion = .{ .x = x, .y = y } });
+                try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = x, .y = y } });
             }
-            try self.handle(.{ .pointer_motion = .{ .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
-            try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = false, .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
+            try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = false, .x = @floatFromInt(b.x), .y = @floatFromInt(b.y) } });
         } else if (eql(u8, op, "scribble")) {
             // scribble cx,cy,r,n: a long freehand stroke, rendering a frame
             // per motion, and log the time per frame
@@ -1658,12 +1843,12 @@ pub const Editor = struct {
                 const rr = @as(f64, @floatFromInt(v[2])) * (0.3 + 0.7 * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n)));
                 const x = @as(f64, @floatFromInt(v[0])) + @cos(a) * rr;
                 const y = @as(f64, @floatFromInt(v[1])) + @sin(a) * rr;
-                try self.handle(.{ .pointer_motion = .{ .x = x, .y = y } });
-                if (i == 0) try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = true, .x = x, .y = y } });
+                try self.handle(.{ .pointer_motion = .{ .surface = self.script_surface, .x = x, .y = y } });
+                if (i == 0) try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = true, .x = x, .y = y } });
                 try self.renderFrame();
             }
             const t1 = nowMs();
-            try self.handle(.{ .pointer_button = .{ .button = window.BTN_LEFT, .pressed = false, .x = 0, .y = 0 } });
+            try self.handle(.{ .pointer_button = .{ .surface = self.script_surface, .button = window.BTN_LEFT, .pressed = false, .x = 0, .y = 0 } });
             std.log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, nowMs() - t1 });
         } else if (eql(u8, op, "scroll")) {
             try self.handle(.{ .pointer_axis = .{ .value = try std.fmt.parseFloat(f64, arg) } });
@@ -1708,8 +1893,23 @@ pub const Editor = struct {
         } else if (eql(u8, op, "render")) {
             try self.renderFrame();
         } else if (eql(u8, op, "dump")) {
+            // dump PATH: the script surface's frame, rendered now
+            const idx = self.script_surface;
+            if (idx >= self.n_panes or !self.panes[idx].alive) return error.NoSuchSurface;
+            for (self.panes[0..self.n_panes]) |*p| p.due = p.alive;
             try self.renderFrame();
+            self.pane_i = idx;
+            defer self.pane_i = self.mouse_pane;
+            if (self.panes[idx].due) {
+                try self.renderPane(idx);
+                self.panes[idx].due = false;
+            }
             self.dumpFrame(arg);
+        } else if (eql(u8, op, "unplug")) {
+            // editor side of an output going away
+            try self.handle(.{ .resize = .{ .w = 0, .h = 0, .surface = try std.fmt.parseInt(u8, arg, 10) } });
+        } else if (eql(u8, op, "surface")) {
+            self.script_surface = try std.fmt.parseInt(u8, arg, 10);
         } else if (eql(u8, op, "export")) {
             self.dumpExport(arg);
         } else if (eql(u8, op, "quit")) {

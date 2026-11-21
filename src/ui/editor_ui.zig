@@ -126,8 +126,8 @@ pub fn layoutToolbar(self: *Editor) !void {
         self.focus = null;
         return;
     }
-    const w: i32 = @intCast(self.win.width);
-    const h: i32 = @intCast(self.win.height);
+    const w: i32 = @intCast(self.pn().width);
+    const h: i32 = @intCast(self.pn().height);
     const btn = self.sc(34);
     const gap = self.sc(4);
     const ggap = self.sc(13);
@@ -254,9 +254,9 @@ fn chromePad(self: *const Editor) i32 {
 pub fn collectOverlays(self: *Editor, list: *RectList) void {
     list.add(self.liveBounds());
     if (self.text) |t| {
-        const f = self.view.rectToBuf(self.doc.shapes.items[t.idx].frame()).expand(self.sc(3));
+        const f = self.pn().view.rectToBuf(self.doc.shapes.items[t.idx].frame()).expand(self.sc(3));
         addOutline(list, f, 2);
-        if (preeditRect(self)) |r| list.add(r.expand(2));
+        if (self.isMousePane()) if (preeditRect(self)) |r| list.add(r.expand(2));
     }
     if (self.selected) |i| {
         if (shapeChromeRect(self, i)) |r| addOutline(list, r, chromePad(self));
@@ -267,10 +267,13 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     } else {
         list.add(hintRect(self).expand(1));
     }
+    if (self.isMousePane()) {
+        if (loupeRect(self)) |r| list.add(r.expand(2));
+    }
+    if (!self.isTbPane()) return;
     if (!self.toolbar_rect.isEmpty()) list.add(self.toolbar_rect.expand(self.sc(4)));
     if (tooltipRect(self)) |r| list.add(r.expand(1));
     if (self.picker.open and !self.toolbar_rect.isEmpty()) list.add(self.picker.rect.expand(self.sc(4)));
-    if (loupeRect(self)) |r| list.add(r.expand(2));
     if (self.copy_notice != .none) list.add(noticeRect(self).expand(self.sc(6)));
     if (self.help_open) list.add(helpRect(self).expand(self.sc(4)));
 }
@@ -278,8 +281,8 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
 fn shapeChromeRect(self: *const Editor, i: usize) ?Rect {
     const s = &self.doc.shapes.items[i];
     return switch (s.handleKind()) {
-        .endpoints => Rect.fromCorners(self.view.toBuf(s.p0), self.view.toBuf(s.p1)),
-        else => self.view.rectToBuf(s.frame()).expand(self.sc(3)),
+        .endpoints => Rect.fromCorners(self.pn().view.toBuf(s.p0), self.pn().view.toBuf(s.p1)),
+        else => self.pn().view.rectToBuf(s.frame()).expand(self.sc(3)),
     };
 }
 
@@ -287,22 +290,23 @@ fn shapeChromeRect(self: *const Editor, i: usize) ?Rect {
 
 pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (self.text) |t| {
-        const f = self.view.rectToBuf(self.doc.shapes.items[t.idx].frame()).expand(self.sc(3));
+        const f = self.pn().view.rectToBuf(self.doc.shapes.items[t.idx].frame()).expand(self.sc(3));
         dashedRect(canvas, f, 0xCCFFFFFF, 0xCC000000);
-        drawPreedit(self, canvas);
+        if (self.isMousePane()) drawPreedit(self, canvas);
     }
     if (self.selected) |i| drawShapeChrome(self, canvas, i);
     drawSelectionChrome(self, canvas);
+    if (self.isMousePane()) drawLoupe(self, canvas);
+    if (!self.isTbPane()) return;
     drawToolbar(self, canvas);
     if (self.picker.open and !self.toolbar_rect.isEmpty()) drawPicker(self, canvas);
-    drawLoupe(self, canvas);
     if (self.copy_notice != .none) drawCopyNotice(self, canvas);
     if (self.help_open) drawHelp(self, canvas);
 }
 
 fn preeditFs(self: *const Editor) f64 {
     const t = self.text.?;
-    return self.doc.shapes.items[t.idx].fontPx() * self.view.scale;
+    return self.doc.shapes.items[t.idx].fontPx() * self.pn().view.scale;
 }
 
 /// Where the input method's in-progress composition shows (at the caret).
@@ -345,7 +349,7 @@ fn drawShapeChrome(self: *Editor, canvas: *Canvas, i: usize) void {
     switch (s.handleKind()) {
         .endpoints => {
             for ([_]Point{ s.p0, s.p1 }) |p| {
-                const b = self.view.toBuf(p);
+                const b = self.pn().view.toBuf(p);
                 canvas.fillCircleAA(@floatFromInt(b.x), @floatFromInt(b.y), hr, 0xFFFFFFFF);
                 canvas.ringAA(@floatFromInt(b.x), @floatFromInt(b.y), hr, 1.5 * f, ui_accent);
             }
@@ -376,7 +380,7 @@ fn dimsLabel(self: *const Editor, buf: []u8) []const u8 {
 fn dimsPillRect(self: *const Editor, s: Rect) Rect {
     var buf: [64]u8 = undefined;
     const label = dimsLabel(self, &buf);
-    const w: i32 = @intCast(self.win.width);
+    const w: i32 = @intCast(self.pn().width);
     const fs = 13.0 * self.uf();
     const tw = text_mod.width(fs, label);
     const ph = text_mod.height(fs) + self.sc(8);
@@ -395,7 +399,7 @@ fn hintRect(self: *const Editor) Rect {
     const fs = 14.0 * self.uf();
     const tw = text_mod.width(fs, hint_text);
     const ph = text_mod.height(fs) + self.sc(14);
-    const w: i32 = @intCast(self.win.width);
+    const w: i32 = @intCast(self.pn().width);
     return .{ .x = @divTrunc(w - tw, 2) - self.sc(18), .y = self.sc(28), .w = tw + self.sc(36), .h = ph };
 }
 
@@ -442,7 +446,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
                 canvas.fillRect(sx, b.rect.y + self.sc(8), 1, b.rect.h - self.sc(16), 0x26FFFFFF);
             }
         }
-        const hovered = b.rect.contains(self.mouse.x, self.mouse.y);
+        const hovered = self.mouse_pane == self.tb_pane and b.rect.contains(self.mouse.x, self.mouse.y);
         const active = switch (b.kind) {
             .tool => |t| t == self.tool,
             .color => |c| c == self.color_idx and !self.custom_active,
@@ -475,7 +479,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
 
 fn tooltipButton(self: *const Editor) ?Button {
     if (self.drag != .none) return null;
-    if (self.hover_btn >= 0 and self.hover_btn < self.buttons.items.len) return self.buttons.items[@intCast(self.hover_btn)];
+    if (self.mouse_pane == self.tb_pane and self.hover_btn >= 0 and self.hover_btn < self.buttons.items.len) return self.buttons.items[@intCast(self.hover_btn)];
     if (self.focus) |fi| {
         if (fi < self.buttons.items.len) return self.buttons.items[fi];
     }
@@ -489,7 +493,7 @@ fn tooltipRect(self: *const Editor) ?Rect {
     const fs = 12.5 * self.uf();
     const tw = text_mod.width(fs, label);
     const th = text_mod.height(fs) + self.sc(8);
-    const w: i32 = @intCast(self.win.width);
+    const w: i32 = @intCast(self.pn().width);
     var x = b.rect.x + @divTrunc(b.rect.w - tw, 2) - self.sc(8);
     x = std.math.clamp(x, 2, @max(2, w - tw - self.sc(16) - 2));
     var y = self.toolbar_rect.y - th - self.sc(6);
@@ -515,8 +519,8 @@ fn layoutPicker(self: *Editor) void {
     }
     const pw = self.sc(220);
     const ph = self.sc(216);
-    const w: i32 = @intCast(self.win.width);
-    const h: i32 = @intCast(self.win.height);
+    const w: i32 = @intCast(self.pn().width);
+    const h: i32 = @intCast(self.pn().height);
     const x = std.math.clamp(anchor.x + @divTrunc(anchor.w - pw, 2), 4, @max(4, w - pw - 4));
     var y = self.toolbar_rect.y - ph - self.sc(8);
     if (y < 4) y = self.toolbar_rect.bottom() + self.sc(8);
@@ -721,8 +725,8 @@ fn loupeRect(self: *const Editor) ?Rect {
     const size = cell * loupe_cells;
     const label_h = text_mod.height(12.0 * self.uf()) + self.sc(8);
     const total_h = size + self.sc(4) + label_h;
-    const w: i32 = @intCast(self.win.width);
-    const h: i32 = @intCast(self.win.height);
+    const w: i32 = @intCast(self.pn().width);
+    const h: i32 = @intCast(self.pn().height);
     const off = self.sc(24);
     var x = self.mouse.x + off;
     var y = self.mouse.y + off;
@@ -735,7 +739,7 @@ fn drawLoupe(self: *Editor, canvas: *Canvas) void {
     const r = loupeRect(self) orelse return;
     const cell = @max(4, self.sc(8));
     const size = cell * loupe_cells;
-    const ip = self.view.toImg(self.mouse);
+    const ip = self.pn().view.toImg(self.mouse);
     const half: i32 = loupe_cells / 2;
     const iw: i32 = @intCast(self.img.width);
     const ih: i32 = @intCast(self.img.height);
@@ -808,8 +812,8 @@ fn helpRect(self: *const Editor) Rect {
     const lh = text_mod.height(fs) + self.sc(6);
     const pw = self.sc(560);
     const ph = lh * @as(i32, help_lines.len) + self.sc(64);
-    const w: i32 = @intCast(self.win.width);
-    const h: i32 = @intCast(self.win.height);
+    const w: i32 = @intCast(self.pn().width);
+    const h: i32 = @intCast(self.pn().height);
     return .{ .x = @divTrunc(w - pw, 2), .y = @max(4, @divTrunc(h - ph, 2)), .w = pw, .h = ph };
 }
 
@@ -840,8 +844,8 @@ fn noticeMessage(self: *const Editor) []const u8 {
 }
 
 fn noticeRect(self: *const Editor) Rect {
-    const window_width: i32 = @intCast(self.win.width);
-    const window_height: i32 = @intCast(self.win.height);
+    const window_width: i32 = @intCast(self.pn().width);
+    const window_height: i32 = @intCast(self.pn().height);
     const fs = 15.0 * self.uf();
     const mw = text_mod.width(fs, noticeMessage(self));
     const mh = text_mod.height(fs);
