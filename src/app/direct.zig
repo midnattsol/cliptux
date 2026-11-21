@@ -369,7 +369,7 @@ const Client = struct {
     }
 };
 
-const Frame = struct { pixels: []u32, width: u32, height: u32 };
+pub const Frame = struct { pixels: []u32, width: u32, height: u32 };
 
 // wl_shm formats (DRM fourcc, except the first two)
 const fmt_argb8888: u32 = 0;
@@ -580,7 +580,14 @@ fn kwinScreen(gpa: std.mem.Allocator, bus: *dbus.Connection, output_name: []cons
         return err;
     };
     sys.close(p[1]);
-    var msg = try bus.waitReplyOrError(serial, 10_000);
+    return kwinReply(gpa, bus, serial, p[0], false, 10_000);
+}
+
+/// The image KWin writes to `read_fd` after answering call `serial`; null
+/// when KWin refused (kwin_refused says why). `alpha`: keep see-through
+/// pixels (a window's rounded corners), else opaque.
+pub fn kwinReply(gpa: std.mem.Allocator, bus: *dbus.Connection, serial: u32, read_fd: sys.fd_t, alpha: bool, timeout_ms: i64) !?Frame {
+    var msg = try bus.waitReplyOrError(serial, timeout_ms);
     defer msg.deinit(gpa);
     if (msg.type == .@"error") {
         const e = msg.error_name orelse "";
@@ -614,14 +621,15 @@ fn kwinScreen(gpa: std.mem.Allocator, bus: *dbus.Connection, output_name: []cons
     var got: usize = 0;
     const deadline = sys.monoMs() + 10_000;
     while (got < size) {
-        if (!try sys.waitReadable(p[0], deadline)) return error.ShortImage;
-        const k = try sys.read(p[0], raw[got..]);
+        if (!try sys.waitReadable(read_fd, deadline)) return error.ShortImage;
+        const k = try sys.read(read_fd, raw[got..]);
         if (k == 0) return error.ShortImage;
         got += k;
     }
     const px = try gpa.alloc(u32, @as(usize, w) * h);
     for (0..h) |y| for (0..w) |x| {
-        px[y * w + x] = qimageConvert(format, std.mem.readInt(u32, raw[y * stride + x * 4 ..][0..4], .little)).?;
+        const v = std.mem.readInt(u32, raw[y * stride + x * 4 ..][0..4], .little);
+        px[y * w + x] = if (alpha) qimageAlpha(format, v) orelse qimageConvert(format, v).? else qimageConvert(format, v).?;
     };
     return .{ .pixels = px, .width = w, .height = h };
 }
@@ -642,7 +650,24 @@ fn qimageConvert(format: u32, p: u32) ?u32 {
     };
 }
 
+/// ARGB32 (5) as is, ARGB32_Premultiplied (6) unpremultiplied; null for
+/// formats without alpha.
+fn qimageAlpha(format: u32, p: u32) ?u32 {
+    const a = p >> 24;
+    return switch (format) {
+        5 => p,
+        6 => if (a == 0) 0 else blk: {
+            var out: u32 = a << 24;
+            inline for (.{ 0, 8, 16 }) |sh| out |= @as(u32, @min(255, ((p >> sh) & 0xFF) * 255 / a)) << sh;
+            break :blk out;
+        },
+        else => null,
+    };
+}
+
 test "QImage formats" {
+    try std.testing.expectEqual(@as(?u32, 0x80FF0000), qimageAlpha(6, 0x80800000));
+    try std.testing.expectEqual(@as(?u32, 0), qimageAlpha(6, 0x00123456));
     try std.testing.expectEqual(@as(?u32, 0xFF112233), qimageConvert(4, 0x00112233));
     try std.testing.expectEqual(@as(?u32, 0xFF112233), qimageConvert(17, 0xFF332211));
     try std.testing.expectEqual(@as(?u32, null), qimageConvert(3, 0));

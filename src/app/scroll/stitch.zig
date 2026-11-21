@@ -187,6 +187,17 @@ pub const Stitcher = struct {
         return b.top + @as(u32, @intCast(self.body.items.len / self.width)) + b.bottom;
     }
 
+    /// Row y of the image so far (y < totalHeight()), without building it.
+    pub fn row(self: *const Stitcher, y: u32) []const u32 {
+        const w = self.width;
+        const b = self.bands orelse return self.first[@as(usize, y) * w ..][0..w];
+        if (y < b.top) return self.first[@as(usize, y) * w ..][0..w];
+        const body_rows: u32 = @intCast(self.body.items.len / w);
+        if (y < b.top + body_rows) return self.body.items[@as(usize, y - b.top) * w ..][0..w];
+        const fy = self.height - (self.totalHeight() - y);
+        return self.prev[@as(usize, fy) * w ..][0..w];
+    }
+
     fn prevFrame(self: *const Stitcher) Frame {
         return .{ .pixels = self.prev, .width = self.width, .height = self.height };
     }
@@ -325,6 +336,8 @@ fn stitchPage(p: Page, step: u32) !void {
     defer testing.allocator.free(want);
     try testing.expectEqual(p.header + p.len + p.footer, out.height);
     try testing.expectEqualSlices(u32, want, out.pixels);
+    for ([_]u32{ 0, p.header, out.height / 2, out.height - 1 }) |y|
+        try testing.expectEqualSlices(u32, want[y * p.w ..][0..p.w], st.row(y));
 }
 
 test "a plain page stitches back together" {

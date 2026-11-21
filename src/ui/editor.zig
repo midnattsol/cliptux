@@ -304,6 +304,8 @@ pub const Editor = struct {
     copy_notice: CopyNotice = .none,
     copy_notice_hide_at_ms: i64 = 0,
     preset_sel: ?[4]i32 = null,
+    /// the image has see-through pixels worth keeping (a window capture)
+    keep_alpha: bool = false,
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -2299,7 +2301,7 @@ pub const Editor = struct {
         // RGBA only for a transparent beautify background; everything else
         // stays RGB as before
         const see_through = self.beautify.enabled and self.beautify.background().transparent();
-        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
+        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through or self.keep_alpha) .auto else .never });
     }
 
     // --- dev hooks: scripted input and frame dumps ---
