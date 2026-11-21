@@ -1,7 +1,5 @@
 # Files over the 600-line limit, with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.
-661 src/app/config.zig
-779 src/app/gnome.zig
 693 src/app/history_ui.zig
 906 src/app/quick.zig
 1120 src/platform/portal.zig
