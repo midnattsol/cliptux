@@ -38,6 +38,8 @@ pub const Args = struct {
     control: bool = true,
     /// a command for the running recording
     command: ?[]const u8 = null,
+    /// the option `parse` did not know, for the caller's message
+    unknown: ?[]const u8 = null,
 };
 
 /// Parse the options into `a` and the settings they override.
@@ -79,7 +81,7 @@ pub fn parse(args: []const []const u8, a: *Args, set: *settings_mod.Settings) !v
         } else if (eq(arg, "--stop") or eq(arg, "--pause") or eq(arg, "--resume") or eq(arg, "--discard")) {
             a.command = arg[2..];
         } else {
-            std.log.warn("record: unknown option {s}", .{arg});
+            a.unknown = arg;
             return error.BadArgs;
         }
     }
@@ -93,7 +95,10 @@ fn eq(a: []const u8, b: []const u8) bool {
 pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
     var set = settings_mod.load(gpa, env.home);
     var a: Args = .{};
-    try parse(argv, &a, &set);
+    parse(argv, &a, &set) catch |err| {
+        if (a.unknown) |opt| std.log.warn("record: unknown option {s}", .{opt});
+        return err;
+    };
     var ans: [64]u8 = undefined;
     if (a.command) |c| {
         const r = ctlsock.send(env.runtime_dir, env.wayland_display, c, &ans) orelse {
@@ -182,4 +187,5 @@ test "record options parse" {
     try parse(&.{"--stop"}, &b, &s);
     try std.testing.expectEqualStrings("stop", b.command.?);
     try std.testing.expectError(error.BadArgs, parse(&.{"--bogus"}, &b, &s));
+    try std.testing.expectEqualStrings("--bogus", b.unknown.?);
 }
