@@ -215,6 +215,8 @@ pub const Surface = struct {
     toplevel: u32 = 0,
     /// zwlr_layer_surface_v1, used instead of xdg_surf/toplevel
     layer_surf: u32 = 0,
+    /// its keyboard interactivity as last set
+    layer_kb: u32 = 0,
     /// surface size minus its window geometry (a drawn shadow): xdg
     /// configure sizes are the geometry's
     geom_extra_w: u32 = 0,
@@ -865,6 +867,7 @@ pub const Window = struct {
             var kb = l.keyboard;
             if (kb == L.keyboard_on_demand and self.layer_shell_version < 4) kb = L.keyboard_none;
             try c.request(s.layer_surf, L.set_keyboard_interactivity, &.{.{ .uint = kb }});
+            s.layer_kb = kb;
             s.pending_w = l.width;
             s.pending_h = l.height;
             try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
@@ -2081,6 +2084,22 @@ pub const Window = struct {
         });
         try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
         try c.flush();
+    }
+
+    /// Let a layer surface take keyboard focus when clicked (on demand) or
+    /// never; some compositors (labwc) focus an on-demand surface as soon
+    /// as it maps, so a window that must not steal the keyboard opens with
+    /// none and asks for on-demand only while the pointer is over it.
+    pub fn setLayerKeyboard(self: *Window, idx: u8, on_demand: bool) !void {
+        const s = &self.surfaces[idx];
+        if (!s.alive or s.layer_surf == 0 or self.layer_shell_version < 4) return;
+        const L = wl.zwlr_layer_surface_v1;
+        const kb = if (on_demand) L.keyboard_on_demand else L.keyboard_none;
+        if (kb == s.layer_kb) return;
+        s.layer_kb = kb;
+        try self.conn.request(s.layer_surf, L.set_keyboard_interactivity, &.{.{ .uint = kb }});
+        try self.conn.request(s.wl_surface, wl.wl_surface.commit, &.{});
+        try self.conn.flush();
     }
 
     /// Ask an xdg toplevel to become a new size (logical); takes effect at

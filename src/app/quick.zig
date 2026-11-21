@@ -6,7 +6,9 @@
 //!
 //! Placement:
 //! - with zwlr_layer_shell_v1 (KDE, wlroots): an overlay layer surface
-//!   anchored bottom-left, exclusive zone 0, keyboard focus on demand;
+//!   anchored bottom-left, exclusive zone 0, keyboard focus on demand
+//!   only while the pointer is over it (some compositors focus on-demand
+//!   surfaces as they map);
 //! - on GNOME (no layer shell in mutter): a small transparent toplevel
 //!   titled "shotlet:quick". The Shotlet GNOME Shell extension
 //!   (gnome-extension/, `shotlet gnome-integration install`) places it
@@ -366,12 +368,15 @@ const Quick = struct {
         if (!self.opened) {
             if (self.win.hasLayerShell()) {
                 self.layer = true;
+                // keyboard only while the pointer is over it (see the
+                // .pointer_motion event): typing stays in the person's app
                 try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
                     .layer = wl.zwlr_layer_shell_v1.layer_overlay,
                     .anchor = wl.zwlr_layer_surface_v1.anchor_bottom | wl.zwlr_layer_surface_v1.anchor_left,
                     .width = sz[0],
                     .height = sz[1],
                     .margin = .{ 0, 0, edge, edge },
+                    .keyboard = wl.zwlr_layer_surface_v1.keyboard_none,
                 } });
             } else {
                 try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1] });
@@ -611,6 +616,7 @@ const Quick = struct {
                 };
             },
             .pointer_motion => |m| {
+                if (self.layer) self.win.setLayerKeyboard(0, self.win.pointer_in) catch {};
                 const h = self.hitAt(m.x, m.y);
                 if (!std.meta.eql(h, self.hover)) self.dirty = true;
                 self.hover = h;
