@@ -1,18 +1,17 @@
 # Files over the 600-line limit, with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.
 771 src/app/config.zig
-675 src/app/direct.zig
-841 src/app/gnome.zig
+779 src/app/gnome.zig
 716 src/app/history_ui.zig
 944 src/app/quick.zig
-688 src/app/shot.zig
+672 src/app/shot.zig
 1120 src/platform/portal.zig
 734 src/platform/pw.zig
 631 src/ui/doc.zig
-2048 src/ui/editor_ui.zig
-2688 src/ui/editor.zig
-1109 src/ui/settings.zig
+1995 src/ui/editor_ui.zig
+2625 src/ui/editor.zig
+1092 src/ui/settings.zig
 898 src/ui/shapes.zig
 2653 src/ui/window.zig
 782 tools/container/wldrive.zig
-1335 tools/e2e.sh
+1334 tools/e2e.sh

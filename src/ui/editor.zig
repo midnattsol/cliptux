@@ -19,6 +19,11 @@ const sys = @import("../platform/sys.zig");
 const shapes_mod = @import("shapes.zig");
 const doc_mod = @import("doc.zig");
 const view_mod = @import("view.zig");
+const tall_view = @import("tall_view.zig");
+const script_input = @import("script_input.zig");
+const parseKey = script_input.parseKey;
+const parsePoint = script_input.parsePoint;
+const parseInts = script_input.parseInts;
 const textedit = @import("textedit.zig");
 const textbox = @import("textbox.zig");
 const ui = @import("editor_ui.zig");
@@ -42,6 +47,8 @@ pub const Action = enum {
     save,
     /// save to a path the user picks (the caller shows the dialog)
     save_as,
+    /// close and start another capture: `next_capture` names the command
+    new_capture,
 };
 
 pub const CopyNotice = enum { none, copying, copied, failed };
@@ -304,6 +311,12 @@ pub const Editor = struct {
     copy_notice: CopyNotice = .none,
     copy_notice_hide_at_ms: i64 = 0,
     preset_sel: ?[4]i32 = null,
+    /// the image has see-through pixels worth keeping (a window capture)
+    keep_alpha: bool = false,
+    /// how far a tall image is scrolled (ui/tall_view.zig), buffer pixels
+    tall_scroll: i32 = 0,
+    /// the capture mode to start after .new_capture (a shotlet command)
+    next_capture: [:0]const u8 = "",
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -496,6 +509,9 @@ pub const Editor = struct {
             if (mon == null and idx < self.monitors.len) mon = self.monitors[idx];
             if (mon) |m| return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, sf.width, sf.height);
         }
+        // a tall image (a scrolling capture) fits the width and scrolls
+        if (tall_view.isTall(self.img.width, self.img.height, self.screenRect()))
+            return tall_view.view(self.img.width, self.img.height, self.screenRect(), self.tall_scroll);
         return View.fit(self.img.width, self.img.height, self.screenRect(), 1.0);
     }
 
@@ -778,7 +794,16 @@ pub const Editor = struct {
     fn onScroll(self: *Editor, value: f64, value120: ?i32) !void {
         // exact notches when the wheel reports them (8 units = 1/15 notch)
         const steps = if (value120) |v| scrollSteps(&self.scroll_acc, @as(f64, @floatFromInt(v)) / 8.0) else scrollSteps(&self.scroll_acc, value);
+        if (steps != 0 and !self.win.ctrl and tall_view.isTall(self.img.width, self.img.height, self.screenRect())) return self.scrollTall(-steps);
         if (steps != 0) try self.setThickness(self.thickness + steps);
+    }
+
+    /// Scroll a tall image by wheel notches: lay every pane out again.
+    fn scrollTall(self: *Editor, notches: i32) !void {
+        const before = self.tall_scroll;
+        self.tall_scroll = tall_view.clampScroll(self.img.width, self.img.height, self.screenRect(), self.tall_scroll + notches * self.sc(80));
+        if (self.tall_scroll == before) return;
+        for (self.panes[0..self.n_panes], 0..) |p, i| if (p.alive) try self.onResize(@intCast(i), p.width, p.height);
     }
 
     pub fn setThickness(self: *Editor, t: i32) !void {
@@ -1712,6 +1737,15 @@ pub const Editor = struct {
                 self.closePopover();
                 self.finish(.save_as);
             },
+            .capture_window, .capture_scroll, .capture_timer => {
+                self.closePopover();
+                self.next_capture = switch (kind) {
+                    .capture_window => "window",
+                    .capture_scroll => "scroll",
+                    else => "timer",
+                };
+                self.finish(.new_capture);
+            },
             .help => {
                 self.closePopover();
                 self.help_open = !self.help_open;
@@ -2299,7 +2333,7 @@ pub const Editor = struct {
         // RGBA only for a transparent beautify background; everything else
         // stays RGB as before
         const see_through = self.beautify.enabled and self.beautify.background().transparent();
-        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
+        return png.encodeWith(self.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through or self.keep_alpha) .auto else .never });
     }
 
     // --- dev hooks: scripted input and frame dumps ---
@@ -2505,46 +2539,6 @@ pub const Editor = struct {
     }
 };
 
-/// US-layout key -> character, only to turn script key names into codes.
-fn usKeyChar(code: u32, shift: bool) ?u8 {
-    const lower = "1234567890";
-    const upper = "!@#$%^&*()";
-    if (code >= 2 and code <= 11) {
-        const i = code - 2;
-        return if (shift) upper[i] else lower[i];
-    }
-    const row1 = "qwertyuiop";
-    if (code >= 16 and code <= 25) {
-        const c = row1[code - 16];
-        return if (shift) c - 32 else c;
-    }
-    const row2 = "asdfghjkl";
-    if (code >= 30 and code <= 38) {
-        const c = row2[code - 30];
-        return if (shift) c - 32 else c;
-    }
-    const row3 = "zxcvbnm";
-    if (code >= 44 and code <= 50) {
-        const c = row3[code - 44];
-        return if (shift) c - 32 else c;
-    }
-    return switch (code) {
-        57 => ' ',
-        12 => if (shift) @as(u8, '_') else '-',
-        13 => if (shift) @as(u8, '+') else '=',
-        26 => if (shift) @as(u8, '{') else '[',
-        27 => if (shift) @as(u8, '}') else ']',
-        39 => if (shift) @as(u8, ':') else ';',
-        40 => if (shift) @as(u8, '"') else '\'',
-        41 => if (shift) @as(u8, '~') else '`',
-        43 => if (shift) @as(u8, '|') else '\\',
-        51 => if (shift) @as(u8, '<') else ',',
-        52 => if (shift) @as(u8, '>') else '.',
-        53 => if (shift) @as(u8, '?') else '/',
-        else => null,
-    };
-}
-
 /// Thickness steps for a scroll of `value` surface units: one per wheel
 /// notch (15 units; v120 wheels report 120 per notch as 15). Touchpads
 /// send many small values, which accumulate in `acc` instead of each
@@ -2563,54 +2557,6 @@ pub fn scrollSteps(acc: *f64, value: f64) i32 {
 fn getenv(name: [*:0]const u8) ?[]const u8 {
     const v = std.c.getenv(name) orelse return null;
     return std.mem.span(v);
-}
-
-fn parseInts(comptime n: usize, s: []const u8) ![n]i32 {
-    var out: [n]i32 = undefined;
-    var it = std.mem.splitScalar(u8, s, ',');
-    for (&out) |*v| v.* = try std.fmt.parseInt(i32, std.mem.trim(u8, it.next() orelse return error.BadScript, " "), 10);
-    return out;
-}
-
-fn parsePoint(s: []const u8) !Point {
-    const v = try parseInts(2, s);
-    return .{ .x = v[0], .y = v[1] };
-}
-
-/// "ctrl+shift+s", "alt+left", "esc", "?" ... for scripted input.
-fn parseKey(spec: []const u8) !window.Key {
-    var k: window.Key = .{ .code = 0, .pressed = true, .ctrl = false, .shift = false };
-    var it = std.mem.splitScalar(u8, spec, '+');
-    var name: []const u8 = "";
-    while (it.next()) |part| {
-        if (std.mem.eql(u8, part, "ctrl")) k.ctrl = true else if (std.mem.eql(u8, part, "shift")) k.shift = true else if (std.mem.eql(u8, part, "alt")) k.alt = true else name = part;
-    }
-    const named = [_]struct { []const u8, u32 }{
-        .{ "esc", window.KEY_ESC },             .{ "enter", window.KEY_ENTER },   .{ "tab", KEY_TAB },
-        .{ "backspace", window.KEY_BACKSPACE }, .{ "delete", window.KEY_DELETE }, .{ "space", window.KEY_SPACE },
-        .{ "left", KEY_LEFT },                  .{ "right", KEY_RIGHT },          .{ "up", KEY_UP },
-        .{ "down", KEY_DOWN },                  .{ "home", KEY_HOME },            .{ "end", KEY_END },
-        .{ "f1", KEY_F1 },                      .{ "]", KEY_RIGHTBRACE },         .{ "?", KEY_SLASH },
-    };
-    for (named) |n| {
-        if (std.mem.eql(u8, name, n[0])) k.code = n[1];
-    }
-    if (std.mem.eql(u8, name, "?")) k.shift = true;
-    if (k.code == 0 and name.len == 1) {
-        var code: u32 = 1;
-        while (code < 60) : (code += 1) {
-            if (usKeyChar(code, false) == name[0]) {
-                k.code = code;
-                break;
-            }
-        }
-    }
-    if (k.code == 0) return error.BadKey;
-    if (!k.ctrl) if (usKeyChar(k.code, k.shift)) |c| {
-        k.text_buf[0] = c;
-        k.text_len = 1;
-    };
-    return k;
 }
 
 /// Caret in text shape `s` nearest to image point `p` (bidi-aware and
@@ -2659,15 +2605,6 @@ test "scroll accumulates touchpad deltas and steps once per notch" {
     _ = scrollSteps(&acc, 14);
     try std.testing.expectEqual(@as(i32, 0), scrollSteps(&acc, -14));
     try std.testing.expectEqual(@as(i32, 1), scrollSteps(&acc, -1));
-}
-
-test "scripted keys parse" {
-    const k = try parseKey("ctrl+shift+s");
-    try std.testing.expect(k.ctrl and k.shift);
-    try std.testing.expectEqual(@as(u32, KEY_S), k.code);
-    const q = try parseKey("?");
-    try std.testing.expectEqualStrings("?", q.text());
-    try std.testing.expectEqual(@as(u32, KEY_LEFT), (try parseKey("alt+left")).code);
 }
 
 test "caret across wrapped lines of a fixed-width text" {

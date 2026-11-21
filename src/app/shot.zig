@@ -17,6 +17,10 @@ const history = @import("history.zig");
 const annot = @import("annot.zig");
 const gnome = @import("gnome.zig");
 const shellcap = @import("shellcap.zig");
+const modes = @import("modes/mode.zig");
+const mode_flow = @import("modes/flow.zig");
+const shell_bus = @import("modes/shell_bus.zig");
+const last_area = @import("modes/last_area.zig");
 const Env = env_mod.Env;
 
 fn warmupPw() void {
@@ -35,9 +39,13 @@ pub const From = struct {
     monitors: ?[]const u8 = null,
     /// taken by the GNOME Shell extension (not a dev source)
     shell: ?shellcap.Args = null,
+    /// the capture mode (app/modes/), and its self-timer
+    req: modes.Request = .{},
+    /// already taken (a window KWin captured); owned by the capture
+    image: ?png.Image = null,
 
     fn any(self: From) bool {
-        return self.file != null or self.monitors != null or self.shell != null;
+        return self.file != null or self.monitors != null or self.shell != null or self.image != null;
     }
 };
 
@@ -52,7 +60,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     // with the GNOME Shell extension, the shell takes the screenshot (no
     // prompt) and starts another shotlet on it
     if (!from.any() and gnome.isGnome() and gnome.extensionActive(&conn)) {
-        switch (gnome.requestCapture(gpa, &conn)) {
+        switch (shell_bus.requestMode(gpa, &conn, from.req)) {
             .started => {
                 std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
                 return;
@@ -79,12 +87,19 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 
     if (pw_thread) |t| t.join();
     const t_pw = nowMs();
+    // the self-timer, where the GNOME extension did not count down
+    if (from.req.delay_s > 0 and !from.any() and !try @import("../ui/countdown.zig").run(&win, from.req.delay_s)) return;
     var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
         std.log.info("capture cancelled", .{});
         return;
     };
     defer cap.deinit(gpa);
+    if (from.req.delay_s > 0) win.closeWindow();
     const t_capture = nowMs();
+    const edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
+        .done => return,
+        .edit => |e| e,
+    };
 
     // one fullscreen surface per monitor when the layout is known
     const per_monitor = cap.monitors.len > 1 and for (cap.monitors) |m| {
@@ -105,7 +120,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         t_capture - t_pw,
         t_open - t_capture,
     });
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null);
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null, edit);
 }
 
 /// The editor's fullscreen surfaces: one per monitor when the capture has
@@ -129,7 +144,7 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen) !void {
+fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     const editor_mod = @import("../ui/editor.zig");
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
@@ -151,6 +166,8 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
     };
     ed.show_hint = !cfg.hint_shown;
     ed.presetSelection(preset_sel);
+    if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
+    ed.keep_alpha = edit.keep_alpha;
     defer ed.deinit();
     if (reopen) |r| {
         // the shapes as they were, still editable
@@ -167,11 +184,18 @@ fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: 
     }
     while (true) {
         const result = try ed.run();
-        if (reopen == null) rememberEditorPrefs(gpa, env, cfg, &ed);
+        if (reopen == null) @import("editor_prefs.zig").remember(gpa, env, cfg, &ed);
         defer if (result.png_data) |d| gpa.free(d);
         const replace: ?keep_mod.Kept = if (reopen) |r| r.kept else null;
+        if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
+            last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
 
         switch (result.action) {
+            .new_capture => {
+                // the More menu's other capture modes: a fresh shotlet
+                win.closeWindow();
+                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
+            },
             .cancel, .copied => {
                 win.closeWindow();
                 ed.releaseCaches(); // serving may outlive the session; drop ~140MB
@@ -254,7 +278,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     if (root.len > kept.root_buf.len) return error.PathTooLong;
     @memcpy(kept.root_buf[0..root.len], root);
     kept.root_len = root.len;
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc });
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc }, .{});
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
@@ -268,6 +292,7 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }
+    if (from.image) |img| return try capture.Capture.single(gpa, img);
     if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
     if (from.file) |path| {
         const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
@@ -644,45 +669,4 @@ fn fromMonitorFiles(gpa: std.mem.Allocator, list: []const u8) !capture.Capture {
         n += 1;
     }
     return capture.stitch(gpa, parts[0..n]);
-}
-
-/// Store the editor's beautify settings and the first-run hint flag, only
-/// the keys that changed (other settings in the file are left alone).
-fn rememberEditorPrefs(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
-    const b = ed.beautify;
-    var bg_buf: [8]u8 = undefined;
-    var changes: [6]config.Change = undefined;
-    var n: usize = 0;
-    const tf = struct {
-        fn s(v: bool) []const u8 {
-            return if (v) "true" else "false";
-        }
-    }.s;
-    if (b.enabled != cfg.beautify) {
-        changes[n] = .{ .key = "beautify", .value = tf(b.enabled) };
-        n += 1;
-    }
-    if (b.bg != cfg.beautify_background) {
-        changes[n] = .{ .key = "beautify_background", .value = std.fmt.bufPrint(&bg_buf, "{d}", .{b.bg}) catch "0" };
-        n += 1;
-    }
-    if (b.padding != cfg.beautify_padding) {
-        changes[n] = .{ .key = "beautify_padding", .value = config.padding_names[b.padding] };
-        n += 1;
-    }
-    if (b.rounded != cfg.beautify_corners) {
-        changes[n] = .{ .key = "beautify_corners", .value = tf(b.rounded) };
-        n += 1;
-    }
-    if (b.shadow != cfg.beautify_shadow) {
-        changes[n] = .{ .key = "beautify_shadow", .value = tf(b.shadow) };
-        n += 1;
-    }
-    if (ed.hint_seen and !cfg.hint_shown) {
-        changes[n] = .{ .key = "hint_shown", .value = "true" };
-        n += 1;
-    }
-    if (n == 0) return;
-    config.update(gpa, env.home, changes[0..n]) catch |err|
-        std.log.warn("could not save editor settings: {t}", .{err});
 }
