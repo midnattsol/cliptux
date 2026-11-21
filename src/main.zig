@@ -203,6 +203,14 @@ test {
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/clipimg.zig");
+    _ = @import("app/binds.zig");
+    _ = @import("app/quick_ipc.zig");
+    _ = @import("app/editor_prefs.zig");
+    _ = @import("ui/beautify.zig");
+    _ = @import("ui/drag.zig");
+    _ = @import("ui/script_keys.zig");
+    _ = @import("ui/help.zig");
+    _ = @import("ui/transfer.zig");
     _ = @import("app/editfile.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
