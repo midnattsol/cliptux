@@ -84,134 +84,150 @@ const Parser = struct {
 /// Flatten path data `d`, mapping path units by `scale` and offsetting
 /// by (ox, oy). `tol` is the flattening tolerance in output units.
 pub fn flatten(d: []const u8, scale: f32, ox: f32, oy: f32, out: *Flat) !void {
-    var p: Parser = .{ .s = d };
-    var cx: f32 = 0; // current point (path units)
-    var cy: f32 = 0;
-    var sx: f32 = 0; // subpath start
-    var sy: f32 = 0;
-    var last_ctrl: ?[2]f32 = null; // for S/T reflection
-    var last_cmd: u8 = 0;
-    var cmd: u8 = 0;
-    const T = struct {
-        fn line(o: *Flat, k: f32, ax: f32, ay: f32, x0: f32, y0: f32, x1: f32, y1: f32) void {
-            o.add(ax + x0 * k, ay + y0 * k, ax + x1 * k, ay + y1 * k);
-        }
-    };
-    while (true) {
-        p.skipSep();
-        if (p.i >= p.s.len) break;
-        const c = p.s[p.i];
+    var f: Flattener = .{ .p = .{ .s = d }, .k = scale, .ox = ox, .oy = oy, .out = out };
+    while (try f.command()) {}
+}
+
+/// Path-walking state of `flatten`; coordinates in path units.
+const Flattener = struct {
+    p: Parser,
+    k: f32,
+    ox: f32,
+    oy: f32,
+    out: *Flat,
+    // current point
+    cx: f32 = 0,
+    cy: f32 = 0,
+    // subpath start
+    sx: f32 = 0,
+    sy: f32 = 0,
+    /// for S/T reflection
+    last_ctrl: ?[2]f32 = null,
+    last_cmd: u8 = 0,
+    cmd: u8 = 0,
+
+    /// Reads and flattens one command (or an implicit repeat of the last
+    /// one); false at the end of the data.
+    fn command(f: *Flattener) !bool {
+        f.p.skipSep();
+        if (f.p.i >= f.p.s.len) return false;
+        const c = f.p.s[f.p.i];
         if (std.ascii.isAlphabetic(c)) {
-            cmd = c;
-            p.i += 1;
-        } else if (cmd == 0) return error.BadPath;
+            f.cmd = c;
+            f.p.i += 1;
+        } else if (f.cmd == 0) return error.BadPath;
         // implicit repeats: M becomes L, m becomes l
-        const rel = std.ascii.isLower(cmd);
-        const up = std.ascii.toUpper(cmd);
-        const bx: f32 = if (rel) cx else 0;
-        const by: f32 = if (rel) cy else 0;
-        var ctrl: ?[2]f32 = null;
+        const rel = std.ascii.isLower(f.cmd);
+        const up = std.ascii.toUpper(f.cmd);
+        const base: [2]f32 = if (rel) .{ f.cx, f.cy } else .{ 0, 0 };
+        if (up == 'Z') {
+            // a number right after Z would be an error; a command is fine
+            f.closePath();
+            return true;
+        }
+        const ctrl = try f.segment(up, rel, base);
+        f.last_cmd = up;
+        f.last_ctrl = ctrl;
+        if (!f.p.atNumber()) {
+            // the next token is a command letter (or the end)
+            f.p.skipSep();
+            if (f.p.i < f.p.s.len and !std.ascii.isAlphabetic(f.p.s[f.p.i])) return error.BadPath;
+        }
+        return true;
+    }
+
+    /// One non-Z command `up` with its numbers relative to `b`; returns
+    /// the control point a following S/T reflects.
+    fn segment(f: *Flattener, up: u8, rel: bool, b: [2]f32) !?[2]f32 {
         switch (up) {
             'M' => {
-                cx = bx + try p.number();
-                cy = by + try p.number();
-                sx = cx;
-                sy = cy;
-                cmd = if (rel) 'l' else 'L';
+                f.cx = b[0] + try f.p.number();
+                f.cy = b[1] + try f.p.number();
+                f.sx = f.cx;
+                f.sy = f.cy;
+                f.cmd = if (rel) 'l' else 'L';
             },
             'L' => {
-                const x = bx + try p.number();
-                const y = by + try p.number();
-                T.line(out, scale, ox, oy, cx, cy, x, y);
-                cx = x;
-                cy = y;
+                const x = b[0] + try f.p.number();
+                const y = b[1] + try f.p.number();
+                f.lineTo(x, y);
             },
-            'H' => {
-                const x = bx + try p.number();
-                T.line(out, scale, ox, oy, cx, cy, x, cy);
-                cx = x;
-            },
-            'V' => {
-                const y = by + try p.number();
-                T.line(out, scale, ox, oy, cx, cy, cx, y);
-                cy = y;
-            },
-            'Z' => {
-                T.line(out, scale, ox, oy, cx, cy, sx, sy);
-                cx = sx;
-                cy = sy;
-                cmd = 0;
-                last_cmd = 'Z';
-                last_ctrl = null;
-                // a number right after Z would be an error; a command is fine
-                continue;
-            },
-            'C', 'S' => {
-                var x1: f32 = undefined;
-                var y1: f32 = undefined;
-                if (up == 'C') {
-                    x1 = bx + try p.number();
-                    y1 = by + try p.number();
-                } else if (last_ctrl != null and (last_cmd == 'C' or last_cmd == 'S')) {
-                    x1 = 2 * cx - last_ctrl.?[0];
-                    y1 = 2 * cy - last_ctrl.?[1];
-                } else {
-                    x1 = cx;
-                    y1 = cy;
-                }
-                const x2 = bx + try p.number();
-                const y2 = by + try p.number();
-                const x = bx + try p.number();
-                const y = by + try p.number();
-                cubic(out, scale, ox, oy, cx, cy, x1, y1, x2, y2, x, y);
-                ctrl = .{ x2, y2 };
-                cx = x;
-                cy = y;
-            },
-            'Q', 'T' => {
-                var x1: f32 = undefined;
-                var y1: f32 = undefined;
-                if (up == 'Q') {
-                    x1 = bx + try p.number();
-                    y1 = by + try p.number();
-                } else if (last_ctrl != null and (last_cmd == 'Q' or last_cmd == 'T')) {
-                    x1 = 2 * cx - last_ctrl.?[0];
-                    y1 = 2 * cy - last_ctrl.?[1];
-                } else {
-                    x1 = cx;
-                    y1 = cy;
-                }
-                const x = bx + try p.number();
-                const y = by + try p.number();
-                // a quadratic is a cubic with these control points
-                cubic(out, scale, ox, oy, cx, cy, cx + (x1 - cx) * 2 / 3, cy + (y1 - cy) * 2 / 3, x + (x1 - x) * 2 / 3, y + (y1 - y) * 2 / 3, x, y);
-                ctrl = .{ x1, y1 };
-                cx = x;
-                cy = y;
-            },
-            'A' => {
-                const rx = try p.number();
-                const ry = try p.number();
-                const rot = try p.number();
-                const large = try p.flag();
-                const sweep = try p.flag();
-                const x = bx + try p.number();
-                const y = by + try p.number();
-                arc(out, scale, ox, oy, cx, cy, rx, ry, rot, large, sweep, x, y);
-                cx = x;
-                cy = y;
-            },
+            'H' => f.lineTo(b[0] + try f.p.number(), f.cy),
+            'V' => f.lineTo(f.cx, b[1] + try f.p.number()),
+            'C', 'S' => return try f.cubicTo(up, b),
+            'Q', 'T' => return try f.quadTo(up, b),
+            'A' => try f.arcTo(b),
             else => return error.BadPath,
         }
-        last_cmd = up;
-        last_ctrl = ctrl;
-        if (!p.atNumber()) {
-            // the next token is a command letter (or the end)
-            p.skipSep();
-            if (p.i < p.s.len and !std.ascii.isAlphabetic(p.s[p.i])) return error.BadPath;
-        }
+        return null;
     }
-}
+
+    fn lineTo(f: *Flattener, x: f32, y: f32) void {
+        f.out.add(f.ox + f.cx * f.k, f.oy + f.cy * f.k, f.ox + x * f.k, f.oy + y * f.k);
+        f.cx = x;
+        f.cy = y;
+    }
+
+    fn closePath(f: *Flattener) void {
+        f.lineTo(f.sx, f.sy);
+        f.cmd = 0;
+        f.last_cmd = 'Z';
+        f.last_ctrl = null;
+    }
+
+    /// The first control point of a smooth curve (S after C/S, T after
+    /// Q/T): the last one reflected, else the current point.
+    fn reflected(f: *const Flattener, a: u8, b: u8) [2]f32 {
+        if (f.last_ctrl) |lc| {
+            if (f.last_cmd == a or f.last_cmd == b) return .{ 2 * f.cx - lc[0], 2 * f.cy - lc[1] };
+        }
+        return .{ f.cx, f.cy };
+    }
+
+    fn point(f: *Flattener, b: [2]f32) ![2]f32 {
+        const x = b[0] + try f.p.number();
+        const y = b[1] + try f.p.number();
+        return .{ x, y };
+    }
+
+    fn cubicTo(f: *Flattener, up: u8, b: [2]f32) ![2]f32 {
+        const c1 = if (up == 'C') try f.point(b) else f.reflected('C', 'S');
+        const c2 = try f.point(b);
+        const e = try f.point(b);
+        cubic(f.out, f.k, f.ox, f.oy, f.cx, f.cy, c1[0], c1[1], c2[0], c2[1], e[0], e[1]);
+        f.cx = e[0];
+        f.cy = e[1];
+        return c2;
+    }
+
+    fn quadTo(f: *Flattener, up: u8, b: [2]f32) ![2]f32 {
+        const c = if (up == 'Q') try f.point(b) else f.reflected('Q', 'T');
+        const x1 = c[0];
+        const y1 = c[1];
+        const e = try f.point(b);
+        const x = e[0];
+        const y = e[1];
+        const cx = f.cx;
+        const cy = f.cy;
+        // a quadratic is a cubic with these control points
+        cubic(f.out, f.k, f.ox, f.oy, cx, cy, cx + (x1 - cx) * 2 / 3, cy + (y1 - cy) * 2 / 3, x + (x1 - x) * 2 / 3, y + (y1 - y) * 2 / 3, x, y);
+        f.cx = x;
+        f.cy = y;
+        return c;
+    }
+
+    fn arcTo(f: *Flattener, b: [2]f32) !void {
+        const rx = try f.p.number();
+        const ry = try f.p.number();
+        const rot = try f.p.number();
+        const large = try f.p.flag();
+        const sweep = try f.p.flag();
+        const e = try f.point(b);
+        arc(f.out, f.k, f.ox, f.oy, f.cx, f.cy, rx, ry, rot, large, sweep, e[0], e[1]);
+        f.cx = e[0];
+        f.cy = e[1];
+    }
+};
 
 fn cubic(out: *Flat, k: f32, ox: f32, oy: f32, x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) void {
     // segments from the control polygon's length in output pixels
