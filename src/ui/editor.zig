@@ -22,6 +22,9 @@ const view_mod = @import("view.zig");
 const textedit = @import("textedit.zig");
 const textbox = @import("textbox.zig");
 const ui = @import("editor_ui.zig");
+const theme_mod = @import("theme.zig");
+const motion = @import("motion.zig");
+const dbus = @import("../platform/dbus.zig");
 
 const Window = window.Window;
 const Canvas = render.Canvas;
@@ -49,7 +52,8 @@ pub const Result = struct {
     png_data: ?[]u8 = null,
 };
 
-pub const dim_color: u32 = 0x8C000000;
+/// over everything outside the selection (theme.Theme.dim)
+pub const dim_color: u32 = 0x52000000;
 
 fn nowMs() i64 {
     var ts: std.os.linux.timespec = undefined;
@@ -67,6 +71,8 @@ pub const DragMode = union(enum) {
     moving_shape: struct { start: Point, applied: Point },
     resizing_shape: struct { handle: u3, orig: Shape },
     picking: ui.PickPart,
+    /// dragging the popover's size slider
+    size_slider,
     /// dragging inside the text being edited
     text_select,
     /// dragging a text box's width handle
@@ -176,6 +182,8 @@ pub const Pane = struct {
     last_frame: []u32 = &.{},
     /// needs a frame once its surface is free
     due: bool = true,
+    /// blurred backdrops and shadows of the floating chrome
+    backdrops: [ui.n_slots]ui.Backdrop = @splat(.{}),
 
     fn release(self: *Pane, alloc: std.mem.Allocator) void {
         alloc.free(self.viewc);
@@ -190,6 +198,7 @@ pub const Pane = struct {
         self.bcache = &.{};
         self.bcache_valid = false;
         self.last_frame = &.{};
+        for (&self.backdrops) |*b| b.release(alloc);
     }
 };
 
@@ -211,7 +220,7 @@ pub const Editor = struct {
 
     // --- tool state ---
     tool: Tool = .select,
-    color_idx: u3 = 0,
+    color_idx: u4 = 0,
     custom_active: bool = false,
     custom_color: u32 = 0xFF15AABF,
     /// logical stroke width; image pixels = thickness * ui scale / view scale
@@ -248,6 +257,39 @@ pub const Editor = struct {
     focus: ?usize = null,
     help_open: bool = false,
     picker: ui.Picker = .{},
+    /// the colour popover or the More menu, and how far it has opened
+    popover: ui.Popover = .none,
+    pop_rect: Rect = Rect.empty,
+    pop_open: motion.Tween = .{},
+    /// the beautify panel beside the toolbar
+    panel_rect: Rect = Rect.empty,
+    seps: [12]Rect = undefined,
+    n_seps: usize = 0,
+    /// toolbar below the selection (else above or inside)
+    tb_below: bool = true,
+    tb_layout_pane: u8 = 0,
+    /// toolbar position and opacity, the active tool's fill (relative to
+    /// the toolbar), the hover highlight
+    tb_x: motion.Tween = .{},
+    tb_y: motion.Tween = .{},
+    tb_alpha: motion.Tween = .{},
+    act_x: motion.Tween = .{},
+    act_y: motion.Tween = .{},
+    hov: motion.Tween = .{ .dur_ms = theme_mod.motion_fast },
+    hover_prev: i32 = -1,
+    hover_since_ms: i64 = 0,
+    /// hover_since_ms of the hover whose tooltip has been drawn
+    tip_drawn_for: i64 = -1,
+    /// move keyboard focus into the popover once it is laid out
+    focus_into_popover: bool = false,
+    /// mid-edge selection handle under the pointer (-1: none)
+    sel_hover: i8 = -1,
+
+    /// the look, from the desktop's preferences (see theme.zig)
+    prefs: theme_mod.Prefs = .{},
+    theme: theme_mod.Theme = theme_mod.Theme.get(true, null),
+    /// session bus, to follow appearance changes while open
+    bus: ?*dbus.Connection = null,
 
     needs_render: bool = true,
     running: bool = true,
@@ -380,7 +422,16 @@ pub const Editor = struct {
                 self.needs_render = true;
             }
             const scripted = self.script != null and self.script_pos < self.script.?.len and self.panes[0].viewc.len > 0;
-            if (try self.win.nextEventTimeout(self.win.pollTimeoutMs(if (scripted) 5 else 100))) |ev| {
+            self.pollBus();
+            // transitions draw a frame per refresh; a tooltip wakes when due
+            const anim = ui.animating(self);
+            if (anim) self.needs_render = true;
+            var wait: i32 = if (scripted) 5 else if (anim) 8 else 100;
+            const tip = ui.tooltipDueMs(self);
+            if (tip != 0) {
+                if (tip <= now) self.needs_render = true else wait = @min(wait, @as(i32, @intCast(std.math.clamp(tip - now, 1, 100))));
+            }
+            if (try self.win.nextEventTimeout(self.win.pollTimeoutMs(wait))) |ev| {
                 try self.handle(ev);
                 while (self.win.queue.items.len > 0) {
                     try self.handle(try self.win.nextEvent());
@@ -399,6 +450,30 @@ pub const Editor = struct {
         if (getenv("SHOTLET_EDITOR_DUMP")) |prefix| self.dumpAtExit(prefix);
         if (self.action == .cancel or self.action == .copied) return .{ .action = self.action };
         return .{ .action = self.action, .png_data = try self.exportPng() };
+    }
+
+    /// Follow the desktop's appearance while open (Settings portal
+    /// SettingChanged), without blocking.
+    fn pollBus(self: *Editor) void {
+        const conn = self.bus orelse return;
+        var n: usize = 0;
+        while (n < 16) : (n += 1) {
+            var msg = (conn.nextMessageDeadline(nowMs()) catch return) orelse return;
+            defer msg.deinit(self.alloc);
+            if (theme_mod.applySignal(&self.prefs, &msg)) self.setPrefs(self.prefs);
+        }
+    }
+
+    /// Apply appearance preferences: colours and motion.
+    pub fn setPrefs(self: *Editor, prefs: theme_mod.Prefs) void {
+        self.prefs = prefs;
+        self.theme = prefs.theme();
+        // scripted runs dump frames: keep them independent of timing
+        motion.enabled = prefs.animations and getenv("SHOTLET_EDITOR_SCRIPT") == null;
+        for (self.panes[0..self.n_panes]) |*p| {
+            for (&p.backdrops) |*b| b.hash = 0;
+        }
+        self.needs_render = true;
     }
 
     // --- caches ---
@@ -662,7 +737,7 @@ pub const Editor = struct {
 
     /// Is buffer point `m` of the pointer's pane on the toolbar's pane at all?
     fn onToolbar(self: *const Editor, m: Point) bool {
-        return self.mouse_pane == self.tb_pane and self.toolbar_rect.contains(m.x, m.y);
+        return ui.onChrome(self, m);
     }
 
     fn pointerOn(self: *Editor, surface: u8) void {
@@ -739,21 +814,24 @@ pub const Editor = struct {
         switch (self.drag) {
             .none => {
                 try self.win.setCursor(self.cursorFor(m));
-                var hover: i32 = -1;
-                if (self.onToolbar(m)) {
-                    for (self.buttons.items, 0..) |btn, bi| {
-                        if (btn.rect.contains(m.x, m.y)) {
-                            hover = @intCast(bi);
-                            break;
-                        }
-                    }
-                }
+                const hover: i32 = if (ui.buttonAt(self, m)) |bi| @intCast(bi) else -1;
                 if (hover != self.hover_btn) {
+                    const t = motion.now();
+                    self.hover_prev = self.hover_btn;
                     self.hover_btn = hover;
+                    self.hover_since_ms = t;
+                    self.hov.snap(0);
+                    self.hov.to(1, t);
+                    self.needs_render = true;
+                }
+                const hh = ui.hoverHandle(self);
+                if (hh != self.sel_hover) {
+                    self.sel_hover = hh;
                     self.needs_render = true;
                 }
                 if (ui.loupeVisible(self)) self.needs_render = true;
             },
+            .size_slider => try self.setThickness(ui.sliderValue(self, m)),
             .selecting => {
                 self.selDirty();
                 const q = self.clampImg(ip);
@@ -969,14 +1047,23 @@ pub const Editor = struct {
             self.needs_render = true;
         }
 
-        // toolbar gets priority
+        // the chrome gets priority; a click outside an open popover or
+        // menu only closes it
         if (self.onToolbar(m)) {
-            for (self.buttons.items) |b| {
-                if (b.rect.contains(m.x, m.y)) {
-                    try self.onButton(b.kind);
+            if (ui.buttonAt(self, m)) |bi| {
+                const b = self.buttons.items[bi];
+                if (b.kind == .thickness) {
+                    self.drag = .size_slider;
+                    try self.setThickness(ui.sliderValue(self, m));
                     return;
                 }
+                if (self.popover != .none and b.layer == .bar and b.kind != .colors and b.kind != .more) self.closePopover();
+                try self.onButton(b.kind);
             }
+            return;
+        }
+        if (self.popover != .none) {
+            self.closePopover();
             return;
         }
         const ip = self.imgAt(m);
@@ -1267,7 +1354,7 @@ pub const Editor = struct {
                 if (s.box_w == tw.orig_box_w and s.p0.x == tw.orig_x) self.doc.dropCheckpoint();
                 try self.unlift();
             },
-            .picking, .text_select, .none => {},
+            .picking, .size_slider, .text_select, .none => {},
         }
         self.needs_render = true;
     }
@@ -1312,6 +1399,10 @@ pub const Editor = struct {
             self.picker.open = false;
             return true;
         }
+        if (self.popover != .none) {
+            self.closePopover();
+            return true;
+        }
         if (self.drag == .text_width) {
             const tw = self.drag.text_width;
             self.drag = .none;
@@ -1332,7 +1423,7 @@ pub const Editor = struct {
             return true;
         }
         switch (self.drag) {
-            .none, .picking, .text_select, .text_width => {},
+            .none, .picking, .size_slider, .text_select, .text_width => {},
             .drawing => {
                 if (self.cur) |*s| s.deinit(self.alloc);
                 self.cur = null;
@@ -1560,8 +1651,16 @@ pub const Editor = struct {
             .tool => |t| {
                 try self.endText();
                 self.deselectShape();
-                self.tool = t;
+                // Blur stands for all three redactions: again cycles them
+                self.tool = if (t == .blur and self.tool.isRedaction()) switch (self.tool) {
+                    .blur => .pixelate,
+                    .pixelate => .redact,
+                    else => .blur,
+                } else t;
             },
+            .colors => self.togglePopover(.colors),
+            .more => self.togglePopover(.more),
+            .seg => |sg| try self.applySeg(sg),
             .color => |c| {
                 self.color_idx = c;
                 self.custom_active = false;
@@ -1575,6 +1674,7 @@ pub const Editor = struct {
             .text_width => try self.toggleTextWidth(),
             .thickness => try self.setThickness(if (self.thickness >= 16) 1 else self.thickness + 1),
             .beautify => {
+                if (self.popover == .more) self.closePopover();
                 self.beautify.enabled = !self.beautify.enabled;
                 self.selDirty();
                 self.dirtyAll(true);
@@ -1600,10 +1700,80 @@ pub const Editor = struct {
             .redo => try self.redo(),
             .copy => try self.copyToClipboard(),
             .save => self.finish(.save),
-            .save_as => self.finish(.save_as),
-            .help => self.help_open = !self.help_open,
-            .cancel => self.finish(.cancel),
+            .save_as => {
+                self.closePopover();
+                self.finish(.save_as);
+            },
+            .help => {
+                self.closePopover();
+                self.help_open = !self.help_open;
+            },
+            .cancel => {
+                self.closePopover();
+                self.finish(.cancel);
+            },
         }
+    }
+
+    fn togglePopover(self: *Editor, which: ui.Popover) void {
+        if (self.popover == which) return self.closePopover();
+        self.popover = which;
+        self.picker.open = false;
+        const t = motion.now();
+        self.pop_open.snap(0);
+        self.pop_open.to(1, t);
+        // a keyboard user lands inside it
+        if (self.focus != null) self.focus_into_popover = true;
+        self.needs_render = true;
+    }
+
+    pub fn closePopover(self: *Editor) void {
+        if (self.popover == .none) return;
+        // focus was inside: back to the button that opened it
+        if (self.focus) |fi| {
+            if (fi < self.buttons.items.len and (self.buttons.items[fi].layer == .popover or self.buttons.items[fi].layer == .menu)) {
+                self.focus = null;
+                for (self.buttons.items, 0..) |b, i| {
+                    if (b.layer == .bar and ((self.popover == .colors and b.kind == .colors) or (self.popover == .more and b.kind == .more))) self.focus = i;
+                }
+            }
+        }
+        self.popover = .none;
+        self.picker.open = false;
+        self.needs_render = true;
+    }
+
+    /// A segment of the popover's segmented controls.
+    fn applySeg(self: *Editor, sg: ui.Seg) !void {
+        const target = if (self.text) |t| self.doc.shapes.items[t.idx].tool else if (self.selected) |i| self.doc.shapes.items[i].tool else self.tool;
+        const old = self.styles.get(target);
+        switch (sg) {
+            .outline, .plain => try self.setStyle(target, old & 2),
+            .filled, .pill => try self.setStyle(target, old | 1),
+            .rounded => try self.setStyle(target, old ^ 2),
+            .mode_blur, .mode_pixelate, .mode_solid => {
+                const t: Tool = switch (sg) {
+                    .mode_blur => .blur,
+                    .mode_pixelate => .pixelate,
+                    else => .redact,
+                };
+                if (self.tool.isRedaction()) self.tool = t;
+                if (self.selected) |i| if (self.doc.shapes.items[i].tool.isRedaction()) {
+                    self.breakCoalescing();
+                    try self.editTarget(4, struct {
+                        fn f(s: *Shape, v: Tool) void {
+                            if (s.tool.isRedaction()) s.tool = v;
+                        }
+                    }.f, t);
+                };
+            },
+            .width_fit, .width_fixed => {
+                const i = self.textHandleShape() orelse return;
+                const fixed = self.doc.shapes.items[i].box_w > 0;
+                if (fixed != (sg == .width_fixed)) try self.toggleTextWidth();
+            },
+        }
+        self.needs_render = true;
     }
 
     fn finish(self: *Editor, action: Action) void {
@@ -1633,6 +1803,12 @@ pub const Editor = struct {
             .rect => old +% 1,
             else => (old ^ 1) & 1,
         };
+        try self.setStyle(target_tool, style);
+    }
+
+    /// Bit 0: filled (text: background pill); bit 1: rounded (rectangles).
+    fn setStyle(self: *Editor, target_tool: Tool, style_in: u2) !void {
+        const style: u2 = if (target_tool == .rect) style_in else style_in & 1;
         self.styles.set(target_tool, style);
         self.breakCoalescing();
         try self.editTarget(3, struct {
@@ -1736,6 +1912,11 @@ pub const Editor = struct {
             }
         }
 
+        if (self.popover != .none and !k.ctrl and !k.alt) switch (k.code) {
+            KEY_UP, KEY_LEFT => return ui.moveFocus(self, -1),
+            KEY_DOWN, KEY_RIGHT => return ui.moveFocus(self, 1),
+            else => {},
+        };
         switch (k.code) {
             window.KEY_ESC => if (!try self.cancelOne()) self.finish(.cancel),
             KEY_TAB => ui.moveFocus(self, if (k.shift) -1 else 1),
@@ -1957,6 +2138,12 @@ pub const Editor = struct {
     /// Paint the background for buffer rect `region`: the dimmed view, the
     /// bright selection (or its beautify frame) and the live stroke.
     fn composeRegion(self: *Editor, px: []u32, region: Rect) void {
+        self.composeRegionTo(px, self.pn().width, .{ .x = 0, .y = 0 }, region);
+    }
+
+    /// composeRegion into `dst`, a buffer `stride` pixels wide whose first
+    /// pixel is buffer point `origin` (the backdrop of floating chrome).
+    pub fn composeRegionTo(self: *Editor, dst: []u32, stride: usize, origin: Point, region: Rect) void {
         const r = Rect.intersect(region, self.screenRect()) orelse return;
         const w: usize = self.pn().width;
         const sel = self.selBuf();
@@ -1965,6 +2152,8 @@ pub const Editor = struct {
         var y = r.y;
         while (y < r.bottom()) : (y += 1) {
             const row = @as(usize, @intCast(y)) * w;
+            // dst[drow + x] is buffer pixel (x, y)
+            const drow = @as(usize, @intCast(y - origin.y)) * stride -% @as(usize, @intCast(origin.x));
             var x0 = r.right();
             var x1 = r.right();
             if (bright) |b| {
@@ -1981,19 +2170,19 @@ pub const Editor = struct {
             const sa: usize = @intCast(x0);
             const sb: usize = @intCast(x1);
             const e: usize = @intCast(r.right());
-            if (sa > a) @memcpy(px[row + a .. row + sa], self.pn().viewc_dim[row + a .. row + sa]);
+            if (sa > a) @memcpy(dst[drow +% a .. drow +% sa], self.pn().viewc_dim[row + a .. row + sa]);
             if (sb > sa) {
                 if (beauty) {
                     const b = self.pn().bcache_rect;
                     const bw: usize = @intCast(b.w);
                     const by: usize = @intCast(y - b.y);
                     const bx: usize = @intCast(x0 - b.x);
-                    @memcpy(px[row + sa .. row + sb], self.pn().bcache[by * bw + bx ..][0 .. sb - sa]);
+                    @memcpy(dst[drow +% sa .. drow +% sb], self.pn().bcache[by * bw + bx ..][0 .. sb - sa]);
                 } else {
-                    @memcpy(px[row + sa .. row + sb], self.pn().viewc[row + sa .. row + sb]);
+                    @memcpy(dst[drow +% sa .. drow +% sb], self.pn().viewc[row + sa .. row + sb]);
                 }
             }
-            if (e > sb) @memcpy(px[row + sb .. row + e], self.pn().viewc_dim[row + sb .. row + e]);
+            if (e > sb) @memcpy(dst[drow +% sb .. drow +% e], self.pn().viewc_dim[row + sb .. row + e]);
         }
         // the freehand stroke being drawn
         const s = &(self.cur orelse return);
@@ -2013,7 +2202,8 @@ pub const Editor = struct {
                 const inside = if (bright) |b| b.contains(x, y) else false;
                 const c = if (inside) col else dimmed[0];
                 const a = (ca * cv + 127) / 255;
-                px[idx] = Canvas.blendPixel(px[idx], (c & 0x00FFFFFF) | (a << 24));
+                const di = @as(usize, @intCast(y - origin.y)) * stride + @as(usize, @intCast(x - origin.x));
+                dst[di] = Canvas.blendPixel(dst[di], (c & 0x00FFFFFF) | (a << 24));
             }
         }
     }
@@ -2230,13 +2420,26 @@ pub const Editor = struct {
                 if (eql(u8, arg, name)) try self.setTool(@field(Tool, name));
             }
         } else if (eql(u8, op, "button")) {
-            for (self.buttons.items) |b| {
-                if (eql(u8, ui.buttonName(b.kind), arg)) {
-                    const c = Point{ .x = b.rect.x + @divTrunc(b.rect.w, 2), .y = b.rect.y + @divTrunc(b.rect.h, 2) };
-                    var buf: [32]u8 = undefined;
-                    try self.runCommand(try std.fmt.bufPrint(&buf, "click {d},{d}", .{ c.x, c.y }));
-                    return;
+            // controls in the popover or the menu: open it first
+            for (0..2) |attempt| {
+                for (self.buttons.items) |b| {
+                    if (eql(u8, ui.buttonName(b.kind), arg)) {
+                        const c = Point{ .x = b.rect.x + @divTrunc(b.rect.w, 2), .y = b.rect.y + @divTrunc(b.rect.h, 2) };
+                        var buf: [32]u8 = undefined;
+                        try self.runCommand(try std.fmt.bufPrint(&buf, "click {d},{d}", .{ c.x, c.y }));
+                        return;
+                    }
                 }
+                if (attempt == 1) break;
+                const want: ui.Popover = switch (ui.nameLayer(arg) orelse return error.NoSuchButton) {
+                    .popover => .colors,
+                    .menu => .more,
+                    else => return error.NoSuchButton,
+                };
+                if (self.popover != want) self.togglePopover(want);
+                self.pane_i = self.tb_pane;
+                defer self.pane_i = self.mouse_pane;
+                try ui.layoutToolbar(self);
             }
             return error.NoSuchButton;
         } else if (eql(u8, op, "render")) {
