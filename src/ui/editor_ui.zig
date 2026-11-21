@@ -800,6 +800,7 @@ const help_lines = [_][2][]const u8{
     .{ "Ctrl+D  Ctrl+]", "Duplicate, bring to front" },
     .{ "Ctrl+Z / Ctrl+Shift+Z", "Undo / redo" },
     .{ "Text: Enter", "New line; Ctrl+Enter or click outside ends" },
+    .{ "Text: Ctrl+V", "Paste plain text" },
     .{ "B", "Beautify frame for the export" },
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
     .{ "Enter  Ctrl+C", "Copy to clipboard" },

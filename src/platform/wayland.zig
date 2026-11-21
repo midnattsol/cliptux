@@ -209,6 +209,12 @@ pub const wl_data_device = struct {
     pub const ev_selection = 5;
 };
 
+pub const wl_data_offer = struct {
+    pub const receive = 1;
+    pub const destroy = 2;
+    pub const ev_offer = 0;
+};
+
 // --- marshaling helper types ---
 
 /// Argument value for requests.

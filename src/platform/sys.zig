@@ -144,6 +144,13 @@ pub fn writeAllBlocking(fd: fd_t, buf: []const u8) !void {
     }
 }
 
+/// A close-on-exec pipe: [read end, write end].
+pub fn pipe() ![2]fd_t {
+    var fds: [2]fd_t = undefined;
+    _ = try check(linux.pipe2(&fds, .{ .CLOEXEC = true }));
+    return fds;
+}
+
 pub fn close(fd: fd_t) void {
     _ = linux.close(fd);
 }

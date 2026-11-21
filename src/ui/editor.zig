@@ -112,6 +112,8 @@ const KEY_TAB = 15;
 const KEY_LEFTBRACE = 26;
 const KEY_RIGHTBRACE = 27;
 const KEY_S = 31;
+const KEY_V = 47;
+const KEY_INSERT = 110;
 const KEY_D = 32;
 const KEY_F = 33;
 const KEY_Y = 21;
@@ -1263,6 +1265,21 @@ pub const Editor = struct {
         }
     }
 
+    /// Paste the clipboard's plain text at the caret, newlines kept.
+    fn pasteText(self: *Editor) !void {
+        const t = &(self.text orelse return);
+        const txt = (self.win.clipboardText(self.alloc, 64 * 1024, 400) catch |e| {
+            std.log.warn("paste failed: {t}", .{e});
+            return;
+        }) orelse {
+            std.log.info("paste: no text on the clipboard", .{});
+            return;
+        };
+        defer self.alloc.free(txt);
+        try t.te.insert(self.alloc, &self.doc.shapes.items[t.idx].str, txt);
+        self.needs_render = true;
+    }
+
     fn typeText(self: *Editor, k: window.Key) !void {
         if (k.ctrl) return;
         const t = &self.text.?;
@@ -1377,6 +1394,10 @@ pub const Editor = struct {
                 if (changed) try self.applyPickerColor();
                 return;
             }
+        }
+        if (self.text != null and ((k.ctrl and k.code == KEY_V) or (k.shift and k.code == KEY_INSERT))) {
+            try self.pasteText();
+            return;
         }
         if (self.text != null) {
             const editing_chord = switch (k.code) {
