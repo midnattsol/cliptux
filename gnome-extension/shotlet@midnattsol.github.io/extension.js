@@ -62,6 +62,7 @@ const IFACE = `<node>
     <property name="Version" type="u" access="read"/>
     <property name="Shortcuts" type="as" access="read"/>
     <property name="BlockedShortcuts" type="as" access="read"/>
+    <property name="ModeShortcuts" type="as" access="read"/>
     <method name="Capture">
       <arg type="b" name="started" direction="out"/>
     </method>
@@ -194,6 +195,11 @@ export default class ShotletExtension extends Extension {
 
     get Shortcuts() {
         return this._bound ? this._settings.get_strv(SHORTCUT_KEY) : [];
+    }
+
+    // the capture modes' bound keys, "mode=accel"
+    get ModeShortcuts() {
+        return this._modes?.describe() ?? [];
     }
 
     get BlockedShortcuts() {

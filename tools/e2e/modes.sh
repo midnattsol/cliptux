@@ -23,6 +23,9 @@ modes_start() { # the driver, the extension pointed at this shotlet
     drv move 0 800 450
     ext_gsettings set shotlet-path "'$BIN'"
     plain_desktop
+    # the extension is up (its keys bound) once it owns its bus name
+    local i
+    for i in $(seq 1 50); do shell1_prop ModeShortcuts | grep -q "fullscreen=" && break; sleep 0.2; done
     sleep 0.5
 }
 # clip_size NAME: the clipboard's PNG (saved as NAME.png), WxH
@@ -51,7 +54,8 @@ modes-screen)
     check "  ... with no editor" not_grep "startup: capture=" "$HL_SHELL_LOG"
     check "  ... and no consent dialog" no_dialog
     check "  ... the capture files gone" capture_dir_empty
-    check "  ... and no PNG written but the history's" eq "$(new_pngs | grep -v "/shotlet/history/")" ""
+    new_pngs | grep -v "/shotlet/history/" >"$OUT/new-pngs.txt"
+    check "  ... and no PNG written but the history's" test ! -s "$OUT/new-pngs.txt"
     clear_clip
     drv move 0 800 450
     sleep 0.3
@@ -223,14 +227,16 @@ modes-keys)
     check "  ... and its old key does nothing" not_grep "capture mode: 2880" "$HL_SHELL_LOG"
     # Settings: the after-capture choice, and recording a mode's key
     SHOTLET_SETTINGS_FOCUS=13 run_shotlet settings settings
-    sleep 2
+    wait_log 10 "keyboard focus"
+    sleep 0.5
     keys space
     sleep 0.5
     check "Settings cycles what a screen capture does" grep -q "^after_fullscreen=editor" "$HOME/.config/shotlet/config"
     keys esc
     wait_exit 5
     SHOTLET_SETTINGS_VIEW=shortcuts SHOTLET_SETTINGS_FOCUS=1 run_shotlet settings-keys settings
-    sleep 2
+    wait_log 10 "keyboard focus"
+    sleep 0.5
     keys enter
     sleep 0.3
     keys ctrl+shift+f

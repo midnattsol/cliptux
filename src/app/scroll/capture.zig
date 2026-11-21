@@ -96,8 +96,23 @@ const Session = struct {
         return self.src.grab(self.c.gpa, self.c.env, self.c.conn, clicks);
     }
 
+    /// The region once nothing moves in it any more (the picker's fade,
+    /// a repaint under load), at most about two seconds on.
+    fn settled(self: *Session) !png.Image {
+        var a = try self.grab(0);
+        for (0..12) |_| {
+            sleepMs(60);
+            const b = try self.grab(0);
+            const same = std.mem.eql(u32, a.pixels, b.pixels);
+            a.deinit(self.c.gpa);
+            a = b;
+            if (same) break;
+        }
+        return a;
+    }
+
     fn collect(self: *Session) !?png.Image {
-        var first = try self.grab(0);
+        var first = try self.settled();
         defer first.deinit(self.c.gpa);
         self.st = try stitch.Stitcher.init(self.c.gpa, .{ .pixels = first.pixels, .width = first.width, .height = first.height }, self.max_height);
         defer self.st.?.deinit();
@@ -132,6 +147,8 @@ const Session = struct {
                 self.hud.setStatus(if (auto) "Scrolling\u{2026}" else "Keep scrolling, or Stop", st.totalHeight());
             },
             .unchanged => {
+                // the app may not have painted the scroll yet
+                if (auto and try self.recheck()) return false;
                 self.still += 1;
                 if (auto and self.still >= 2) {
                     std.log.info("scrolling capture: reached the end", .{});
@@ -139,6 +156,8 @@ const Session = struct {
                 }
             },
             .no_overlap => {
+                // a frame caught mid-repaint: look again before giving up
+                if (auto and try self.recheck()) return false;
                 std.log.info("scrolling capture: moved too far ({d} notches)", .{self.clicks});
                 if (auto and self.clicks == 1) return true;
                 self.clicks = @max(1, @divTrunc(self.clicks, 2));
@@ -150,6 +169,15 @@ const Session = struct {
             },
         }
         return false;
+    }
+
+    /// The region again, without scrolling: true when it lines up now.
+    fn recheck(self: *Session) !bool {
+        sleepMs(150);
+        var f = try self.settled();
+        defer f.deinit(self.c.gpa);
+        const r = try self.st.?.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height });
+        return r == .appended;
     }
 
     fn adapt(self: *Session, d: u32, h: u32) void {
