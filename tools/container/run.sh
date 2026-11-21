@@ -22,9 +22,9 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMAGE=${CTR_IMAGE:-shotlet-e2e:trixie}
 
-scenarios_sway="capture multimon rotated portal quick pin history ocr"
+scenarios_sway="capture multimon rotated portal quick pin history ocr modes"
 scenarios_labwc="capture multimon portal quick pin history"
-scenarios_kwin="capture multimon portal quick pin history"
+scenarios_kwin="capture multimon portal quick pin history modes"
 
 BIN=$ROOT/zig-out/bin/shotlet
 WLDRIVE=$ROOT/zig-out/bin/shotlet-wldrive
