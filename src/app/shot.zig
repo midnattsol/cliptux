@@ -1,28 +1,29 @@
-//! Capture-and-edit flow: portal/PipeWire acquisition, the first-run
-//! permission dialog, and copy/save handling around the editor.
+//! Capture-and-edit flow: portal/PipeWire acquisition (every monitor,
+//! stitched), the first-run permission dialog, and copy/save
+//! handling around the editor.
 
 const std = @import("std");
 const capture = @import("capture.zig");
+const clock = @import("clock.zig");
+const config = @import("config.zig");
 const dbus = @import("../platform/dbus.zig");
+const env_mod = @import("env.zig");
 const portal = @import("../platform/portal.zig");
 const png = @import("../gfx/png.zig");
 const sys = @import("../platform/sys.zig");
-const Env = @import("env.zig").Env;
+const Env = env_mod.Env;
 
 fn warmupPw() void {
     _ = @import("../platform/pw.zig").available();
 }
 
 pub fn nowMs() i64 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+    return sys.monoMs();
 }
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel: ?[4]i32, smoke_ms: i64) !void {
     const editor_mod = @import("../ui/editor.zig");
     const window = @import("../ui/window.zig");
-    const config = @import("config.zig");
     const t0 = nowMs();
 
     // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
@@ -46,7 +47,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
 
     if (pw_thread) |t| t.join();
     const t_pw = nowMs();
-    var cap = try capture.Capture.single(gpa, try acquireImage(gpa, env, &conn, &cfg, from_file));
+    var cap = (try acquire(gpa, env, &conn, &cfg, from_file)) orelse {
+        std.log.info("capture cancelled", .{});
+        return;
+    };
     defer cap.deinit(gpa);
     const t_capture = nowMs();
 
@@ -79,10 +83,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             ed.releaseCaches(); // serving may outlive the session; drop ~140MB
             if (win.hasClipboard()) try win.serveClipboard();
         },
-        // TODO(platform): .save_as asks for a path with the FileChooser portal
         .save, .save_as => {
+            const data = result.png_data.?;
             if (cfg.copy_on_save) {
-                const copy = try gpa.dupe(u8, result.png_data.?);
+                const copy = try gpa.dupe(u8, data);
                 win.setClipboardPng(copy) catch |err| {
                     gpa.free(copy);
                     std.log.warn("copy-on-save failed: {t}", .{err});
@@ -90,84 +94,140 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from_file: ?[]const u8, preset_sel:
             }
             win.closeWindow();
             ed.releaseCaches();
-            const path = try savePng(gpa, env, &cfg, result.png_data.?);
-            defer gpa.free(path);
-            var buf: [512]u8 = undefined;
-            const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
-            if (cfg.notify) portal.notify(gpa, &conn, "Shotlet", msg);
+            // TODO(platform): .save_as asks for a path with the FileChooser portal
+            const saved: ?[]u8 = try savePng(gpa, env, &cfg, data);
+            if (saved) |path| {
+                defer gpa.free(path);
+                var buf: [512]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
+                if (cfg.notify) portal.notify(gpa, &conn, "Shotlet", msg);
+            }
             if (win.hasClipboard()) try win.serveClipboard();
         },
     }
 }
 
-fn acquireImage(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *@import("config.zig").Config, from_file: ?[]const u8) !png.Image {
+/// Get the image to edit. Null means the person cancelled a dialog: the
+/// caller exits quietly, with no fallback and no further dialogs.
+fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from_file: ?[]const u8) !?capture.Capture {
     const pw = @import("../platform/pw.zig");
-    const config = @import("config.zig");
 
     if (from_file) |path| {
         const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
         defer gpa.free(data);
-        return png.decode(gpa, data);
+        var img = try png.decode(gpa, data);
+        errdefer img.deinit(gpa);
+        return try capture.Capture.single(gpa, img);
     }
 
-    if (pw.available()) fast: {
-        const ts0 = nowMs();
-        const session_path = portal.scCreateSession(gpa, conn) catch |err| {
-            std.log.info("screencast unavailable ({t}); falling back to screenshot portal", .{err});
-            break :fast;
-        };
-        defer gpa.free(session_path);
-
-        const started = portal.scSelectAndStart(gpa, conn, session_path, cfg.scToken()) catch |err| {
-            std.log.info("screencast denied ({t}); falling back to screenshot portal", .{err});
-            portal.closeSession(gpa, conn, session_path);
-            break :fast;
-        };
-        defer if (started.restore_token) |t| gpa.free(t);
-        if (started.restore_token) |t| {
-            cfg.setScToken(t);
-            // only this key: never write back a stale snapshot of the rest
-            config.saveScreencastToken(gpa, env.home, t) catch |err|
-                std.log.warn("could not store the screencast token: {t}", .{err});
+    if (pw.available()) {
+        switch (screencast(gpa, env, conn, cfg)) {
+            .granted => |cap| return cap,
+            .cancelled => return null,
+            .timeout => return error.PortalTimeout,
+            .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
+            .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
-
-        const fd = portal.scOpenRemote(gpa, conn, session_path) catch |err| {
-            std.log.info("OpenPipeWireRemote failed ({t}); falling back", .{err});
-            portal.closeSession(gpa, conn, session_path);
-            break :fast;
-        };
-
-        const ts1 = nowMs();
-        var frame = pw.grabFrame(fd, started.node_id, 5) catch |err| {
-            std.log.info("pipewire grab failed ({t}); falling back to screenshot portal", .{err});
-            portal.closeSession(gpa, conn, session_path);
-            break :fast;
-        };
-        defer frame.deinit();
-        const ts2 = nowMs();
-        // close the session immediately: GNOME's screen-sharing indicator
-        // must only blink during the actual grab, never while editing
-        portal.closeSession(gpa, conn, session_path);
-        const px = try gpa.dupe(u32, frame.pixels);
-        std.log.info("  capture detail: session={d} grab={d} close+dup={d}ms", .{ ts1 - ts0, ts2 - ts1, nowMs() - ts2 });
-        return .{ .width = frame.width, .height = frame.height, .pixels = px };
     }
 
-    const png_data = portal.screenshot(gpa, conn, false) catch |err| switch (err) {
-        error.PermissionDenied, error.CaptureCancelled => blk: {
-            // GNOME only shows its consent dialog to the focused app, so a
-            // headless first run is denied; ask again from a focused window.
-            break :blk try firstRunPermissionFlow(gpa, env, conn);
-        },
-        else => return err,
+    const png_data = switch (try portal.screenshot(gpa, conn, false)) {
+        .granted => |d| d,
+        .cancelled => return null,
+        // GNOME only shows its consent dialog to the focused app, so a
+        // headless first run is denied; ask again from a focused window
+        .denied => (try firstRunPermissionFlow(gpa, env, conn)) orelse return null,
+        .unavailable => return error.NoScreenshotPortal,
+        .timeout => return error.PortalTimeout,
     };
     defer gpa.free(png_data);
-    return png.decode(gpa, png_data);
+    var img = try png.decode(gpa, png_data);
+    errdefer img.deinit(gpa);
+    return try capture.Capture.single(gpa, img);
+}
+
+/// ScreenCast + PipeWire: one frame from every monitor, stitched. Errors
+/// after the portal said yes count as "unavailable" so the caller can fall
+/// back to the Screenshot portal.
+fn screencast(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config) portal.Result(capture.Capture) {
+    return screencastInner(gpa, env, conn, cfg) catch |err| {
+        std.log.info("screencast capture failed ({t})", .{err});
+        return .unavailable;
+    };
+}
+
+fn screencastInner(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config) !portal.Result(capture.Capture) {
+    const pw = @import("../platform/pw.zig");
+    const Res = portal.Result(capture.Capture);
+    const ts0 = nowMs();
+
+    const session_path = switch (try portal.scCreateSession(gpa, conn)) {
+        .granted => |p| p,
+        else => |o| return passOn(Res, o),
+    };
+    defer gpa.free(session_path);
+    // the session must be closed on every path, and as early as possible:
+    // GNOME's screen-sharing indicator must only blink during the grab
+    var open = true;
+    defer if (open) portal.closeSession(gpa, conn, session_path);
+
+    var started = switch (try portal.scSelectAndStart(gpa, conn, session_path, cfg.scToken())) {
+        .granted => |st| st,
+        else => |o| return passOn(Res, o),
+    };
+    defer started.deinit(gpa);
+    if (started.restore_token) |t| {
+        cfg.setScToken(t);
+        // only this key: never write back a stale snapshot of the rest
+        config.saveScreencastToken(gpa, env.home, t) catch |err|
+            std.log.warn("could not store the screencast token: {t}", .{err});
+    }
+
+    const fd = try portal.scOpenRemote(gpa, conn, session_path);
+    const streams = started.streams[0..@min(started.streams.len, pw.max_nodes)];
+    var node_ids: [pw.max_nodes]u32 = undefined;
+    for (streams, 0..) |st, i| node_ids[i] = st.node_id;
+
+    const ts1 = nowMs();
+    var frames: [pw.max_nodes]pw.Frame = undefined;
+    try pw.grabFrames(fd, node_ids[0..streams.len], frames[0..streams.len], 5000);
+    defer for (frames[0..streams.len]) |*f| f.deinit();
+    const ts2 = nowMs();
+    portal.closeSession(gpa, conn, session_path);
+    open = false;
+
+    var parts: [pw.max_nodes]capture.Part = undefined;
+    for (streams, frames[0..streams.len], 0..) |st, f, i| {
+        parts[i] = .{ .pixels = f.pixels, .width = f.width, .height = f.height };
+        if (st.position != null and st.size != null) {
+            parts[i].logical = .{
+                .x = st.position.?[0],
+                .y = st.position.?[1],
+                .w = @intCast(st.size.?[0]),
+                .h = @intCast(st.size.?[1]),
+            };
+        }
+    }
+    const cap = try capture.stitch(gpa, parts[0..streams.len]);
+    std.log.info("  capture detail: monitors={d} session={d} grab={d} close+stitch={d}ms", .{
+        streams.len, ts1 - ts0, ts2 - ts1, nowMs() - ts2,
+    });
+    return .{ .granted = cap };
+}
+
+fn passOn(comptime R: type, o: anytype) R {
+    return switch (o) {
+        .granted => unreachable,
+        .cancelled => .cancelled,
+        .denied => .denied,
+        .unavailable => .unavailable,
+        .timeout => .timeout,
+    };
 }
 
 /// First-run consent: open a small focused window, re-request the screenshot
 /// so GNOME can show its permission dialog, then recapture once granted.
-fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ![]u8 {
+/// Null when the person closes the window.
+fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?[]u8 {
     const window = @import("../ui/window.zig");
     const render = @import("../gfx/render.zig");
 
@@ -175,7 +235,7 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = false, .width = 640, .height = 220 });
 
-    var pending: ?portal.Pending = null;
+    var pending: ?portal.Request = null;
     defer if (pending) |*p| p.deinit(gpa);
     var status: []const u8 = "Press Enter to request it";
     var hint_logged = false;
@@ -211,25 +271,38 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
             while (try win.nextEventTimeout(0)) |ev| switch (ev) {
                 .key => |k| {
                     if (!k.pressed) continue;
-                    if (k.code == window.KEY_ESC) return error.CaptureCancelled;
+                    if (k.code == window.KEY_ESC) return null;
                     if (k.code == window.KEY_ENTER and pending == null) {
-                        pending = try portal.begin(gpa, conn, false);
+                        pending = try portal.beginScreenshot(gpa, conn, false);
                         status = "Waiting for the system dialog...";
                     }
                 },
-                .close => return error.CaptureCancelled,
+                .close => return null,
                 else => {},
             };
         }
         if (fds[1].revents != 0 or conn.hasPending()) {
-            var msg = try conn.nextMessage();
-            defer msg.deinit(gpa);
+            var msg = conn.nextMessage() catch |err| {
+                if (dbus.isFatal(err)) return err;
+                continue;
+            };
             // without an in-flight request, unrelated bus traffic is drained
             // and discarded so poll() never spins on an unread socket
-            if (pending == null) continue;
-            try pending.?.handleMessage(gpa, &msg);
-            if (pending.?.done()) {
-                if (pending.?.err != null) {
+            const req = if (pending) |*p| p else {
+                msg.deinit(gpa);
+                continue;
+            };
+            const kept = req.handle(gpa, &msg) catch false;
+            if (!kept) msg.deinit(gpa);
+            const outcome = req.outcome orelse continue;
+            switch (outcome) {
+                .granted => {
+                    uri = try gpa.dupe(u8, try portal.screenshotUri(req));
+                    break :outer;
+                },
+                .cancelled => return null,
+                .unavailable, .timeout => return error.NoScreenshotPortal,
+                .denied => {
                     // stay open and let the user retry
                     status = "Denied by the portal - Enter to retry";
                     if (!hint_logged) {
@@ -237,12 +310,10 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
                         std.log.warn("portal denied the request; manual grant (plain DBus):", .{});
                         std.log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot shotlet 1 yes", .{});
                     }
-                    pending.?.deinit(gpa);
+                    req.deinit(gpa);
                     pending = null;
                     continue :outer;
-                }
-                uri = try gpa.dupe(u8, pending.?.uri.?);
-                break :outer;
+                },
             }
         }
     }
@@ -254,39 +325,85 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
     // give the compositor a moment to unmap our window
     var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 400 * std.time.ns_per_ms };
     _ = std.os.linux.nanosleep(&ts, null);
-    return portal.screenshot(gpa, conn, false);
+    return switch (try portal.screenshot(gpa, conn, false)) {
+        .granted => |d| d,
+        .cancelled => null,
+        else => error.NoScreenshotPortal,
+    };
 }
+
+// --- saving ---
 
 /// Where screenshots go: the configured save_dir (with ~ expanded), else the
 /// user's XDG Pictures directory.
-fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const @import("config.zig").Config, buf: []u8) ![]u8 {
-    const env_mod = @import("env.zig");
+fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, buf: []u8) ![]u8 {
     if (cfg.saveDir()) |d| return env_mod.expandHome(buf, env.home, d);
     return env_mod.picturesDir(gpa, buf, env.home);
 }
 
-fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const @import("config.zig").Config, data: []const u8) ![]u8 {
+/// "shotlet-20260701-140501" in local time.
+fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
+    const lt = clock.localTime(gpa, env.tz, sys.realtimeSec());
+    return std.fmt.bufPrint(buf, "shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}", .{
+        lt.year, lt.month, lt.day, lt.hour, lt.minute, lt.second,
+    });
+}
+
+/// Save into the screenshots folder. Returns the path written (owned).
+fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755); // best effort; may already exist
+    var name_buf: [64]u8 = undefined;
+    return writeUnique(gpa, dir, try baseName(gpa, env, &name_buf), ".png", data);
+}
 
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(.REALTIME, &ts);
-    const es = std.time.epoch.EpochSeconds{ .secs = @intCast(ts.sec) };
-    const day = es.getEpochDay().calculateYearDay();
-    const md = day.calculateMonthDay();
-    const ds = es.getDaySeconds();
+/// Write `<dir>/<base><ext>`, or `<base>-2<ext>`, `-3`, ... when taken.
+/// Never overwrites: each attempt is an O_EXCL create.
+pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ext: []const u8, data: []const u8) ![]u8 {
+    var n: u32 = 1;
+    while (n < 10_000) : (n += 1) {
+        const path = if (n == 1)
+            try std.fmt.allocPrint(gpa, "{s}/{s}{s}", .{ dir, base, ext })
+        else
+            try std.fmt.allocPrint(gpa, "{s}/{s}-{d}{s}", .{ dir, base, n, ext });
+        errdefer gpa.free(path);
+        sys.writeFileExclusive(path, data, 0o644) catch |err| switch (err) {
+            error.PathAlreadyExists => {
+                gpa.free(path);
+                continue;
+            },
+            else => return err,
+        };
+        return path;
+    }
+    return error.TooManyCollisions;
+}
 
-    const path = try std.fmt.allocPrint(gpa, "{s}/shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}.png", .{
-        dir,
-        day.year,
-        md.month.numeric(),
-        @as(u32, md.day_index) + 1,
-        ds.getHoursIntoDay(),
-        ds.getMinutesIntoHour(),
-        ds.getSecondsIntoMinute(),
-    });
-    errdefer gpa.free(path);
-    try sys.writeFile(path, data);
-    return path;
+test "saved names never overwrite" {
+    const gpa = std.testing.allocator;
+    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
+    defer gpa.free(dir);
+    defer sys.removeTree(dir);
+
+    const a = try writeUnique(gpa, dir, "shot", ".png", "one");
+    defer gpa.free(a);
+    const b = try writeUnique(gpa, dir, "shot", ".png", "two");
+    defer gpa.free(b);
+    const c = try writeUnique(gpa, dir, "shot", ".png", "three");
+    defer gpa.free(c);
+    try std.testing.expect(std.mem.endsWith(u8, a, "/shot.png"));
+    try std.testing.expect(std.mem.endsWith(u8, b, "/shot-2.png"));
+    try std.testing.expect(std.mem.endsWith(u8, c, "/shot-3.png"));
+    const first = try sys.readFileAlloc(gpa, a, 64);
+    defer gpa.free(first);
+    try std.testing.expectEqualStrings("one", first);
+
+    // a symlink in the way is not followed
+    var link_buf: [512]u8 = undefined;
+    const link = try std.fmt.bufPrint(&link_buf, "{s}/l.png\x00", .{dir});
+    _ = std.os.linux.symlinkat("/nonexistent-target", std.os.linux.AT.FDCWD, @ptrCast(link.ptr));
+    const d = try writeUnique(gpa, dir, "l", ".png", "x");
+    defer gpa.free(d);
+    try std.testing.expect(std.mem.endsWith(u8, d, "/l-2.png"));
 }

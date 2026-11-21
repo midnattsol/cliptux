@@ -45,31 +45,57 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
     }
     if (std.mem.eql(u8, cmd, "test-grab")) {
 
-        // internal development tool: ScreenCast + PipeWire single frame
+        // internal development tool: ScreenCast + PipeWire, every monitor
         const pw = @import("../platform/pw.zig");
+        const capture = @import("capture.zig");
         var cfg = @import("config.zig").load(gpa, env.home);
         var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
         defer conn.deinit();
         portal.ensureAppScope(gpa, &conn);
         const t0 = nowMs();
-        var sc = try portal.openScreenCast(gpa, &conn, cfg.scToken());
+        var sc = switch (try portal.openScreenCast(gpa, &conn, cfg.scToken())) {
+            .granted => |s| s,
+            else => |o| {
+                std.debug.print("screencast: {t}\n", .{o});
+                return true;
+            },
+        };
         defer sc.deinit(gpa);
         const t1 = nowMs();
-        if (sc.restore_token) |t| {
+        if (sc.start.restore_token) |t| {
             cfg.setScToken(t);
             @import("config.zig").saveScreencastToken(gpa, env.home, t) catch {};
         }
-        std.debug.print("session: node={d} fd={d} portal={d}ms token={s}\n", .{
-            sc.node_id, sc.pw_fd, t1 - t0, if (sc.restore_token != null) "new" else "reused",
+        const streams = sc.start.streams[0..@min(sc.start.streams.len, pw.max_nodes)];
+        std.debug.print("session: streams={d} fd={d} portal={d}ms token={s}\n", .{
+            streams.len, sc.pw_fd, t1 - t0, if (sc.start.restore_token != null) "new" else "reused",
         });
-        var frame = try pw.grabFrame(sc.pw_fd, sc.node_id, 5);
-        defer frame.deinit();
+        var ids: [pw.max_nodes]u32 = undefined;
+        for (streams, 0..) |st, i| {
+            ids[i] = st.node_id;
+            std.debug.print("  node {d} position={any} size={any}\n", .{ st.node_id, st.position, st.size });
+        }
+        var frames: [pw.max_nodes]pw.Frame = undefined;
+        try pw.grabFrames(sc.pw_fd, ids[0..streams.len], frames[0..streams.len], 5000);
+        defer for (frames[0..streams.len]) |*f| f.deinit();
+        portal.closeSession(gpa, &conn, sc.session_path);
+        var parts: [pw.max_nodes]capture.Part = undefined;
+        for (streams, frames[0..streams.len], 0..) |st, f, i| {
+            parts[i] = .{ .pixels = f.pixels, .width = f.width, .height = f.height };
+            if (st.position != null and st.size != null) parts[i].logical = .{
+                .x = st.position.?[0],
+                .y = st.position.?[1],
+                .w = @intCast(st.size.?[0]),
+                .h = @intCast(st.size.?[1]),
+            };
+        }
+        var cap = try capture.stitch(gpa, parts[0..streams.len]);
+        defer cap.deinit(gpa);
         const t2 = nowMs();
-        std.debug.print("frame: {d}x{d} grab={d}ms total={d}ms\n", .{ frame.width, frame.height, t2 - t1, t2 - t0 });
-        const out = try png.encode(gpa, frame.pixels, frame.width, frame.height);
+        std.debug.print("image: {d}x{d} grab+stitch={d}ms total={d}ms\n", .{ cap.image.width, cap.image.height, t2 - t1, t2 - t0 });
+        const out = try png.encode(gpa, cap.image.pixels, cap.image.width, cap.image.height);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/shotlet-grab.png", out);
-        std.debug.print("wrote /tmp/shotlet-grab.png\n", .{});
+        try writeDebug(gpa, env, "shotlet-grab.png", out);
         return true;
     }
     if (std.mem.eql(u8, cmd, "test-font")) {
@@ -92,8 +118,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         text.draw(&canvas, 20, 170, 11.0, 0xFFE9ECEF, "Tiny 11px: The quick brown fox jumps over the lazy dog");
         const out = try png.encode(gpa, px, W, H);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/shotlet-font.png", out);
-        std.debug.print("wrote /tmp/shotlet-font.png\n", .{});
+        try writeDebug(gpa, env, "shotlet-font.png", out);
         return true;
     }
     if (std.mem.eql(u8, cmd, "test-decode")) {
@@ -107,8 +132,18 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         std.debug.print("decoded {d}x{d}, pixel[0]=0x{x:0>8}\n", .{ img.width, img.height, img.pixels[0] });
         const out = try png.encode(gpa, img.pixels, img.width, img.height);
         defer gpa.free(out);
-        try sys.writeFile("/tmp/shotlet-reencoded.png", out);
+        try writeDebug(gpa, env, "shotlet-reencoded.png", out);
         return true;
     }
     return false;
+}
+
+/// Debug output goes to $XDG_RUNTIME_DIR (private to the user, 0700), never
+/// to a fixed, world-readable /tmp path another user could pre-create.
+fn writeDebug(gpa: std.mem.Allocator, env: Env, name: []const u8, data: []const u8) !void {
+    const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ env.runtime_dir, name });
+    defer gpa.free(path);
+    sys.unlink(path) catch {};
+    try sys.writeFileExclusive(path, data, 0o600);
+    std.debug.print("wrote {s}\n", .{path});
 }
