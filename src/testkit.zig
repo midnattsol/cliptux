@@ -6,3 +6,6 @@ pub const pw = @import("platform/pw.zig");
 pub const sys = @import("platform/sys.zig");
 pub const png = @import("gfx/png.zig");
 pub const window = @import("ui/window.zig");
+pub const wayland = @import("platform/wayland.zig");
+pub const render = @import("gfx/render.zig");
+pub const text = @import("gfx/text.zig");
