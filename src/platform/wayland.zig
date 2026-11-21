@@ -95,10 +95,50 @@ pub const wl_keyboard = struct {
 };
 
 pub const wl_output = struct {
+    pub const release = 0; // since v3
     pub const ev_geometry = 0;
     pub const ev_mode = 1;
+    pub const ev_done = 2; // since v2
+    pub const ev_scale = 3; // since v2
+    pub const ev_name = 4; // since v4
+    pub const ev_description = 5; // since v4
+    pub const mode_current: u32 = 1;
+};
+
+pub const zxdg_output_manager_v1 = struct {
+    pub const destroy = 0;
+    pub const get_xdg_output = 1;
+};
+
+pub const zxdg_output_v1 = struct {
+    pub const destroy = 0;
+    pub const ev_logical_position = 0;
+    pub const ev_logical_size = 1;
     pub const ev_done = 2;
-    pub const ev_scale = 3;
+    pub const ev_name = 3; // since v2
+    pub const ev_description = 4; // since v2
+};
+
+pub const zwp_text_input_manager_v3 = struct {
+    pub const destroy = 0;
+    pub const get_text_input = 1;
+};
+
+pub const zwp_text_input_v3 = struct {
+    pub const destroy = 0;
+    pub const enable = 1;
+    pub const disable = 2;
+    pub const set_surrounding_text = 3;
+    pub const set_text_change_cause = 4;
+    pub const set_content_type = 5;
+    pub const set_cursor_rectangle = 6;
+    pub const commit = 7;
+    pub const ev_enter = 0;
+    pub const ev_leave = 1;
+    pub const ev_preedit_string = 2;
+    pub const ev_commit_string = 3;
+    pub const ev_delete_surrounding_text = 4;
+    pub const ev_done = 5;
 };
 
 pub const xdg_wm_base = struct {
@@ -190,32 +230,47 @@ pub const Event = struct {
     body: []const u8,
 };
 
-/// Sequential decoder for event arguments.
+/// Sequential decoder for event arguments. Every accessor is bounds
+/// checked: a short or malformed payload yields error.Malformed instead of
+/// reading past the message.
 pub const ArgReader = struct {
     data: []const u8,
     pos: usize = 0,
 
-    pub fn uint(self: *ArgReader) u32 {
+    pub const Error = error{Malformed};
+
+    pub fn uint(self: *ArgReader) Error!u32 {
+        if (self.data.len < 4 or self.pos > self.data.len - 4) return error.Malformed;
         defer self.pos += 4;
         return std.mem.readInt(u32, self.data[self.pos..][0..4], .little);
     }
-    pub fn int(self: *ArgReader) i32 {
-        return @bitCast(self.uint());
+    pub fn int(self: *ArgReader) Error!i32 {
+        return @bitCast(try self.uint());
     }
-    pub fn fixed(self: *ArgReader) f64 {
-        const raw: i32 = self.int();
+    pub fn fixed(self: *ArgReader) Error!f64 {
+        const raw: i32 = try self.int();
         return @as(f64, @floatFromInt(raw)) / 256.0;
     }
-    pub fn string(self: *ArgReader) []const u8 {
-        const len = self.uint(); // includes NUL
-        const s = if (len == 0) "" else self.data[self.pos..][0 .. len - 1];
-        self.pos += std.mem.alignForward(usize, len, 4);
+    /// Length-prefixed, NUL-terminated, padded to 4. A zero length is the
+    /// null string and reads as "".
+    pub fn string(self: *ArgReader) Error![]const u8 {
+        const len = try self.uint(); // includes NUL
+        if (len == 0) return "";
+        const padded = std.mem.alignForward(usize, len, 4);
+        if (padded > self.data.len - self.pos) return error.Malformed;
+        const raw = self.data[self.pos..][0..len];
+        if (raw[len - 1] != 0) return error.Malformed;
+        const s = raw[0 .. len - 1];
+        if (std.mem.indexOfScalar(u8, s, 0) != null) return error.Malformed;
+        self.pos += padded;
         return s;
     }
-    pub fn array(self: *ArgReader) []const u8 {
-        const len = self.uint();
+    pub fn array(self: *ArgReader) Error![]const u8 {
+        const len = try self.uint();
+        const padded = std.mem.alignForward(usize, len, 4);
+        if (padded > self.data.len - self.pos) return error.Malformed;
         const s = self.data[self.pos..][0..len];
-        self.pos += std.mem.alignForward(usize, len, 4);
+        self.pos += padded;
         return s;
     }
 };
@@ -322,7 +377,7 @@ pub const Connection = struct {
     pub fn readEvent(self: *Connection) !Event {
         try self.flush();
         while (true) {
-            if (self.parseEvent()) |ev| return ev;
+            if (try self.parseEvent()) |ev| return ev;
             // compact buffer
             if (self.buf_start > 0) {
                 std.mem.copyForwards(u8, self.buf[0 .. self.buf_end - self.buf_start], self.buf[self.buf_start..self.buf_end]);
@@ -336,24 +391,17 @@ pub const Connection = struct {
     }
 
     /// Non-blocking variant: returns null when no complete event is buffered.
-    pub fn pollEvent(self: *Connection) ?Event {
+    pub fn pollEvent(self: *Connection) !?Event {
         return self.parseEvent();
     }
 
-    fn parseEvent(self: *Connection) ?Event {
-        const avail = self.buf_end - self.buf_start;
-        if (avail < 8) return null;
-        const hdr = self.buf[self.buf_start..];
-        const object = std.mem.readInt(u32, hdr[0..4], .little);
-        const size_op = std.mem.readInt(u32, hdr[4..8], .little);
-        const size = size_op >> 16;
-        const opcode: u16 = @truncate(size_op);
-        if (avail < size) return null;
-        const body = self.buf[self.buf_start + 8 .. self.buf_start + size];
-        self.buf_start += size;
-        return .{ .object = object, .opcode = opcode, .body = body };
+    fn parseEvent(self: *Connection) !?Event {
+        const ev = (try parseMessage(self.buf[self.buf_start..self.buf_end])) orelse return null;
+        self.buf_start += ev.size;
+        return ev.event;
     }
 
+    // --- convenience wrappers ---
     // --- convenience wrappers ---
 
     pub fn sync(self: *Connection) !u32 {
@@ -380,10 +428,73 @@ pub const Connection = struct {
     }
 };
 
+pub const Parsed = struct { event: Event, size: usize };
+
+/// Decode one message header from `buf`. Returns null when the message is
+/// not complete yet, error.Malformed when the header can never be valid
+/// (a size below the 8-byte header or not a multiple of 4), so a corrupt
+/// stream cannot spin the reader or index out of bounds.
+pub fn parseMessage(buf: []const u8) error{Malformed}!?Parsed {
+    if (buf.len < 8) return null;
+    const object = std.mem.readInt(u32, buf[0..4], .little);
+    const size_op = std.mem.readInt(u32, buf[4..8], .little);
+    const size: usize = size_op >> 16;
+    const opcode: u16 = @truncate(size_op);
+    if (size < 8 or size % 4 != 0) return error.Malformed;
+    if (buf.len < size) return null;
+    return .{ .event = .{ .object = object, .opcode = opcode, .body = buf[8..size] }, .size = size };
+}
+
 test "arg reader strings" {
     // string "hi\x00" padded to 4: len=3
     const data = [_]u8{ 3, 0, 0, 0, 'h', 'i', 0, 0, 42, 0, 0, 0 };
     var r = ArgReader{ .data = &data };
-    try std.testing.expectEqualStrings("hi", r.string());
-    try std.testing.expectEqual(@as(u32, 42), r.uint());
+    try std.testing.expectEqualStrings("hi", try r.string());
+    try std.testing.expectEqual(@as(u32, 42), try r.uint());
+    try std.testing.expectError(error.Malformed, r.uint());
+}
+
+test "arg reader rejects malformed payloads" {
+    const E = error.Malformed;
+    // short uint
+    var r = ArgReader{ .data = &[_]u8{ 1, 2 } };
+    try std.testing.expectError(E, r.uint());
+    // string length past the end
+    r = .{ .data = &[_]u8{ 200, 0, 0, 0, 'a', 'b', 0, 0 } };
+    try std.testing.expectError(E, r.string());
+    // string without its NUL terminator
+    r = .{ .data = &[_]u8{ 3, 0, 0, 0, 'a', 'b', 'c', 0 } };
+    try std.testing.expectError(E, r.string());
+    // embedded NUL
+    r = .{ .data = &[_]u8{ 4, 0, 0, 0, 'a', 0, 'c', 0 } };
+    try std.testing.expectError(E, r.string());
+    // padding runs past the end
+    r = .{ .data = &[_]u8{ 2, 0, 0, 0, 'a', 0 } };
+    try std.testing.expectError(E, r.string());
+    // huge array length (would overflow naive pos + len)
+    r = .{ .data = &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0 } };
+    try std.testing.expectError(E, r.array());
+    // null string is fine
+    r = .{ .data = &[_]u8{ 0, 0, 0, 0 } };
+    try std.testing.expectEqualStrings("", try r.string());
+    // valid array
+    r = .{ .data = &[_]u8{ 2, 0, 0, 0, 7, 8, 0, 0 } };
+    try std.testing.expectEqualSlices(u8, &.{ 7, 8 }, try r.array());
+}
+
+test "message parser rejects bad sizes" {
+    // size 0 used to loop forever
+    try std.testing.expectError(error.Malformed, parseMessage(&[_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 }));
+    // size 4 (< header) used to panic
+    try std.testing.expectError(error.Malformed, parseMessage(&[_]u8{ 1, 0, 0, 0, 0, 0, 4, 0 }));
+    // unaligned size
+    try std.testing.expectError(error.Malformed, parseMessage(&[_]u8{ 1, 0, 0, 0, 0, 0, 10, 0, 0, 0 }));
+    // incomplete header or body: wait for more
+    try std.testing.expect((try parseMessage(&[_]u8{ 1, 0, 0 })) == null);
+    try std.testing.expect((try parseMessage(&[_]u8{ 1, 0, 0, 0, 2, 0, 12, 0 })) == null);
+    // complete message with a 4-byte body
+    const ok = (try parseMessage(&[_]u8{ 1, 0, 0, 0, 2, 0, 12, 0, 9, 0, 0, 0, 0xEE })).?;
+    try std.testing.expectEqual(@as(usize, 12), ok.size);
+    try std.testing.expectEqual(@as(u16, 2), ok.event.opcode);
+    try std.testing.expectEqual(@as(usize, 4), ok.event.body.len);
 }
