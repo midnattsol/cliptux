@@ -363,7 +363,8 @@ the previous area, each `after_fullscreen`), `modes-timer` (the countdown
 on screen but not in the capture), `modes-window` (a 640x480 GTK window
 captured at exactly its size with see-through corners, then with its
 shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the
-expected height, its marker band exactly once, scrolling in the editor)
+expected height, its marker band exactly once, scrolling in the editor),
+`modes-scroll-manual` (the person scrolls, Stop ends it)
 and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
 run without the extension. On Debian/Ubuntu:
 `apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul python3-gi gir1.2-gtk-4.0`.

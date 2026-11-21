@@ -210,6 +210,32 @@ modes-scroll)
     check "  ... and the page's height through the region (~$want)" test "${th:-0}" -ge $((want - 2)) -a "${th:-0}" -le $((want + 2))
     check "  ... the marker band exactly once" eq "$(drv runs "$OUT/tall.png" 5 ff00ff 8 && echo "$VAL")" 1
     ;;
+modes-scroll-manual)
+    # scroll_auto=false: the person scrolls, Shotlet follows, Stop ends it
+    modes_start Meta-0
+    mode_cfg copy scroll_auto=false
+    : >"$OUT/page.log"
+    "$PYGTK" "$ROOT/tools/e2e/scrolltarget.py" 3000 >>"$OUT/page.log" 2>>"$OUT/page.err" &
+    for i in $(seq 1 50); do grep -q "^viewport" "$OUT/page.log" && break; sleep 0.2; done
+    sleep 1
+    drv key ctrl+super+print
+    shell_wait 10 "scrolling capture: pick a region" 1
+    sleep 2
+    drag 0 300 300 0 600 500 0 900 700
+    keys enter
+    check "the region is captured while the person scrolls" shell_wait 10 "the person scrolls" 1
+    sleep 1
+    for i in $(seq 1 10); do drv move 0 600 500; drv wheel 2; sleep 0.6; done
+    check "  ... the page moved by hand" grep -q "^scrolled [1-9]" "$OUT/page.log"
+    drv find 0 0a84ff 24 100 && read -r bx by _ <<<"$VAL"
+    check "Stop on the control ends it" eval 'click 0 "$bx" "$by" && shell_wait 15 "startup: capture=" 1'
+    sleep 1
+    keys enter
+    check "  ... and the editor copies what was scrolled" wait_clip manual 10
+    s=$(png_size "$OUT/manual.png"); mh=${s#*x}
+    check "  ... taller than the region (${s})" test "${mh:-0}" -gt 800
+    check "  ... with no part twice (the marker at most once)" test "$(drv runs "$OUT/manual.png" 5 ff00ff 8 && echo "$VAL")" -le 1
+    ;;
 modes-keys)
     modes_start Meta-0
     mode_cfg copy
