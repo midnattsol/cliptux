@@ -214,7 +214,7 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection)
     }
     st.theme = st.prefs.theme();
     st.env = env;
-    st.gnome = model.gnomeState(alloc, bus);
+    st.gnome = model.gnomeState(alloc, env, bus);
     if (st.gnome == .active) st.capture = gnome.captureInfo(alloc, bus.?);
     st.modes = settings_modes.load(alloc, env, bus);
     // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, and

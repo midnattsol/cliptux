@@ -30,6 +30,7 @@ const capture = @import("gnome/capture.zig");
 const custom = @import("gnome/custom.zig");
 const setup = @import("gnome/setup.zig");
 const cli = @import("gnome/cli.zig");
+const install_state = @import("gnome/install_state.zig");
 
 pub const uuid = extension.uuid;
 pub const bus_name = extension.bus_name;
@@ -40,6 +41,8 @@ pub const shellState = extension.shellState;
 pub const writeBundled = extension.writeBundled;
 pub const schemaDir = extension.schemaDir;
 pub const InstallResult = extension.InstallResult;
+pub const InstallState = install_state.State;
+pub const installState = install_state.read;
 
 pub const CaptureRequest = capture.CaptureRequest;
 pub const requestCapture = capture.requestCapture;
@@ -62,5 +65,7 @@ comptime {
     _ = custom;
     _ = @import("gnome/screenshot_keys.zig");
     _ = setup;
+    _ = install_state;
+    _ = @import("gnome/shell_settings.zig");
     _ = cli;
 }

@@ -10,6 +10,7 @@ const capture = @import("capture.zig");
 const custom = @import("custom.zig");
 const screenshot_keys = @import("screenshot_keys.zig");
 const setup = @import("setup.zig");
+const install_state = @import("install_state.zig");
 const gnome_keys = @import("../modes/gnome_keys.zig");
 
 const ext_schema_id = extension.ext_schema_id;
@@ -25,7 +26,7 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const [
     } else if (std.mem.eql(u8, sub, "shortcut")) {
         try runShortcut(gpa, env, &bus, rest);
     } else {
-        runStatus(gpa, &bus);
+        runStatus(gpa, env, &bus);
     }
 }
 
@@ -105,27 +106,13 @@ fn setCaptureShortcut(gpa: std.mem.Allocator, env: Env, sd: []const u8, accels: 
     _ = std.os.linux.nanosleep(&ts, null);
 }
 
-fn runStatus(gpa: std.mem.Allocator, bus: *dbus.Connection) void {
-    const active = extension.extensionActive(bus);
-    const state = extension.shellState(gpa, bus);
+fn runStatus(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) void {
     out("desktop: {s}\nextension {s}: {s}\n", .{
         if (extension.isGnome()) "GNOME" else "not GNOME",
         extension.uuid,
-        if (active) "active" else if (state) |s| stateText(s) else "GNOME Shell not reachable",
+        install_state.read(gpa, env, bus).text(),
     });
     const info = capture.captureInfo(gpa, bus);
     out("capture: {s}\n", .{if (info.capture) "through the GNOME integration (no prompts)" else "through the screen-sharing portal"});
     capture.printShortcut(&info);
-}
-
-/// GNOME Shell's extension state (see shellState), for `status`.
-fn stateText(s: u32) []const u8 {
-    return switch (s) {
-        1 => "enabled",
-        2, 6 => "installed, not enabled (shotlet gnome-integration install)",
-        3 => "error (see journalctl /usr/bin/gnome-shell)",
-        4 => "out of date for this GNOME version",
-        99 => "not installed (shotlet gnome-integration install)",
-        else => "unknown state",
-    };
 }

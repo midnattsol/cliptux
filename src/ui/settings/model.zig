@@ -63,12 +63,15 @@ pub const Region = struct {
 /// The GNOME Shell integration as the Settings window shows it.
 pub const GnomeState = enum { not_gnome, active, installed, missing, failed };
 
-pub fn gnomeState(alloc: std.mem.Allocator, bus: ?*dbus.Connection) GnomeState {
+pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) GnomeState {
     if (!gnome.isGnome()) return .not_gnome;
     const b = bus orelse return .missing;
-    if (gnome.extensionActive(b)) return .active;
-    const st = gnome.shellState(alloc, b) orelse return .missing;
-    return if (st == 99) .missing else .installed;
+    return switch (gnome.installState(alloc, env, b)) {
+        .active => .active,
+        // nothing to click: it loads at the next login
+        .next_login => .installed,
+        else => .missing,
+    };
 }
 
 pub fn headerHeight(win: *const Window) i32 {
