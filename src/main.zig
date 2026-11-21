@@ -205,6 +205,9 @@ test {
     _ = @import("ui/view.zig");
     _ = @import("ui/textedit.zig");
     _ = @import("gfx/png.zig");
+    _ = @import("gfx/jpeg.zig");
+    _ = @import("gfx/imgload.zig");
+    _ = @import("gfx/codec_libs.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");
