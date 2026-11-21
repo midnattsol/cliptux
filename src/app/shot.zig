@@ -1,11 +1,11 @@
-//! Capture-and-edit flow: portal/PipeWire acquisition (every monitor,
-//! stitched), the first-run permission dialog, and copy/save/save-as
-//! handling around the editor.
+//! Capture-and-edit flow: acquisition (direct, ScreenCast in
+//! shot/screencast.zig, the Screenshot portal with the first-run
+//! permission dialog), then copy/save/save-as handling around the editor
+//! (files in shot/save.zig).
 
 const std = @import("std");
 const capture = @import("capture.zig");
 const direct = @import("direct.zig");
-const clock = @import("clock.zig");
 const config = @import("config.zig");
 const dbus = @import("../platform/dbus.zig");
 const env_mod = @import("env.zig");
@@ -21,7 +21,20 @@ const modes = @import("modes/mode.zig");
 const mode_flow = @import("modes/flow.zig");
 const shell_bus = @import("modes/shell_bus.zig");
 const last_area = @import("modes/last_area.zig");
+const save = @import("shot/save.zig");
+const screencast = @import("shot/screencast.zig").screencast;
+const window = @import("../ui/window.zig");
+const editor_mod = @import("../ui/editor.zig");
 const Env = env_mod.Env;
+
+pub const baseName = save.baseName;
+pub const savePng = save.savePng;
+pub const writeUnique = save.writeUnique;
+pub const saveAs = save.saveAs;
+
+comptime {
+    _ = save;
+}
 
 fn warmupPw() void {
     _ = @import("../platform/pw.zig").available();
@@ -50,44 +63,29 @@ pub const From = struct {
 };
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
-    const window = @import("../ui/window.zig");
-    const t0 = nowMs();
-
+    var t: Startup = .{ .t0 = nowMs() };
     var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
     defer conn.deinit();
-    const t_dbus = nowMs();
-
-    // with the GNOME Shell extension, the shell takes the screenshot (no
-    // prompt) and starts another shotlet on it
-    if (!from.any() and gnome.isGnome() and gnome.extensionActive(&conn)) {
-        @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
-        switch (shell_bus.requestMode(gpa, &conn, from.req)) {
-            .started => {
-                std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
-                return;
-            },
-            .declined => return,
-            .unavailable => {},
-        }
-    }
+    t.dbus = nowMs();
+    if (!from.any() and handedToShell(gpa, env, &conn, from.req, t.t0)) return;
 
     // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
     const pw_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupPw, .{}) catch null;
     portal.registerApp(gpa, &conn);
-    const t_scope = nowMs();
+    t.scope = nowMs();
 
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
-    const t_config = nowMs();
+    t.config = nowMs();
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
-    const t_wayland = nowMs();
+    t.wayland = nowMs();
 
-    if (pw_thread) |t| t.join();
-    const t_pw = nowMs();
+    if (pw_thread) |th| th.join();
+    t.pw = nowMs();
     // the self-timer, where the GNOME extension did not count down
     if (from.req.delay_s > 0 and !from.any() and !try @import("../ui/countdown.zig").run(&win, from.req.delay_s)) return;
     var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
@@ -96,33 +94,69 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     };
     defer cap.deinit(gpa);
     if (from.req.delay_s > 0) win.closeWindow();
-    const t_capture = nowMs();
+    t.capture = nowMs();
     const edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
         .done => return,
         .edit => |e| e,
     };
 
-    // one fullscreen surface per monitor when the layout is known
-    const per_monitor = cap.monitors.len > 1 and for (cap.monitors) |m| {
-        if (m.logical == null) break false;
-    } else true;
+    const per_monitor = perMonitor(&cap);
     try openEditor(&win, &cap, per_monitor);
-    const t_open = nowMs();
-    std.log.info("startup: capture={d}ms total={d}ms", .{ t_capture - t0, t_open - t0 });
-    if (from.shell) |sh| if (sh.t0_ms) |key| {
-        std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t_open - key, t0 - key });
-    };
-    std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
-        t_dbus - t0,
-        t_scope - t_dbus,
-        t_config - t_scope,
-        t_wayland - t_config,
-        t_pw - t_wayland,
-        t_capture - t_pw,
-        t_open - t_capture,
-    });
+    t.open = nowMs();
+    t.log(from.shell);
     try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null, edit);
 }
+
+/// With the GNOME Shell extension, the shell takes the screenshot (no
+/// prompt) and starts another shotlet on it. True when it took over (or
+/// declined): this process has nothing left to do.
+fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, req: modes.Request, t0: i64) bool {
+    if (!gnome.isGnome() or !gnome.extensionActive(conn)) return false;
+    @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
+    switch (shell_bus.requestMode(gpa, conn, req)) {
+        .started => {
+            std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
+            return true;
+        },
+        .declined => return true,
+        .unavailable => return false,
+    }
+}
+
+/// One fullscreen surface per monitor when the layout is known.
+fn perMonitor(cap: *const capture.Capture) bool {
+    return cap.monitors.len > 1 and for (cap.monitors) |m| {
+        if (m.logical == null) break false;
+    } else true;
+}
+
+/// Startup timestamps (ms), logged once the editor is open.
+const Startup = struct {
+    t0: i64,
+    dbus: i64 = 0,
+    scope: i64 = 0,
+    config: i64 = 0,
+    wayland: i64 = 0,
+    pw: i64 = 0,
+    capture: i64 = 0,
+    open: i64 = 0,
+
+    fn log(t: Startup, shell: ?shellcap.Args) void {
+        std.log.info("startup: capture={d}ms total={d}ms", .{ t.capture - t.t0, t.open - t.t0 });
+        if (shell) |sh| if (sh.t0_ms) |key| {
+            std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
+        };
+        std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
+            t.dbus - t.t0,
+            t.scope - t.dbus,
+            t.config - t.scope,
+            t.wayland - t.config,
+            t.pw - t.wayland,
+            t.capture - t.pw,
+            t.open - t.capture,
+        });
+    }
+};
 
 /// The editor's fullscreen surfaces: one per monitor when the capture has
 /// several; for a capture of one monitor (a portal that shares one, like
@@ -146,10 +180,45 @@ const Reopen = struct {
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
 pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
-    const editor_mod = @import("../ui/editor.zig");
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
-    // the desktop's light/dark preference, accent and reduced motion
+    configureEditor(&ed, conn, cfg, smoke_ms);
+    ed.presetSelection(preset_sel);
+    if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
+    ed.keep_alpha = edit.keep_alpha;
+    defer ed.deinit();
+    if (reopen) |r| try restoreReopened(gpa, &ed, r);
+    while (true) {
+        const result = try ed.run();
+        if (reopen == null) @import("editor_prefs.zig").remember(gpa, env, cfg, &ed);
+        defer if (result.png_data) |d| gpa.free(d);
+        if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
+            last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
+
+        const f: Finish = .{ .gpa = gpa, .env = env, .conn = conn, .cfg = cfg, .win = win, .ed = &ed, .replace = if (reopen) |r| r.kept else null };
+        switch (result.action) {
+            .new_capture => {
+                // the More menu's other capture modes: a fresh shotlet
+                win.closeWindow();
+                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
+            },
+            .cancel, .copied => try f.closed(result.action == .copied),
+            .save, .save_as => if (!try f.saved(result.action == .save, result.png_data.?)) {
+                // the file chooser was cancelled: back to the editor,
+                // annotations intact, rather than losing the work
+                try openEditor(win, cap, per_monitor);
+                ed.running = true;
+                ed.action = .cancel;
+                continue;
+            },
+        }
+        return;
+    }
+}
+
+/// The editor's settings from the config and the desktop's light/dark
+/// preference, accent and reduced motion.
+fn configureEditor(ed: *editor_mod.Editor, conn: *dbus.Connection, cfg: *const config.Config, smoke_ms: i64) void {
     const theme = @import("../ui/theme.zig");
     ed.setPrefs(theme.readPrefs(conn, 1500));
     theme.watch(conn) catch {};
@@ -166,90 +235,81 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
         .shadow = cfg.beautify_shadow,
     };
     ed.show_hint = !cfg.hint_shown;
-    ed.presetSelection(preset_sel);
-    if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
-    ed.keep_alpha = edit.keep_alpha;
-    defer ed.deinit();
-    if (reopen) |r| {
-        // the shapes as they were, still editable
-        ed.show_hint = false;
-        ed.beautify = r.doc.beautify;
-        ed.doc.sel = r.doc.sel orelse ed.doc.imageRect();
-        for (r.doc.shapes.items) |*s| {
-            var c = try s.clone(gpa);
-            ed.doc.shapes.append(gpa, c) catch |err| {
-                c.deinit(gpa);
-                return err;
-            };
-        }
-    }
-    while (true) {
-        const result = try ed.run();
-        if (reopen == null) @import("editor_prefs.zig").remember(gpa, env, cfg, &ed);
-        defer if (result.png_data) |d| gpa.free(d);
-        const replace: ?keep_mod.Kept = if (reopen) |r| r.kept else null;
-        if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
-            last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
+}
 
-        switch (result.action) {
-            .new_capture => {
-                // the More menu's other capture modes: a fresh shotlet
-                win.closeWindow();
-                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
-            },
-            .cancel, .copied => {
-                win.closeWindow();
-                ed.releaseCaches(); // serving may outlive the session; drop ~140MB
-                if (result.action == .copied) {
-                    if (win.clipboardPng()) |data| {
-                        if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .replace = replace })) |k| {
-                            if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
-                        }
-                    }
-                }
-                if (win.hasClipboard()) try win.serveClipboard();
-            },
-            .save, .save_as => {
-                const data = result.png_data.?;
-                if (cfg.copy_on_save) {
-                    const copy = try gpa.dupe(u8, data);
-                    win.setClipboardPng(copy) catch |err| {
-                        gpa.free(copy);
-                        std.log.warn("copy-on-save failed: {t}", .{err});
-                    };
-                }
-                win.closeWindow();
-                ed.releaseCaches();
-                const saved: ?[]u8 = if (result.action == .save)
-                    try savePng(gpa, env, cfg, data)
-                else
-                    try saveAs(gpa, env, conn, cfg, data);
-                const path = saved orelse {
-                    // the file chooser was cancelled: back to the editor,
-                    // annotations intact, rather than losing the work
-                    try openEditor(win, cap, per_monitor);
-                    ed.running = true;
-                    ed.action = .cancel;
-                    continue;
-                };
-                defer gpa.free(path);
-                var buf: [512]u8 = undefined;
-                const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
-                if (cfg.notify) portal.notify(gpa, conn, "Shotlet", msg);
-                if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = path, .replace = replace })) |k| {
-                    if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
-                }
-                if (win.hasClipboard()) try win.serveClipboard();
-            },
-        }
-        return;
+/// A reopened capture: the shapes as they were, still editable.
+fn restoreReopened(gpa: std.mem.Allocator, ed: *editor_mod.Editor, r: Reopen) !void {
+    ed.show_hint = false;
+    ed.beautify = r.doc.beautify;
+    ed.doc.sel = r.doc.sel orelse ed.doc.imageRect();
+    for (r.doc.shapes.items) |*s| {
+        var c = try s.clone(gpa);
+        ed.doc.shapes.append(gpa, c) catch |err| {
+            c.deinit(gpa);
+            return err;
+        };
     }
 }
+
+/// What happens after the editor closed with a result.
+const Finish = struct {
+    gpa: std.mem.Allocator,
+    env: Env,
+    conn: *dbus.Connection,
+    cfg: *config.Config,
+    win: *window.Window,
+    ed: *editor_mod.Editor,
+    /// the history entry a reopened capture updates
+    replace: ?keep_mod.Kept,
+
+    /// Cancel or Copy: the window closes; a copy is kept and served.
+    fn closed(f: Finish, copied: bool) !void {
+        f.win.closeWindow();
+        f.ed.releaseCaches(); // serving may outlive the session; drop ~140MB
+        if (copied) {
+            if (f.win.clipboardPng()) |data| f.keep(data, "");
+        }
+        if (f.win.hasClipboard()) try f.win.serveClipboard();
+    }
+
+    /// Save (`quick`: to the screenshots folder) or Save As. False when
+    /// the file chooser was cancelled.
+    fn saved(f: Finish, quick: bool, data: []const u8) !bool {
+        const gpa = f.gpa;
+        if (f.cfg.copy_on_save) {
+            const copy = try gpa.dupe(u8, data);
+            f.win.setClipboardPng(copy) catch |err| {
+                gpa.free(copy);
+                std.log.warn("copy-on-save failed: {t}", .{err});
+            };
+        }
+        f.win.closeWindow();
+        f.ed.releaseCaches();
+        const path = (if (quick)
+            try savePng(gpa, f.env, f.cfg, data)
+        else
+            try saveAs(gpa, f.env, f.conn, f.cfg, data)) orelse return false;
+        defer gpa.free(path);
+        var buf: [512]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
+        if (f.cfg.notify) portal.notify(gpa, f.conn, "Shotlet", msg);
+        f.keep(data, path);
+        if (f.win.hasClipboard()) try f.win.serveClipboard();
+        return true;
+    }
+
+    /// Keeps the capture for the history (and quick access).
+    fn keep(f: Finish, data: []const u8, saved_path: []const u8) void {
+        const ed = f.ed;
+        if (keep_mod.keep(f.gpa, f.env, f.cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace })) |k| {
+            if (f.cfg.quick_access) keep_mod.spawnQuick(f.gpa, f.env, &k);
+        }
+    }
+};
 
 /// `shotlet edit ROOT ID`: open a kept capture in the editor again, with
 /// its annotations; Copy or Save update the same entry.
 pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !void {
-    const window = @import("../ui/window.zig");
     if (!history.Id.valid(id)) return error.BadId;
     var path_buf: [1200]u8 = undefined;
     const src_data = try sys.readFileAlloc(gpa, try history.entryPath(&path_buf, root, id, "source.png"), 256 * 1024 * 1024);
@@ -285,37 +345,12 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
 pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
-    const pw = @import("../platform/pw.zig");
-
-    if (from.shell) |args| {
-        const t_load = nowMs();
-        const cap = try shellcap.load(gpa, env.runtime_dir, args);
-        std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
-        return cap;
-    }
-    if (from.image) |img| return try capture.Capture.single(gpa, img);
-    if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
-    if (from.file) |path| {
-        const data = try sys.readFileAlloc(gpa, path, 256 * 1024 * 1024);
-        defer gpa.free(data);
-        var img = try png.decode(gpa, data);
-        errdefer img.deinit(gpa);
-        return try capture.Capture.single(gpa, img);
-    }
-
+    if (from.any()) return try fromGiven(gpa, env, from);
     // the desktop's own capture interface: no consent dialog
     if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
-        if (direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn)) |res| switch (res) {
-            .captured => |c| {
-                std.log.info("capture path: direct ({s})", .{c.method.label()});
-                direct.remember(env.home, .direct);
-                return c.cap;
-            },
-            .unavailable => |why| std.log.info("capture path: no direct capture ({s}); the portal", .{why}),
-        } else |err| std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
+        if (tryDirect(gpa, env, conn)) |cap| return cap;
     }
-
-    if (pw.available()) {
+    if (@import("../platform/pw.zig").available()) {
         switch (screencast(gpa, env, conn, cfg)) {
             .granted => |cap| {
                 std.log.info("capture path: portal (ScreenCast)", .{});
@@ -328,7 +363,49 @@ pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
             .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
     }
+    return screenshotPortal(gpa, env, conn);
+}
 
+/// A capture that is already taken: by the GNOME extension, KWin, or a
+/// dev source.
+fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
+    if (from.shell) |args| {
+        const t_load = nowMs();
+        const cap = try shellcap.load(gpa, env.runtime_dir, args);
+        std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
+        return cap;
+    }
+    if (from.image) |img| return try capture.Capture.single(gpa, img);
+    if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
+    const data = try sys.readFileAlloc(gpa, from.file.?, 256 * 1024 * 1024);
+    defer gpa.free(data);
+    var img = try png.decode(gpa, data);
+    errdefer img.deinit(gpa);
+    return try capture.Capture.single(gpa, img);
+}
+
+/// The compositor's own capture interface; null (logged) when there is
+/// none or it failed, for the portal to take over.
+fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.Capture {
+    const res = direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn) catch |err| {
+        std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
+        return null;
+    };
+    switch (res) {
+        .captured => |c| {
+            std.log.info("capture path: direct ({s})", .{c.method.label()});
+            direct.remember(env.home, .direct);
+            return c.cap;
+        },
+        .unavailable => |why| {
+            std.log.info("capture path: no direct capture ({s}); the portal", .{why});
+            return null;
+        },
+    }
+}
+
+/// The Screenshot portal, the last resort; null when cancelled.
+fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?capture.Capture {
     std.log.info("capture path: portal (Screenshot)", .{});
     direct.remember(env.home, .portal);
     const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
@@ -351,195 +428,6 @@ pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
 fn dialogTimedOut() ?capture.Capture {
     std.log.info("the permission dialog got no answer; closed it and stopped", .{});
     return null;
-}
-
-/// ScreenCast + PipeWire: one frame from every monitor, stitched. Errors
-/// after the portal said yes count as "unavailable" so the caller can fall
-/// back to the Screenshot portal.
-fn screencast(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config) portal.Result(capture.Capture) {
-    return screencastInner(gpa, env, conn, cfg) catch |err| {
-        std.log.info("screencast capture failed ({t})", .{err});
-        return .unavailable;
-    };
-}
-
-fn screencastInner(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config) !portal.Result(capture.Capture) {
-    const pw = @import("../platform/pw.zig");
-    const Res = portal.Result(capture.Capture);
-    const ts0 = nowMs();
-
-    const session_path = switch (try portal.scCreateSession(gpa, conn)) {
-        .granted => |p| p,
-        else => |o| return passOn(Res, o),
-    };
-    defer gpa.free(session_path);
-    // the session must be closed on every path, and as early as possible:
-    // GNOME's screen-sharing indicator must only blink during the grab
-    var open = true;
-    defer if (open) portal.closeSession(gpa, conn, session_path);
-
-    var started = switch (try portal.scSelectAndStart(gpa, conn, session_path, cfg.scToken())) {
-        .granted => |st| st,
-        else => |o| return passOn(Res, o),
-    };
-    defer started.deinit(gpa);
-    if (started.restore_token) |t| {
-        cfg.setScToken(t);
-        // only this key: never write back a stale snapshot of the rest
-        config.saveScreencastToken(gpa, env.home, t) catch |err|
-            std.log.warn("could not store the screencast token: {t}", .{err});
-    }
-
-    for (started.streams) |st| std.log.debug("screencast stream: node {d} position {?any} size {?any}", .{ st.node_id, st.position, st.size });
-    const fd = try portal.scOpenRemote(gpa, conn, session_path);
-    const streams = started.streams[0..@min(started.streams.len, pw.max_nodes)];
-    var node_ids: [pw.max_nodes]u32 = undefined;
-    for (streams, 0..) |st, i| node_ids[i] = st.node_id;
-
-    const ts1 = nowMs();
-    var frames: [pw.max_nodes]pw.Frame = undefined;
-    try pw.grabFrames(fd, node_ids[0..streams.len], frames[0..streams.len], 5000);
-    defer for (frames[0..streams.len]) |*f| f.deinit();
-    const ts2 = nowMs();
-    portal.closeSession(gpa, conn, session_path);
-    open = false;
-
-    var parts: [pw.max_nodes]capture.Part = undefined;
-    for (streams, frames[0..streams.len], 0..) |st, f, i| {
-        parts[i] = .{ .pixels = f.pixels, .width = f.width, .height = f.height };
-        if (st.position != null and st.size != null) {
-            parts[i].logical = .{
-                .x = st.position.?[0],
-                .y = st.position.?[1],
-                .w = @intCast(st.size.?[0]),
-                .h = @intCast(st.size.?[1]),
-            };
-        }
-    }
-    const cap = try capture.stitch(gpa, parts[0..streams.len]);
-    std.log.info("  capture detail: monitors={d} session={d} grab={d} close+stitch={d}ms", .{
-        streams.len, ts1 - ts0, ts2 - ts1, nowMs() - ts2,
-    });
-    return .{ .granted = cap };
-}
-
-fn passOn(comptime R: type, o: anytype) R {
-    return switch (o) {
-        .granted => unreachable,
-        .cancelled => .cancelled,
-        .denied => .denied,
-        .unavailable => .unavailable,
-        .timeout => .timeout,
-    };
-}
-
-// --- saving ---
-
-/// Where screenshots go: the configured save_dir (with ~ expanded), else the
-/// user's XDG Pictures directory.
-fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, buf: []u8) ![]u8 {
-    if (cfg.saveDir()) |d| return env_mod.expandHome(buf, env.home, d);
-    return env_mod.picturesDir(gpa, buf, env.home);
-}
-
-/// "shotlet-20260701-140501" in local time.
-pub fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
-    const lt = clock.localTime(gpa, env.tz, sys.realtimeSec());
-    return std.fmt.bufPrint(buf, "shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}", .{
-        lt.year, lt.month, lt.day, lt.hour, lt.minute, lt.second,
-    });
-}
-
-/// Save into the screenshots folder. Returns the path written (owned).
-pub fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
-    var dir_buf: [1024]u8 = undefined;
-    const dir = try saveDir(gpa, env, cfg, &dir_buf);
-    sys.mkdirAll(dir, 0o755); // best effort; may already exist
-    var name_buf: [64]u8 = undefined;
-    return writeUnique(gpa, dir, try baseName(gpa, env, &name_buf), ".png", data);
-}
-
-/// Write `<dir>/<base><ext>`, or `<base>-2<ext>`, `-3`, ... when taken.
-/// Never overwrites: each attempt is an O_EXCL create.
-pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ext: []const u8, data: []const u8) ![]u8 {
-    var n: u32 = 1;
-    while (n < 10_000) : (n += 1) {
-        const path = if (n == 1)
-            try std.fmt.allocPrint(gpa, "{s}/{s}{s}", .{ dir, base, ext })
-        else
-            try std.fmt.allocPrint(gpa, "{s}/{s}-{d}{s}", .{ dir, base, n, ext });
-        errdefer gpa.free(path);
-        sys.writeFileExclusive(path, data, 0o644) catch |err| switch (err) {
-            error.PathAlreadyExists => {
-                gpa.free(path);
-                continue;
-            },
-            else => return err,
-        };
-        return path;
-    }
-    return error.TooManyCollisions;
-}
-
-/// Ask where to save with the FileChooser portal. Null when the person
-/// cancelled (nothing is written). Falls back to the screenshots folder
-/// when there is no FileChooser portal.
-pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
-    var dir_buf: [1024]u8 = undefined;
-    const dir = try saveDir(gpa, env, cfg, &dir_buf);
-    sys.mkdirAll(dir, 0o755);
-    var name_buf: [64]u8 = undefined;
-    const base = try baseName(gpa, env, &name_buf);
-    var file_buf: [80]u8 = undefined;
-    const current_name = try std.fmt.bufPrint(&file_buf, "{s}.png", .{base});
-
-    const path = switch (try portal.saveFile(gpa, conn, .{ .current_name = current_name, .current_folder = dir })) {
-        .granted => |p| p,
-        .cancelled, .denied, .timeout => return null,
-        .unavailable => {
-            std.log.warn("no file chooser portal; saving to {s}", .{dir});
-            return try savePng(gpa, env, cfg, data);
-        },
-    };
-    errdefer gpa.free(path);
-    if (std.ascii.endsWithIgnoreCase(path, ".png")) {
-        // the chooser already confirmed replacing an existing file
-        try sys.writeFile(path, data);
-        return path;
-    }
-    // a name typed without extension: add one, but never replace a file
-    // the chooser did not ask about
-    defer gpa.free(path);
-    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return error.BadPath;
-    return try writeUnique(gpa, path[0..slash], path[slash + 1 ..], ".png", data);
-}
-
-test "saved names never overwrite" {
-    const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-
-    const a = try writeUnique(gpa, dir, "shot", ".png", "one");
-    defer gpa.free(a);
-    const b = try writeUnique(gpa, dir, "shot", ".png", "two");
-    defer gpa.free(b);
-    const c = try writeUnique(gpa, dir, "shot", ".png", "three");
-    defer gpa.free(c);
-    try std.testing.expect(std.mem.endsWith(u8, a, "/shot.png"));
-    try std.testing.expect(std.mem.endsWith(u8, b, "/shot-2.png"));
-    try std.testing.expect(std.mem.endsWith(u8, c, "/shot-3.png"));
-    const first = try sys.readFileAlloc(gpa, a, 64);
-    defer gpa.free(first);
-    try std.testing.expectEqualStrings("one", first);
-
-    // a symlink in the way is not followed
-    var link_buf: [512]u8 = undefined;
-    const link = try std.fmt.bufPrint(&link_buf, "{s}/l.png\x00", .{dir});
-    _ = std.os.linux.symlinkat("/nonexistent-target", std.os.linux.AT.FDCWD, @ptrCast(link.ptr));
-    const d = try writeUnique(gpa, dir, "l", ".png", "x");
-    defer gpa.free(d);
-    try std.testing.expect(std.mem.endsWith(u8, d, "/l-2.png"));
 }
 
 /// Dev: stitch one PNG per monitor, placed left to right in a logical

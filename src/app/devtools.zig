@@ -10,6 +10,7 @@ const Env = @import("env.zig").Env;
 const nowMs = @import("shot.zig").nowMs;
 const pw = @import("../platform/pw.zig");
 const capture = @import("capture.zig");
+const stitchStreams = @import("shot/screencast.zig").stitchStreams;
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
 
@@ -102,17 +103,7 @@ fn grabAndStitch(gpa: std.mem.Allocator, conn: *dbus.Connection, sc: *const port
     try pw.grabFrames(sc.pw_fd, ids[0..streams.len], frames[0..streams.len], 5000);
     defer for (frames[0..streams.len]) |*f| f.deinit();
     portal.closeSession(gpa, conn, sc.session_path);
-    var parts: [pw.max_nodes]capture.Part = undefined;
-    for (streams, frames[0..streams.len], 0..) |st, f, i| {
-        parts[i] = .{ .pixels = f.pixels, .width = f.width, .height = f.height };
-        if (st.position != null and st.size != null) parts[i].logical = .{
-            .x = st.position.?[0],
-            .y = st.position.?[1],
-            .w = @intCast(st.size.?[0]),
-            .h = @intCast(st.size.?[1]),
-        };
-    }
-    return capture.stitch(gpa, parts[0..streams.len]);
+    return stitchStreams(gpa, streams, frames[0..streams.len]);
 }
 
 /// `test-font`: renders sample text to a PNG; `test-font "line|line..."
