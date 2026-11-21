@@ -79,6 +79,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
         };
         switch (action) {
             .capture => spawnChild(env, "shot"),
+            .history => spawnChild(env, "history"),
             .settings => spawnChild(env, "settings"),
             .quit => return,
             .none => {},

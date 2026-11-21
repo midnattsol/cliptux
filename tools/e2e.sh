@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime"
+scenarios="capture cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history"
 
 # ---------------------------------------------------------------- inner side
 if [ "${1:-}" = "--inner" ]; then
@@ -63,6 +63,31 @@ if [ "${1:-}" = "--inner" ]; then
         drv sleep 100 && drv up
     }
     shot() { drv shot "$1" "$OUT/$2.png" >/dev/null; }
+    slow_drag() { # slow_drag MON X0 Y0 X1 Y1 ...: like a hand, a pause per point
+        local mon=$1
+        # mutter only gives a window that just moved under a still pointer
+        # the pointer on the next motion: arrive in two steps
+        drv move "$mon" $(($2 - 4)) "$3" && drv sleep 150 &&
+            drv move "$mon" "$2" "$3" && drv sleep 150 && drv down || return 1
+        shift 3
+        while [ $# -ge 2 ]; do drv move "$mon" "$1" "$2" && drv sleep 200 || return 1; shift 2; done
+        drv sleep 300 && drv up
+    }
+    shown_count() { cat "$OUT"/*.log 2>/dev/null | grep -cE "quick access: (showing|added)"; }
+    # new_card N: wait until more than N thumbnails were shown in all
+    new_card() {
+        local i
+        for i in $(seq 1 100); do [ "$(shown_count)" -gt "$1" ] && { sleep 1; return 0; }; sleep 0.1; done
+        return 1
+    }
+    any_log() { # any_log SECONDS PATTERN: in any shotlet log of this scenario
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            grep -qE "$2" "$OUT"/*.log 2>/dev/null && return 0
+            sleep 0.1
+        done
+        return 1
+    }
 
     # --- shotlet
     SHOT_PID=
@@ -179,7 +204,256 @@ if [ "${1:-}" = "--inner" ]; then
         press_button "$mon"
     }
 
+    # --- another app: a maximized GTK window reporting focus, typing,
+    # clicks and drops (tools/e2e/target.py) on $OUT/target.log
+    TGT_PID=
+    start_target() { # start_target [MIME...]
+        local i
+        : >"$OUT/target.log"
+        env ${TGT_DEBUG:+WAYLAND_DEBUG=client} "$PYGTK" "$ROOT/tools/e2e/target.py" "$@" >>"$OUT/target.log" 2>>"$OUT/target.err" &
+        TGT_PID=$!
+        for i in $(seq 1 50); do grep -q "^active True" "$OUT/target.log" && return 0; sleep 0.2; done
+        return 1
+    }
+    # a window taking drops (tools/e2e/droptarget.zig) on $OUT/drop.log
+    start_droptarget() { # start_droptarget [MIME...]
+        local i
+        : >"$OUT/drop.log"
+        "$(dirname "$DRIVE")/shotlet-droptarget" "$@" >>"$OUT/drop.log" 2>>"$OUT/drop.err" &
+        for i in $(seq 1 50); do grep -q "^ready" "$OUT/drop.log" && { sleep 0.8; return 0; }; sleep 0.2; done
+        return 1
+    }
+    drop_said() { # drop_said SECONDS PATTERN
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            grep -qE "$2" "$OUT/drop.log" 2>/dev/null && return 0
+            sleep 0.1
+        done
+        return 1
+    }
+    target_said() { # target_said SECONDS PATTERN
+        local i
+        for i in $(seq 1 $(($1 * 10))); do
+            grep -qE "$2" "$OUT/target.log" 2>/dev/null && return 0
+            sleep 0.1
+        done
+        return 1
+    }
+    # the thumbnail stack's newest card: bottom-left, 32 px from the
+    # edges, 240x150 (8 px window gap + 28 px shadow margin; monitor 0 is 1600x900, no bottom panel)
+    CARD_X0=36 CARD_Y1=864
+    card_point() { # card_point DX DY: a point DX right, DY up from the card's bottom-left
+        echo "$((CARD_X0 + $1)) $((CARD_Y1 - $2))"
+    }
+    # a capture with a red filled rectangle in it, copied with Enter
+    red_capture() { # red_capture NAME [first]
+        run_shotlet "$1"
+        if [ "${2:-}" = first ]; then share_dialog 0 || return 1; fi
+        wait_editor 10 || return 1
+        drag 0 400 200 0 700 400 0 900 500
+        keys r f
+        drag 0 500 300 0 650 380 0 800 420
+        sleep 0.3
+        keys enter
+    }
+    quick_cfg() { # settings for the quick-access scenarios
+        mkdir -p "$HOME/.config/shotlet"
+        printf 'quick_access_seconds=600\n' >>"$HOME/.config/shotlet/config"
+    }
+
     case $scenario in
+    capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime)
+        # these check what happens without the floating thumbnail
+        mkdir -p "$HOME/.config/shotlet"
+        printf 'quick_access=false\n' >"$HOME/.config/shotlet/config"
+        ;;
+    esac
+
+    case $scenario in
+    quick)
+        # with the Shotlet GNOME Shell extension (HL_EXTENSIONS)
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        check "another app is up and focused" start_target
+        drv move 0 800 450
+        red_capture first first
+        check "thumbnail process starts after Copy" wait_log 10 "quick access: showing"
+        check "  ... placed by the GNOME extension" grep -q "placed by the GNOME extension" "$SHOT_LOG"
+        sleep 1.5
+        shot 0 thumb
+        check "thumbnail shows bottom-left" drv find 0 ff453a 40 4 0 700 300 900
+        check "  ... above the other app (not covered)" drv find 0 ff453a 40 4 0 700 300 900
+        keys a b c
+        check "the other app keeps the keyboard focus (typing reaches it)" target_said 3 "^text abc"
+        # hover: the veil and buttons; Copy
+        read -r x y <<<"$(card_point 120 75)"
+        drv move 0 "$x" "$y"
+        sleep 0.4
+        shot 0 hover
+        : >"$OUT/clip-before"
+        timeout 5 wl-copy -- "something else" &
+        sleep 0.5
+        read -r x y <<<"$(card_point 60 23)"
+        click 0 "$x" "$y"
+        sleep 1
+        check "thumbnail Copy puts the PNG back on the clipboard" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
+        shot 0 copied
+        # a click beside the card (its transparent margin) reaches the app
+        : >"$OUT/target.clicks"
+        n0=$(grep -c "^click" "$OUT/target.log")
+        click 0 16 884
+        sleep 0.5
+        check "a click beside the thumbnail reaches the window below" test "$(grep -c "^click" "$OUT/target.log")" -gt "$n0"
+        click 0 800 300
+        sleep 0.8
+        shot 0 after-click
+        check "  ... and the thumbnail stays above it" drv find 0 ff453a 40 4 0 700 300 900
+        # drag out into the app
+        read -r x y <<<"$(card_point 120 75)"
+        slow_drag 0 "$x" "$y" $((x + 40)) $((y - 40)) 400 500 600 400 800 300
+        check "dragging the thumbnail drops the image into a GTK app" target_said 5 "^drop texture 500 300"
+        check "  ... and the thumbnail goes away" any_log 5 "quick access: dropped"
+        sleep 0.5
+        shot 0 dropped
+        check "  ... from the screen" no_find_exact 0 ff453a 40 4 0 700 300 900
+        # as a file: an app that asks for text/uri-list
+        check "a drop target for files is up" start_droptarget text/uri-list
+        n=$(shown_count)
+        red_capture third
+        new_card "$n"
+        read -r x y <<<"$(card_point 120 75)"
+        slow_drag 0 "$x" "$y" $((x + 40)) $((y - 40)) 400 500 600 400 800 300
+        check "  ... and as a file (text/uri-list)" drop_said 5 "^drop text/uri-list [0-9]+ file:///"
+        f=$(grep -o "file://[^ ]*" "$OUT/drop.log" | head -1 | sed 's|^file://||')
+        check "  ... naming a PNG named after the capture time" eq "$(png_size "$f")" 500x300
+        pkill -f shotlet-droptarget
+
+        # pin: a second capture, pinned
+        n=$(shown_count)
+        red_capture second
+        new_card "$n"
+        read -r x y <<<"$(card_point 120 75)"
+        drv move 0 "$x" "$y"
+        sleep 0.3
+        read -r x y <<<"$(card_point $((240 - 21)) $((150 - 21)))"
+        click 0 "$x" "$y"
+        check "Pin opens a pinned window" any_log 5 "pin: showing"
+        sleep 1
+        shot 0 pinned
+        click 0 1500 100
+        sleep 0.8
+        shot 0 pinned-after-click
+        check "  ... that stays above after clicking the app" drv find 0 ff453a 40 4
+        ;;
+    quick-plain)
+        # no extension: the thumbnail is an ordinary window, still usable
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        start_target
+        drv move 0 800 450
+        red_capture plain first
+        check "thumbnail shown without the extension" wait_log 10 "quick access: showing .*plain window"
+        sleep 1.5
+        shot 0 thumb
+        check "  ... somewhere on screen" drv find 0 ff453a 40 4
+        check "  ... with the integration hint" grep -q "no Shotlet GNOME Shell extension" "$SHOT_LOG"
+        keys ctrl+c
+        sleep 1
+        check "  ... and its Ctrl+C copies" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
+        keys esc
+        check "Esc closes it" wait_log 5 "quick access: closed"
+        ;;
+    annotate)
+        # Annotate on the thumbnail reopens the editor with the shapes
+        # still editable; its Copy updates the same capture
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        start_target
+        drv move 0 800 450
+        red_capture first first
+        check "thumbnail shown" wait_log 10 "quick access: showing"
+        sleep 1
+        clip_png "$OUT/orig.png"
+        drv pixel "$OUT/orig.png" 150 140
+        check "the copy has the red rectangle" test "${VAL:2:6}" = ff453a
+        read -r x y <<<"$(card_point 120 75)"
+        drv move 0 "$x" "$y"
+        sleep 0.3
+        read -r x y <<<"$(card_point 187 129)"
+        click 0 "$x" "$y"
+        check "Annotate reopens the editor" any_log 10 "editing [0-9a-f-]+ again"
+        sleep 1.5
+        shot 0 reopened
+        # the 500x300 capture sits centred: the rectangle at 650..800, 400..480
+        check "  ... with the previous annotations" drv find 0 ff453a 40 4 600 350 1000 550
+        keys v
+        click 0 725 440
+        drv sleep 200
+        keys delete
+        sleep 0.3
+        shot 0 deleted
+        check "  ... which can be selected and deleted" no_find_exact 0 ff453a 40 4 600 350 1000 550
+        keys enter
+        sleep 1.5
+        clip_png "$OUT/edited.png"
+        check "  ... and Copy gives the edited image" eq "$(png_size "$OUT/edited.png")" 500x300
+        drv pixel "$OUT/edited.png" 150 140
+        check "  ... without the rectangle" test "${VAL:2:6}" != ff453a
+        n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+        check "  ... updating the same history entry" eq "$n" 1
+        ;;
+    history)
+        quick_cfg
+        drv_start Meta-0 || { fail "driver"; exit 1; }
+        drv key esc
+        drv move 0 800 450
+        red_capture one first
+        wait_log 10 "quick access: showing"
+        sleep 0.5
+        n=$(shown_count)
+        run_shotlet two
+        wait_editor 10
+        drag 0 100 100 0 300 250
+        keys ctrl+s
+        new_card "$n"
+        n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+        check "copied and saved captures are kept" eq "$n" 2
+        grep -l "saved=" "$HOME"/.local/state/shotlet/history/*/meta >/dev/null
+        check "  ... the saved one with its path" test $? = 0
+        pkill -f "shotlet quick" 2>/dev/null
+        SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
+        check "Recent captures lists both" wait_log 5 "history: 2 captures"
+        check "  ... without a search field when Tesseract is missing" wait_log 5 "text search off|text search on"
+        sleep 1
+        shot 0 panel
+        keys tab
+        sleep 0.2
+        shot 0 picked
+        keys enter
+        sleep 0.5
+        check "Enter copies the picked capture" wait_log 5 "history: copied"
+        check "  ... as a PNG" clip_png "$OUT/hclip.png"
+        keys delete
+        check "Delete removes it" wait_log 5 "history: deleted"
+        sleep 0.3
+        shot 0 after-delete
+        keys esc esc
+        wait_exit 5
+        pkill -f "shotlet (quick|history|pin)" 2>/dev/null
+        sleep 0.5
+        run_shotlet again history
+        check "the history survives a restart" wait_log 5 "history: 1 captures"
+        keys esc esc
+        wait_exit 5
+        "$BIN" history clear >/dev/null 2>&1
+        run_shotlet cleared history
+        check "history clear empties it" wait_log 5 "history: 0 captures"
+        keys esc
+        wait_exit 5
+        ;;
     capture)
         drv_start Meta-0 || { fail "driver"; exit 1; }
         drv key esc # leave the overview the session starts in
@@ -639,6 +913,7 @@ if [ "${1:-}" = "--inner" ]; then
     esac
     stop_shotlet
     pkill -P $$ 2>/dev/null
+    cp "$HL_SHELL_LOG" "$OUT/shell.log" 2>/dev/null
     exit $failed
 fi
 
@@ -666,6 +941,12 @@ for f in "$BIN" "$DRIVE"; do
     [ -x "$f" ] || { echo "e2e: $f not built (zig build e2e-driver)" >&2; exit 2; }
 done
 BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE")
+# a Python with GTK 4 bindings plays "another app" (python3-gi, gir1.2-gtk-4.0)
+PYGTK=
+for p in /usr/bin/python3 python3; do
+    "$p" -c 'import gi; gi.require_version("Gtk", "4.0")' 2>/dev/null && { PYGTK=$p; break; }
+done
+export PYGTK
 
 keep=${E2E_OUT:+1}
 E2E_OUT=${E2E_OUT:-$(mktemp -d -t shotlet-e2e-out.XXXXXX)}
@@ -684,14 +965,17 @@ for s in $want; do
         mixed | fractional | integer) mons="2560x1440 1280x720" ;;
         keyboard | clipboard) layout=es ;;
     esac
-    ibus= apps= app_id=
+    ibus= apps= app_id= exts=
     [ "$s" = ime ] && ibus=hangul
+    case $s in
+        quick | annotate | history) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;;
+    esac
     if [ "$s" = fallback ]; then
         # GNOME maps windows to apps through .desktop files whose Exec exists
         sed "s|^Exec=.*|Exec=$BIN --daemon|" "$ROOT/shotlet.desktop" >"$E2E_OUT/shotlet.desktop"
         apps=$E2E_OUT/shotlet.desktop app_id=shotlet
     fi
-    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_PORTAL_APP_ID=$app_id timeout 300 \
+    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_PORTAL_APP_ID=$app_id HL_EXTENSIONS=$exts timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$s" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
         while IFS= read -r line; do

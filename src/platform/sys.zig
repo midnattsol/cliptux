@@ -72,6 +72,13 @@ pub fn realtimeSec() i64 {
     return ts.sec;
 }
 
+/// Milliseconds since the epoch (UTC).
+pub fn realtimeMs() i64 {
+    var ts: linux.timespec = undefined;
+    _ = linux.clock_gettime(.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+}
+
 /// Fill `buf` from the kernel CSPRNG.
 pub fn getRandom(buf: []u8) void {
     var off: usize = 0;
@@ -456,6 +463,74 @@ fn removeTreeDepth(path: []const u8, depth: usize) void {
     @memcpy(pathz[0..path.len], path);
     pathz[path.len] = 0;
     _ = linux.unlinkat(linux.AT.FDCWD, pathz[0..path.len :0].ptr, linux.AT.REMOVEDIR);
+}
+
+/// Names in a directory (no "." or ".."), each with whether it is a
+/// directory. Caller frees with freeNames.
+pub const DirEntry = struct { name: []u8, is_dir: bool };
+
+pub fn listDir(alloc: std.mem.Allocator, path: []const u8) ![]DirEntry {
+    const dfd = try openDir(path);
+    defer close(dfd);
+    var out: std.ArrayList(DirEntry) = .empty;
+    errdefer freeNames(alloc, out.items);
+    errdefer out.deinit(alloc);
+    var buf: [8192]u8 align(8) = undefined;
+    while (true) {
+        const n = linux.getdents64(dfd, &buf, buf.len);
+        if (linux.errno(n) != .SUCCESS) return error.SyscallFailed;
+        if (n == 0) break;
+        var off: usize = 0;
+        while (off < n) {
+            const ent: *const linux.dirent64 = @ptrCast(@alignCast(&buf[off]));
+            const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&buf[off + @offsetOf(linux.dirent64, "name")])), 0);
+            off += ent.reclen;
+            if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+            const copy = try alloc.dupe(u8, name);
+            out.append(alloc, .{ .name = copy, .is_dir = ent.type == 4 }) catch |err| {
+                alloc.free(copy);
+                return err;
+            };
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+pub fn freeNames(alloc: std.mem.Allocator, list: []const DirEntry) void {
+    for (list) |e| alloc.free(e.name);
+}
+
+/// Bind a listening unix stream socket at `path` (non-blocking accept).
+pub fn listenUnix(path: []const u8) !fd_t {
+    const fd = try check(linux.socket(linux.AF.UNIX, linux.SOCK.STREAM | linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK, 0));
+    errdefer close(@intCast(fd));
+    var sa: linux.sockaddr.un = .{ .family = linux.AF.UNIX, .path = @splat(0) };
+    if (path.len >= sa.path.len) return error.PathTooLong;
+    @memcpy(sa.path[0..path.len], path);
+    const rc = linux.bind(@intCast(fd), @ptrCast(&sa), @sizeOf(linux.sockaddr.un));
+    if (linux.errno(rc) == .ADDRINUSE) return error.AddressInUse;
+    _ = try check(rc);
+    _ = try check(linux.listen(@intCast(fd), 8));
+    return @intCast(fd);
+}
+
+/// Accept one pending connection (null when none is waiting).
+pub fn accept(fd: fd_t) !?fd_t {
+    const rc = linux.accept4(fd, null, null, linux.SOCK.CLOEXEC);
+    if (linux.errno(rc) == .AGAIN) return null;
+    return @intCast(try check(rc));
+}
+
+/// Seconds since the epoch of a file's last change; null when missing.
+pub fn mtimeSec(path: []const u8) ?i64 {
+    var pathz: [4096]u8 = undefined;
+    if (path.len >= pathz.len) return null;
+    @memcpy(pathz[0..path.len], path);
+    pathz[path.len] = 0;
+    var stx: linux.Statx = undefined;
+    const rc = linux.statx(linux.AT.FDCWD, pathz[0..path.len :0].ptr, 0, .{ .MTIME = true }, &stx);
+    if (linux.errno(rc) != .SUCCESS) return null;
+    return stx.mtime.sec;
 }
 
 pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) ![]u8 {

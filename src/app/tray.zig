@@ -11,7 +11,7 @@ const sni_iface = "org.kde.StatusNotifierItem";
 const menu_iface = "com.canonical.dbusmenu";
 const props_iface = "org.freedesktop.DBus.Properties";
 
-pub const MenuAction = enum { capture, settings, quit, none };
+pub const MenuAction = enum { capture, history, settings, quit, none };
 
 pub const Tray = struct {
     alloc: std.mem.Allocator,
@@ -206,6 +206,7 @@ pub const Tray = struct {
 
     const menu_items = [_]struct { id: i32, label: []const u8, separator: bool }{
         .{ .id = 1, .label = "Take screenshot", .separator = false },
+        .{ .id = 5, .label = "Recent captures…", .separator = false },
         .{ .id = 2, .label = "Settings", .separator = false },
         .{ .id = 3, .label = "", .separator = true },
         .{ .id = 4, .label = "Quit", .separator = false },
@@ -289,6 +290,7 @@ pub const Tray = struct {
             if (std.mem.eql(u8, event_type, "clicked")) {
                 return switch (id) {
                     1 => .capture,
+                    5 => .history,
                     2 => .settings,
                     4 => .quit,
                     else => .none,
@@ -476,4 +478,36 @@ test "tray answers with the declared types, and errors for unknown objects" {
         try std.testing.expectEqual(@as(?u32, 77), reply.reply_serial);
         try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownObject", reply.error_name.?);
     }
+}
+
+test "menu items map to their actions, Recent captures included" {
+    const alloc = std.testing.allocator;
+    const fds = try @import("../platform/sys.zig").socketPair();
+    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    defer host.deinit();
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    defer ours.deinit();
+    var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
+    for ([_]struct { id: i32, want: MenuAction }{
+        .{ .id = 1, .want = .capture },
+        .{ .id = 5, .want = .history },
+        .{ .id = 2, .want = .settings },
+        .{ .id = 4, .want = .quit },
+        .{ .id = 99, .want = .none },
+    }) |c| {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putI32(c.id);
+        try m.putString("clicked");
+        try m.putSignature("i");
+        try m.putI32(0);
+        try m.putU32(0);
+        var call = testCall(menu_path, menu_iface, "Event", m.buf.items);
+        try std.testing.expectEqual(c.want, try tray.handleMessage(&call));
+        var reply = try host.readMessage();
+        reply.deinit(alloc);
+    }
+    var found = false;
+    for (Tray.menu_items) |item| found = found or std.mem.eql(u8, item.label, "Recent captures…");
+    try std.testing.expect(found);
 }

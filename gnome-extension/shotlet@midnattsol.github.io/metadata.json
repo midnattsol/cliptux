@@ -1,0 +1,8 @@
+{
+  "uuid": "shotlet@midnattsol.github.io",
+  "name": "Shotlet integration",
+  "description": "Lets Shotlet's floating screenshot thumbnail sit in the bottom-left corner above other windows without taking the keyboard focus, and keeps pinned screenshots on top. Only windows of the Shotlet app (app id shotlet) are touched.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/midnattsol/shotlet",
+  "version": 1
+}

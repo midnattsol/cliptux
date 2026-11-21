@@ -11,6 +11,9 @@ const env_mod = @import("env.zig");
 const portal = @import("../platform/portal.zig");
 const png = @import("../gfx/png.zig");
 const sys = @import("../platform/sys.zig");
+const keep_mod = @import("keep.zig");
+const history = @import("history.zig");
+const annot = @import("annot.zig");
 const Env = env_mod.Env;
 
 fn warmupPw() void {
@@ -30,7 +33,6 @@ pub const From = struct {
 };
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
-    const editor_mod = @import("../ui/editor.zig");
     const window = @import("../ui/window.zig");
     const t0 = nowMs();
 
@@ -78,13 +80,26 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         t_capture - t_pw,
         t_open - t_capture,
     });
-    var ed = editor_mod.Editor.init(gpa, &win, &cap.image);
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null);
+}
+
+/// A kept capture opened again in the editor ("Annotate").
+const Reopen = struct {
+    kept: keep_mod.Kept,
+    doc: *const annot.Doc,
+};
+
+/// The editor, then whatever its result asks for: copy, save, save as;
+/// keeping the capture for quick access and the history.
+fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen) !void {
+    const editor_mod = @import("../ui/editor.zig");
+    var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
     // the desktop's light/dark preference, accent and reduced motion
     const theme = @import("../ui/theme.zig");
-    ed.setPrefs(theme.readPrefs(&conn, 1500));
-    theme.watch(&conn) catch {};
-    ed.bus = &conn;
+    ed.setPrefs(theme.readPrefs(conn, 1500));
+    theme.watch(conn) catch {};
+    ed.bus = conn;
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
@@ -99,15 +114,36 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     ed.show_hint = !cfg.hint_shown;
     ed.presetSelection(preset_sel);
     defer ed.deinit();
+    if (reopen) |r| {
+        // the shapes as they were, still editable
+        ed.show_hint = false;
+        ed.beautify = r.doc.beautify;
+        ed.doc.sel = r.doc.sel orelse ed.doc.imageRect();
+        for (r.doc.shapes.items) |*s| {
+            var c = try s.clone(gpa);
+            ed.doc.shapes.append(gpa, c) catch |err| {
+                c.deinit(gpa);
+                return err;
+            };
+        }
+    }
     while (true) {
         const result = try ed.run();
-        rememberEditorPrefs(gpa, env, &cfg, &ed);
+        if (reopen == null) rememberEditorPrefs(gpa, env, cfg, &ed);
         defer if (result.png_data) |d| gpa.free(d);
+        const replace: ?keep_mod.Kept = if (reopen) |r| r.kept else null;
 
         switch (result.action) {
             .cancel, .copied => {
                 win.closeWindow();
                 ed.releaseCaches(); // serving may outlive the session; drop ~140MB
+                if (result.action == .copied) {
+                    if (win.clipboardPng()) |data| {
+                        if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = &cap.image, .doc = &ed.doc, .beautify = ed.beautify, .replace = replace })) |k| {
+                            if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
+                        }
+                    }
+                }
                 if (win.hasClipboard()) try win.serveClipboard();
             },
             .save, .save_as => {
@@ -122,9 +158,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
                 win.closeWindow();
                 ed.releaseCaches();
                 const saved: ?[]u8 = if (result.action == .save)
-                    try savePng(gpa, env, &cfg, data)
+                    try savePng(gpa, env, cfg, data)
                 else
-                    try saveAs(gpa, env, &conn, &cfg, data);
+                    try saveAs(gpa, env, conn, cfg, data);
                 const path = saved orelse {
                     // the file chooser was cancelled: back to the editor,
                     // annotations intact, rather than losing the work
@@ -136,12 +172,51 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
                 defer gpa.free(path);
                 var buf: [512]u8 = undefined;
                 const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
-                if (cfg.notify) portal.notify(gpa, &conn, "Shotlet", msg);
+                if (cfg.notify) portal.notify(gpa, conn, "Shotlet", msg);
+                if (keep_mod.keep(gpa, env, cfg, .{ .image_png = data, .source = &cap.image, .doc = &ed.doc, .beautify = ed.beautify, .saved = path, .replace = replace })) |k| {
+                    if (cfg.quick_access) keep_mod.spawnQuick(gpa, env, &k);
+                }
                 if (win.hasClipboard()) try win.serveClipboard();
             },
         }
         return;
     }
+}
+
+/// `shotlet edit ROOT ID`: open a kept capture in the editor again, with
+/// its annotations; Copy or Save update the same entry.
+pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !void {
+    const window = @import("../ui/window.zig");
+    if (!history.Id.valid(id)) return error.BadId;
+    var path_buf: [1200]u8 = undefined;
+    const src_data = try sys.readFileAlloc(gpa, try history.entryPath(&path_buf, root, id, "source.png"), 256 * 1024 * 1024);
+    defer gpa.free(src_data);
+    const doc_data = try sys.readFileAlloc(gpa, try history.entryPath(&path_buf, root, id, "doc"), 64 * 1024 * 1024);
+    defer gpa.free(doc_data);
+    var doc = try annot.parse(gpa, doc_data);
+    defer doc.deinit(gpa);
+    var img = try png.decode(gpa, src_data);
+    var cap = capture.Capture.single(gpa, img) catch |err| {
+        img.deinit(gpa);
+        return err;
+    };
+    defer cap.deinit(gpa);
+
+    var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    defer conn.deinit();
+    var cfg = config.load(gpa, env.home);
+    const text = @import("../gfx/text.zig");
+    text.init(gpa);
+    defer text.deinit();
+    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    defer win.deinit();
+    try win.open("Shotlet", .{ .fullscreen = true });
+    std.log.info("editing {s} again", .{id});
+    var kept: keep_mod.Kept = .{ .id = history.Id.fromSlice(id).? };
+    if (root.len > kept.root_buf.len) return error.PathTooLong;
+    @memcpy(kept.root_buf[0..root.len], root);
+    kept.root_len = root.len;
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc });
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
@@ -387,7 +462,7 @@ fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, buf: []u
 }
 
 /// "shotlet-20260701-140501" in local time.
-fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
+pub fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
     const lt = clock.localTime(gpa, env.tz, sys.realtimeSec());
     return std.fmt.bufPrint(buf, "shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}", .{
         lt.year, lt.month, lt.day, lt.hour, lt.minute, lt.second,
@@ -395,7 +470,7 @@ fn baseName(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
 }
 
 /// Save into the screenshots folder. Returns the path written (owned).
-fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
+pub fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, data: []const u8) ![]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755); // best effort; may already exist
@@ -428,7 +503,7 @@ pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ex
 /// Ask where to save with the FileChooser portal. Null when the person
 /// cancelled (nothing is written). Falls back to the screenshots folder
 /// when there is no FileChooser portal.
-fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
+pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755);
