@@ -48,9 +48,17 @@ pub fn main(init: std.process.Init) !void {
     };
     const gpa = if (is_debug) gpa_state.allocator() else std.heap.smp_allocator;
 
+    const env = try readEnv(arena, init);
+    launch.env = env;
+    setXdgDirs(init.environ_map);
+    try dispatch(gpa, env, args);
+}
+
+/// The process environment Shotlet needs, from the variables.
+fn readEnv(arena: std.mem.Allocator, init: std.process.Init) !Env {
     const vars = init.environ_map;
     const runtime_dir = env_mod.absolute(vars.get("XDG_RUNTIME_DIR")) orelse return error.NoRuntimeDir;
-    const env: Env = .{
+    return .{
         // without an explicit address, use the per-user bus systemd and
         // dbus-broker put in the runtime dir
         .bus_addr = nonEmpty(vars.get("DBUS_SESSION_BUS_ADDRESS")) orelse
@@ -61,14 +69,19 @@ pub fn main(init: std.process.Init) !void {
         .envp = init.minimal.environ.block.slice.ptr,
         .tz = vars.get("TZ"),
     };
-    launch.env = env;
+}
+
+fn setXdgDirs(vars: anytype) void {
     env_mod.xdg = .{
         .config_home = env_mod.absolute(vars.get("XDG_CONFIG_HOME")),
         .state_home = env_mod.absolute(vars.get("XDG_STATE_HOME")),
         .pictures_dir = env_mod.absolute(vars.get("XDG_PICTURES_DIR")),
         .cache_home = env_mod.absolute(vars.get("XDG_CACHE_HOME")),
     };
+}
 
+/// Runs the command `args` name; unknown ones print the usage.
+fn dispatch(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
     // `shotlet --from-shell ID ...` is how the GNOME Shell extension
     // starts a capture: `shotlet shot --from-shell ID ...`
     const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
@@ -76,100 +89,35 @@ pub fn main(init: std.process.Init) !void {
     if (shell_launch) launch.takeHandOff(env.runtime_dir);
     // `shotlet text` is a capture whose region's text is copied
     if (std.mem.eql(u8, cmd, "text")) launch.text_capture = true;
+    const eql = std.mem.eql;
 
-    if (std.mem.eql(u8, cmd, "shot") or std.mem.eql(u8, cmd, "text")) {
-        // dev/testing flags: --from FILE (skip portal), --sel X,Y,W,H
-        // (preset selection), --smoke MS (auto-cancel, for leak runs),
-        // --from-monitors A.png,B.png (one image per monitor, side by side)
-        var from: ?[]const u8 = null;
-        var from_monitors: ?[]const u8 = null;
-        var from_shell: ?shellcap.Args = null;
-        var shell_monitors: []const u8 = "";
-        var shell_pieces: []const u8 = "";
-        var t0: ?i64 = null;
-        var sel: ?[4]i32 = null;
-        var smoke_ms: i64 = 0;
-        var then_record = false;
-        var req: @import("app/modes/mode.zig").Request = .{};
-        var i: usize = if (shell_launch) 1 else 2;
-        while (i + 1 < args.len) : (i += 2) {
-            if (std.mem.eql(u8, args[i], "--from")) {
-                from = args[i + 1];
-            } else if (std.mem.eql(u8, args[i], "--from-monitors")) {
-                from_monitors = args[i + 1];
-            } else if (std.mem.eql(u8, args[i], "--from-shell")) {
-                // the GNOME Shell extension's capture (src/app/shellcap.zig)
-                from_shell = .{ .id = args[i + 1] };
-            } else if (std.mem.eql(u8, args[i], "--monitors")) {
-                shell_monitors = args[i + 1];
-            } else if (std.mem.eql(u8, args[i], "--pieces")) {
-                shell_pieces = args[i + 1];
-            } else if (std.mem.eql(u8, args[i], "--then")) {
-                // the extension's record shortcut: the picker on this capture
-                if (std.mem.eql(u8, args[i + 1], "record")) then_record = true;
-            } else if (std.mem.eql(u8, args[i], "--mode")) {
-                req.withModeArg(args[i + 1]);
-            } else if (std.mem.eql(u8, args[i], "--pointer")) {
-                req.withPointerArg(args[i + 1]);
-            } else if (std.mem.eql(u8, args[i], "--t0")) {
-                t0 = std.fmt.parseInt(i64, args[i + 1], 10) catch null;
-            } else if (std.mem.eql(u8, args[i], "--smoke")) {
-                smoke_ms = std.fmt.parseInt(i64, args[i + 1], 10) catch 0;
-            } else if (std.mem.eql(u8, args[i], "--sel")) {
-                var it = std.mem.splitScalar(u8, args[i + 1], ',');
-                var vals: [4]i32 = undefined;
-                for (&vals) |*v| {
-                    v.* = std.fmt.parseInt(i32, it.next() orelse return error.BadSelArg, 10) catch return error.BadSelArg;
-                }
-                sel = vals;
-            }
-        }
-        if (from_shell) |*fs| {
-            fs.monitors = shell_monitors;
-            fs.pieces = shell_pieces;
-            fs.t0_ms = t0;
-        }
-        if (then_record and from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, from_shell.?);
-        try shot.run(gpa, env, .{ .file = from, .monitors = from_monitors, .shell = from_shell, .req = req }, sel, smoke_ms);
-    } else if (std.mem.eql(u8, cmd, "--daemon") or std.mem.eql(u8, cmd, "daemon")) {
+    if (eql(u8, cmd, "shot") or eql(u8, cmd, "text")) {
+        try runShot(gpa, env, args[@min(args.len, @as(usize, if (shell_launch) 1 else 2))..]);
+    } else if (eql(u8, cmd, "--daemon") or eql(u8, cmd, "daemon")) {
         const foreground = args.len > 2 and
-            (std.mem.eql(u8, args[2], "--foreground") or std.mem.eql(u8, args[2], "-f"));
+            (eql(u8, args[2], "--foreground") or eql(u8, args[2], "-f"));
         try daemon.run(gpa, env, foreground);
-    } else if (std.mem.eql(u8, cmd, "settings")) {
-        const smoke: i64 = if (args.len > 3 and std.mem.eql(u8, args[2], "--smoke"))
-            std.fmt.parseInt(i64, args[3], 10) catch 0
-        else
-            0;
-        try @import("ui/settings.zig").run(gpa, env, smoke);
-    } else if (std.mem.eql(u8, cmd, "quick") and args.len > 3) {
+    } else if (eql(u8, cmd, "settings")) {
+        try @import("ui/settings.zig").run(gpa, env, smokeArg(args));
+    } else if (eql(u8, cmd, "quick") and args.len > 3) {
         try @import("app/quick.zig").run(gpa, env, args[2], args[3]);
-    } else if (std.mem.eql(u8, cmd, "history")) {
-        if (args.len > 2 and std.mem.eql(u8, args[2], "clear")) {
-            var buf: [1024]u8 = undefined;
-            @import("app/history.zig").clear(try @import("app/history.zig").historyRoot(&buf, env.home));
-            std.debug.print("history cleared\n", .{});
-            return;
-        }
-        const smoke: i64 = if (args.len > 3 and std.mem.eql(u8, args[2], "--smoke"))
-            std.fmt.parseInt(i64, args[3], 10) catch 0
-        else
-            0;
-        try @import("app/history_ui.zig").run(gpa, env, smoke);
-    } else if (std.mem.eql(u8, cmd, "quick-video") and args.len > 3) {
+    } else if (eql(u8, cmd, "history")) {
+        try runHistory(gpa, env, args);
+    } else if (eql(u8, cmd, "quick-video") and args.len > 3) {
         try @import("record/quickvid.zig").run(gpa, env, args[2], args[3]);
-    } else if (std.mem.eql(u8, cmd, "trim") and args.len > 3) {
+    } else if (eql(u8, cmd, "trim") and args.len > 3) {
         try @import("ui/recui/trimui.zig").run(gpa, env, args[2], args[3], args[4..]);
-    } else if (std.mem.eql(u8, cmd, "record")) {
+    } else if (eql(u8, cmd, "record")) {
         try @import("record/cli.zig").main(gpa, env, args[2..]);
-    } else if (std.mem.eql(u8, cmd, "pin")) {
+    } else if (eql(u8, cmd, "pin")) {
         if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
-    } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
+    } else if (eql(u8, cmd, "gnome-integration")) {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
-    } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
+    } else if (eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
-    } else if (std.mem.eql(u8, cmd, "toast") and args.len > 2) {
+    } else if (eql(u8, cmd, "toast") and args.len > 2) {
         try @import("app/toastwin.zig").run(gpa, env, args[2], if (args.len > 3) args[3] else "");
-    } else if (std.mem.eql(u8, cmd, "edit") and args.len == 3) {
+    } else if (eql(u8, cmd, "edit") and args.len == 3) {
         try @import("app/editfile.zig").run(gpa, env, args[2]);
     } else if (try @import("app/modes/cli.zig").run(gpa, env, cmd, args[2..])) {
         // a capture mode
@@ -178,6 +126,95 @@ pub fn main(init: std.process.Init) !void {
     } else {
         std.debug.print("{s}", .{usage});
     }
+}
+
+/// `CMD --smoke MS`: auto-close after MS (leak runs); 0 when absent.
+fn smokeArg(args: []const [:0]const u8) i64 {
+    return if (args.len > 3 and std.mem.eql(u8, args[2], "--smoke"))
+        std.fmt.parseInt(i64, args[3], 10) catch 0
+    else
+        0;
+}
+
+/// `shotlet history [clear | --smoke MS]`.
+fn runHistory(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
+    if (args.len > 2 and std.mem.eql(u8, args[2], "clear")) {
+        var buf: [1024]u8 = undefined;
+        @import("app/history.zig").clear(try @import("app/history.zig").historyRoot(&buf, env.home));
+        std.debug.print("history cleared\n", .{});
+        return;
+    }
+    try @import("app/history_ui.zig").run(gpa, env, smokeArg(args));
+}
+
+/// Options of `shotlet shot`, from its flag/value pairs.
+const ShotArgs = struct {
+    from: ?[]const u8 = null,
+    from_monitors: ?[]const u8 = null,
+    from_shell: ?shellcap.Args = null,
+    shell_monitors: []const u8 = "",
+    shell_pieces: []const u8 = "",
+    t0: ?i64 = null,
+    sel: ?[4]i32 = null,
+    smoke_ms: i64 = 0,
+    then_record: bool = false,
+    req: @import("app/modes/mode.zig").Request = .{},
+};
+
+/// `shotlet shot|text [FLAG VALUE]...`. Dev/testing flags: --from FILE
+/// (skip portal), --sel X,Y,W,H (preset selection), --smoke MS
+/// (auto-cancel, for leak runs), --from-monitors A.png,B.png (one image
+/// per monitor, side by side).
+fn runShot(gpa: std.mem.Allocator, env: Env, flags: []const [:0]const u8) !void {
+    var o: ShotArgs = .{};
+    var i: usize = 0;
+    while (i + 1 < flags.len) : (i += 2) try parseShotFlag(&o, flags[i], flags[i + 1]);
+    if (o.from_shell) |*fs| {
+        fs.monitors = o.shell_monitors;
+        fs.pieces = o.shell_pieces;
+        fs.t0_ms = o.t0;
+    }
+    if (o.then_record and o.from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, o.from_shell.?);
+    try shot.run(gpa, env, .{ .file = o.from, .monitors = o.from_monitors, .shell = o.from_shell, .req = o.req }, o.sel, o.smoke_ms);
+}
+
+fn parseShotFlag(o: *ShotArgs, flag: []const u8, value: [:0]const u8) !void {
+    const eql = std.mem.eql;
+    if (eql(u8, flag, "--from")) {
+        o.from = value;
+    } else if (eql(u8, flag, "--from-monitors")) {
+        o.from_monitors = value;
+    } else if (eql(u8, flag, "--from-shell")) {
+        // the GNOME Shell extension's capture (src/app/shellcap.zig)
+        o.from_shell = .{ .id = value };
+    } else if (eql(u8, flag, "--monitors")) {
+        o.shell_monitors = value;
+    } else if (eql(u8, flag, "--pieces")) {
+        o.shell_pieces = value;
+    } else if (eql(u8, flag, "--then")) {
+        // the extension's record shortcut: the picker on this capture
+        if (eql(u8, value, "record")) o.then_record = true;
+    } else if (eql(u8, flag, "--mode")) {
+        o.req.withModeArg(value);
+    } else if (eql(u8, flag, "--pointer")) {
+        o.req.withPointerArg(value);
+    } else if (eql(u8, flag, "--t0")) {
+        o.t0 = std.fmt.parseInt(i64, value, 10) catch null;
+    } else if (eql(u8, flag, "--smoke")) {
+        o.smoke_ms = std.fmt.parseInt(i64, value, 10) catch 0;
+    } else if (eql(u8, flag, "--sel")) {
+        o.sel = try parseSel(value);
+    }
+}
+
+/// "X,Y,W,H" for --sel.
+fn parseSel(value: []const u8) ![4]i32 {
+    var it = std.mem.splitScalar(u8, value, ',');
+    var vals: [4]i32 = undefined;
+    for (&vals) |*v| {
+        v.* = std.fmt.parseInt(i32, it.next() orelse return error.BadSelArg, 10) catch return error.BadSelArg;
+    }
+    return vals;
 }
 
 fn nonEmpty(v: ?[]const u8) ?[]const u8 {
