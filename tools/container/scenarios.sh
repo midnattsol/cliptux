@@ -2,7 +2,7 @@
 # WAYLAND_DISPLAY and the bus point at it; pass/fail/skip/check, COMP,
 # SCEN, OUT, NMON are set).
 
-BIN=$BINDIR/shotlet DRIVE=$BINDIR/shotlet-wldrive DROP=$BINDIR/shotlet-droptarget
+BIN=${SHOTLET_BIN:-$BINDIR/shotlet} DRIVE=$BINDIR/shotlet-wldrive DROP=$BINDIR/shotlet-droptarget
 
 # --- the input driver, as a coprocess
 DRV_PID=
@@ -36,6 +36,13 @@ slow_drag() { # slow_drag MON X0 Y0 X1 Y1 ...: a pause per point, like a hand
     shift 3
     while [ $# -ge 2 ]; do drv move "$mon" "$1" "$2" && drv sleep 200 || return 1; shift 2; done
     drv sleep 300 && drv up
+}
+# a drag from X0 Y0 to X1 Y1 on MON, arriving like a hand (KWin's fake
+# input can leave the press at an earlier pointer position otherwise)
+select_on() { # select_on MON X0 Y0 X1 Y1
+    drv move "$1" $(($2 - 8)) "$3" && drv sleep 100 && drv move "$1" $(($2 - 4)) "$3" && drv sleep 100 &&
+        drv move "$1" "$2" "$3" && drv sleep 150 && drv down &&
+        drv move "$1" $((($2 + $4) / 2)) $((($3 + $5) / 2)) && drv move "$1" "$4" "$5" && drv sleep 100 && drv up && drv sleep 200
 }
 eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
 
@@ -150,6 +157,13 @@ kde_share_dialog() { # kde_share_dialog [TILES]: tick screens 0 (default), 1
     click 0 $((x + 396)) $((y + 47))
 }
 
+# direct capture asked nobody: no portal chooser ran, no KDE dialog was
+# answered, the portal was never used
+no_consent() {
+    check "  ... and nobody was asked (no chooser, no dialog, no portal)" \
+        test ! -s "$HOME/chooser.log" -a "$DIALOGS" = 0 -a -z "$(grep "capture path: portal" "$OUT"/*.log)"
+}
+
 # a real capture through the portal: a 400x300 selection, copied. On KWin
 # the portal's dialog is answered unless it is NODIALOG (a restore token
 # should make it silent)
@@ -162,24 +176,19 @@ portal_capture() { # portal_capture NAME [nodialog | TILES]
 }
 
 run_scenario() {
-    drv_start || { fail "input driver"; return; }
-    mon_size
     if [ "$COMP" = kwin ] && [ -z "${CTR_RENDER_NODE:-}" ]; then
         skip "KWin without a GPU render node composites with QPainter: no screenshots, no screencasts"
-        drv quit
         return
     fi
-    case $1 in
-    capture | restore | multimon)
-        # xdg-desktop-portal-wlr needs dmabuf-capable screencopy (GLES2 on a
-        # render node), KWin's screencast needs OpenGL compositing
-        if [ -z "${CTR_RENDER_NODE:-}" ]; then
-            skip "screen capture needs a GPU render node (/dev/dri/renderD*) for the compositor"
-            drv quit
-            return
-        fi
-        ;;
-    esac
+    if [ "$1" = portal ] && [ -z "${CTR_RENDER_NODE:-}" ]; then
+        # xdg-desktop-portal-wlr needs dmabuf-capable screencopy (GLES2 on
+        # a render node)
+        skip "the portal's screencast needs a GPU render node (/dev/dri/renderD*)"
+        return
+    fi
+    if [ "$1" = probe ] && [ -n "${CTR_PROBE0:-}" ]; then eval "$CTR_PROBE0"; fi
+    drv_start || { fail "input driver"; return; }
+    mon_size
     case $1 in
     probe)
         if [ -n "${CTR_PROBE:-}" ]; then eval "$CTR_PROBE"; fi
@@ -190,9 +199,15 @@ run_scenario() {
     capture)
         no_quick_cfg
         check "a window to capture is up" start_droptarget
-        portal_capture first
-        check "the portal granted a screencast and the editor opened" grep -q "startup: capture=" "$SHOT_LOG"
-        check "  ... through ScreenCast + PipeWire" grep -q "capture detail: monitors=1" "$SHOT_LOG"
+        portal_capture first nodialog
+        check "the editor opened, with no dialog" grep -q "startup: capture=" "$SHOT_LOG"
+        if [ "$COMP" = kwin ]; then
+            check "  ... captured directly by KWin (the installed .desktop file authorizes it)" grep -q "capture path: direct (KWin ScreenShot2)" "$SHOT_LOG"
+        else
+            m=$(grep -o "capture path: direct ([a-z-]*)" "$SHOT_LOG" | grep -o "([a-z-]*)")
+            check "  ... captured directly ${m:-(not)}" test -n "$m"
+        fi
+        no_consent
         wait_exit 5
         check "Enter copied the selection" clip_png "$OUT/clip.png"
         check "  ... 400x300" eq "$(png_size "$OUT/clip.png")" 400x300
@@ -200,18 +215,77 @@ run_scenario() {
         # the droptarget's colour (dde7f0), as captured
         check "  ... showing the window that was on screen" eq "$VAL" ffdde7f0
         ;;
-    restore)
+    multimon)
+        no_quick_cfg
+        drv monitors; echo "  monitors: $VAL" >&2
+        start_droptarget
+        # the stitched picture has the highest scale of the two: on wlroots
+        # (scale 1 and 2) a selection on the first output doubles
+        if [ "$COMP" = kwin ]; then want1=200x150 want0=400x300; else want1=400x300 want0=800x600; fi
+        run_shotlet first
+        check "two outputs$([ "$COMP" = kwin ] || echo ", scale 1 and 2"): the editor opens with no dialog" wait_editor 20
+        check "  ... both captured directly" grep -q "direct capture: 2 outputs" "$SHOT_LOG"
+        no_consent
+        check "  ... the editor covers both outputs" grep -q "editor: 2 surfaces" "$SHOT_LOG"
+        select_on 1 100 100 300 250 && keys enter
+        wait_exit 5
+        check "  ... a selection on the second output copies its pixels ($want1)" eq "$(clip_png "$OUT/clip1.png" && png_size "$OUT/clip1.png")" "$want1"
+        drv pixel "$OUT/clip1.png" 20 20; p1=$VAL
+        run_shotlet second
+        wait_editor 20
+        select_on 0 200 200 600 500 && keys enter
+        wait_exit 5
+        check "  ... and one on the first output ($want0)" eq "$(clip_png "$OUT/clip0.png" && png_size "$OUT/clip0.png")" "$want0"
+        drv pixel "$OUT/clip0.png" 100 100
+        check "  ... each showing its own output (the app is on the first only)" test "$VAL" = ffdde7f0 -a "$p1" != ffdde7f0
+        ;;
+    rotated)
+        # outputs turned 90 degrees and flipped upside down: the picture
+        # must come out the way each output shows it. A pin (a 300x200
+        # test picture, red inside 60..240 x 40..160) sits at 134,134 of
+        # each output's top-left
+        no_quick_cfg
+        start_droptarget
+        drv mkpng "$OUT/small.png" 300 200 ff2020
+        drv monitors; echo "  monitors: $VAL" >&2
+        for mon in 0 1; do
+            run_shotlet "pin$mon" pin "$OUT/small.png"
+            wait_log 5 "pin: showing" || { fail "pin on output $mon"; return; }
+            sleep 0.5
+            # pins open on the focused output: move it there first
+            [ "$mon" = 0 ] && { drv move 1 300 300; drv click; sleep 0.3; }
+        done
+        sleep 0.5
+        shot 0 screen0; shot 1 screen1
+        for mon in 0 1; do
+            drv find "$mon" ff2020 40 20 >/dev/null 2>&1 && echo "  output $mon: red at $VAL (screenshot)" >&2
+            run_shotlet "cap$mon"
+            wait_editor 20 || { fail "editor"; return; }
+            select_on "$mon" 220 190 340 280 && keys enter
+            wait_exit 5
+            clip_png "$OUT/clip$mon.png"
+            drv findpng "$OUT/clip$mon.png" ff2020 40 20 >/dev/null 2>&1; r=$VAL
+            drv pixel "$OUT/clip$mon.png" 60 45
+            check "output $mon ($(echo $MONITORS | cut -d' ' -f$((mon + 1)))): the pin comes out where the output shows it" eq "$VAL" ffff2020
+        done
+        ;;
+    portal)
+        # the portal when direct capture is off (wlroots: SHOTLET_NO_DIRECT)
+        # or refused (KWin: Shotlet not installed, so no .desktop file)
         no_quick_cfg
         start_droptarget
         portal_capture first
         wait_exit 5
         if [ "$COMP" = kwin ]; then
-            check "the first capture asks which screen (the portal's dialog)" test "$DIALOGS" -ge 1
+            check "KWin refuses direct capture to an app it has no .desktop file for" grep -q "KWin refused" "$SHOT_LOG"
+            check "  ... so the portal asks which screen (its dialog)" test "$DIALOGS" -ge 1
         else
             n1=$(wc -l <"$HOME/chooser.log" 2>/dev/null || echo 0)
-            check "the first capture asks which output (the chooser ran)" test "$n1" -ge 1
+            check "with direct capture off, the portal asks which output (the chooser ran)" test "$n1" -ge 1
         fi
+        check "  ... the capture went through it" grep -q "capture path: portal (ScreenCast)" "$SHOT_LOG"
         check "  ... and a restore token was stored" grep -q "^screencast_restore_token=" "$XDG_CONFIG_HOME/shotlet/config"
+        check "  ... Enter copied the selection" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x300
         portal_capture second nodialog
         wait_exit 5
         check "the second capture works, with no dialog to answer" grep -q "startup: capture=" "$SHOT_LOG"
@@ -219,44 +293,6 @@ run_scenario() {
             n2=$(wc -l <"$HOME/chooser.log" 2>/dev/null || echo 0)
             check "  ... silently: the restore token skipped the chooser" eq "$n2" "$n1"
         fi
-        ;;
-    multimon)
-        no_quick_cfg
-        if [ "$COMP" = kwin ]; then
-            # kwin_wayland --virtual: same-size outputs, one scale
-            start_droptarget
-            portal_capture first "0 1"
-            check "capture of two outputs (both ticked in the portal's dialog) opens the editor" grep -q "startup: capture=" "$SHOT_LOG"
-            check "  ... with both monitors" grep -q "capture detail: monitors=2" "$SHOT_LOG"
-            wait_exit 5
-            check "  ... and copies the selection" clip_png "$OUT/clip.png"
-            # xdg-desktop-portal-kde gives no stream positions, so the two
-            # 1600x900 frames sit side by side in one window, scaled to fit
-            # (3200x900 at half size, 225 px bands above and below): the
-            # 400x300 drag from (200, 200) covers 800x550 pixels
-            check "  ... both monitors in one window: the selection at half scale (800x550)" eq "$(png_size "$OUT/clip.png")" 800x550
-            return
-        fi
-        drv monitors; echo "  monitors: $VAL" >&2
-        start_droptarget
-        portal_capture first
-        check "capture with two outputs (mixed scale) opens the editor" grep -q "startup: capture=" "$SHOT_LOG"
-        grep "capture detail" "$SHOT_LOG" >&2
-        wait_exit 5
-        check "  ... and copies the selection" clip_png "$OUT/clip.png"
-        check "  ... 400x300" eq "$(png_size "$OUT/clip.png")" 400x300
-        # the second output, through the chooser
-        echo HEADLESS-2 >"$HOME/chooser-output"
-        sed -i '/^screencast_restore_token=/d' "$XDG_CONFIG_HOME/shotlet/config"
-        run_shotlet second
-        check "capturing the scale 2 output opens the editor" wait_editor 20
-        shot 0 editor2-mon0
-        shot 1 editor2-mon1
-        check "  ... on that output (the other one keeps its window)" eq "$(drv pixel "$OUT/editor2-mon0.png" 800 450 && echo "$VAL")" ffdde7f0
-        drv move 1 100 100 && drv down && drv move 1 200 150 && drv move 1 300 250 && drv up && drv sleep 200 && keys enter
-        wait_exit 5
-        check "  ... where a selection copies at the output's scale (200x150 logical, 400x300 pixels)" \
-            eq "$(clip_png "$OUT/clip2.png" && png_size "$OUT/clip2.png")" 400x300
         ;;
     quick)
         quick_cfg

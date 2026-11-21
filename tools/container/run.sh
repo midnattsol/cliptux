@@ -22,9 +22,9 @@ set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMAGE=${CTR_IMAGE:-shotlet-e2e:trixie}
 
-scenarios_sway="capture restore multimon quick pin history ocr"
-scenarios_labwc="capture restore quick pin history"
-scenarios_kwin="capture restore multimon quick pin history"
+scenarios_sway="capture multimon rotated portal quick pin history ocr"
+scenarios_labwc="capture multimon portal quick pin history"
+scenarios_kwin="capture multimon portal quick pin history"
 
 BIN=$ROOT/zig-out/bin/shotlet
 WLDRIVE=$ROOT/zig-out/bin/shotlet-wldrive
@@ -95,17 +95,31 @@ failed=0
 for r in "${runs[@]}"; do
     comp=${r%%:*} scen=${r#*:}
     mkdir -p "$OUT/$comp/$scen"
-    "$engine" run --rm --network none --init --shm-size 256m \
+    name=shotlet-e2e-$$-$comp-$scen
+    # a scenario still running after 4 minutes is stuck (inner.sh stops at
+    # 5): keep what its processes are waiting on, seen from outside
+    ( sleep 240 & sp=$!
+      trap 'kill $sp; exit' TERM
+      wait $sp
+      "$engine" exec "$name" sh -c 'for p in /proc/[0-9]*; do echo "${p#/proc/} $(cat $p/wchan 2>/dev/null) $(cat $p/stat 2>/dev/null | cut -d" " -f3) $(cat $p/comm 2>/dev/null)"; done' \
+          >"$OUT/$comp/$scen/stuck-host.txt" 2>&1 ) &
+    watch=$!
+    "$engine" run --rm --name "$name" --network none --init --shm-size 256m \
         "${user_args[@]}" "${gpu_args[@]}" \
-        -e SHOTLET_CONTAINER=1 -e HOME=/tmp/home ${CTR_PROBE:+-e CTR_PROBE} \
+        -e SHOTLET_CONTAINER=1 -e HOME=/tmp/home ${CTR_PROBE:+-e CTR_PROBE} ${CTR_PROBE0:+-e CTR_PROBE0} ${CTR_KWIN_LOG:+-e CTR_KWIN_LOG} ${MONITORS:+-e MONITORS} ${CTR_ROTATED:+-e CTR_ROTATED} \
         -v "$(realpath "$BIN")":/opt/shotlet/bin/shotlet:ro \
         -v "$(realpath "$WLDRIVE")":/opt/shotlet/bin/shotlet-wldrive:ro \
         -v "$(realpath "$DROP")":/opt/shotlet/bin/shotlet-droptarget:ro \
         -v "$ROOT/tools/container":/opt/shotlet/ctr:ro \
+        -v "$(realpath "$BIN")":/opt/shotlet/pkg/shotlet:ro \
+        -v "$ROOT/install.sh":/opt/shotlet/pkg/install.sh:ro \
+        -v "$ROOT/io.github.midnattsol.Shotlet.desktop":/opt/shotlet/pkg/io.github.midnattsol.Shotlet.desktop:ro \
+        -v "$ROOT/io.github.midnattsol.Shotlet.svg":/opt/shotlet/pkg/io.github.midnattsol.Shotlet.svg:ro \
         -v "$OUT/$comp/$scen":/out \
         "$IMAGE" timeout 300 /opt/shotlet/ctr/inner.sh "$comp" "$scen" \
         2>"$OUT/$comp/$scen/stderr.log" | tee "$OUT/$comp/$scen/result.txt"
     rc=${PIPESTATUS[0]}
+    kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
     # the scenarios' own notes (indented) and driver errors; the rest of
     # the session's chatter stays in stderr.log
     grep -E '^(  |driver:)' "$OUT/$comp/$scen/stderr.log" | sed "s/^/  [$comp:$scen] /" >&2

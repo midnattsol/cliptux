@@ -9,6 +9,9 @@ Categories=Utility;Graphics;
 StartupNotify=false
 StartupWMClass=io.github.midnattsol.Shotlet
 X-GNOME-UsesNotifications=true
+# KWin lets the app whose executable matches Exec take screenshots without
+# a dialog (install.sh makes Exec an absolute path)
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
 Actions=Screenshot;History;Settings;
 
 [Desktop Action Screenshot]

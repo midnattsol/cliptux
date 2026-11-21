@@ -206,6 +206,7 @@ test {
     _ = @import("gfx/png.zig");
     _ = @import("gfx/effects.zig");
     _ = @import("app/capture.zig");
+    _ = @import("app/direct.zig");
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const capture = @import("capture.zig");
+const direct = @import("direct.zig");
 const clock = @import("clock.zig");
 const config = @import("config.zig");
 const dbus = @import("../platform/dbus.zig");
@@ -112,6 +113,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 /// xdg-desktop-portal-wlr), on that monitor rather than wherever the
 /// compositor puts a new window.
 fn openEditor(win: anytype, cap: *const capture.Capture, per_monitor: bool) !void {
+    defer std.log.debug("editor: {d} surfaces", .{win.n_surfaces});
     if (per_monitor) return win.openOutputs("Shotlet");
     if (cap.monitors.len == 1) if (cap.monitors[0].logical) |l| {
         return win.openOnOutputAt("Shotlet", l.x, l.y);
@@ -275,9 +277,25 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         return try capture.Capture.single(gpa, img);
     }
 
+    // the desktop's own capture interface: no consent dialog
+    if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
+        if (direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn)) |res| switch (res) {
+            .captured => |c| {
+                std.log.info("capture path: direct ({s})", .{c.method.label()});
+                direct.remember(env.home, .direct);
+                return c.cap;
+            },
+            .unavailable => |why| std.log.info("capture path: no direct capture ({s}); the portal", .{why}),
+        } else |err| std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
+    }
+
     if (pw.available()) {
         switch (screencast(gpa, env, conn, cfg)) {
-            .granted => |cap| return cap,
+            .granted => |cap| {
+                std.log.info("capture path: portal (ScreenCast)", .{});
+                direct.remember(env.home, .portal);
+                return cap;
+            },
             .cancelled => return null,
             .timeout => return dialogTimedOut(),
             .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
@@ -285,6 +303,8 @@ fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *confi
         }
     }
 
+    std.log.info("capture path: portal (Screenshot)", .{});
+    direct.remember(env.home, .portal);
     const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
         .granted => |d| d,
         .cancelled => return null,

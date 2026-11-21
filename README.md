@@ -4,8 +4,10 @@ Fast screenshot tool for **Linux on Wayland** with a Flameshot-style
 annotation editor. Written in Zig, zero build dependencies — it speaks the
 Wayland and DBus wire protocols directly.
 
-- Instant capture (~0.3s) via the ScreenCast portal + PipeWire, with a
-  Screenshot-portal fallback. One consent dialog ever.
+- Instant capture (~0.3s). No dialog at all on wlroots compositors (Sway,
+  Hyprland, labwc, river...) and KDE Plasma, which let Shotlet capture
+  directly; elsewhere the ScreenCast portal + PipeWire (Screenshot-portal
+  fallback), with one consent dialog ever.
 - Multi-monitor: every monitor you share in the picker is captured and
   laid out as on your desktop, at the sharpest monitor's pixel density.
 - Region selection (with a magnifier), then annotate: pencil, line, arrow,
@@ -63,6 +65,16 @@ older portals learn it from a systemd scope), which is what lets GNOME
 remember the screen-sharing and screenshot consent however Shotlet is
 started. Consent given to versions before this id is not carried over:
 expect to be asked once more after updating.
+
+Direct capture, no dialog: on wlroots compositors Shotlet reads every
+monitor itself (`ext-image-copy-capture-v1`, else `wlr-screencopy`). On
+KDE Plasma, KWin lets it take screenshots because the installed desktop
+entry declares `X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2`;
+KWin matches the running executable against that entry's `Exec`, so this
+works for the `shotlet` that `install.sh` put in `~/.local/bin` (run from
+the source tree it is refused and the portal asks instead). Settings shows
+"captured directly (no prompts)" when this is what happened. The log
+says `capture path: direct (...)` or `capture path: portal (...)`.
 
 ## Usage
 
@@ -285,9 +297,15 @@ zig build e2e-container -- kwin:pin     # one scenario
 
 The container suite (`tools/container/`) covers what GNOME cannot: the
 layer-shell thumbnail, pins and history panel on wlroots (sway, labwc) and
-KWin, capture through `xdg-desktop-portal-wlr` and `xdg-desktop-portal-kde`
-with restore tokens, two outputs at mixed scales, and the text search with
-Tesseract (English and Spanish). Each scenario runs in a throwaway
+KWin; direct capture with no dialog (wlr-screencopy, KWin's ScreenShot2
+authorized by Shotlet's installed desktop entry, never by KWin's
+permission-check overrides), two outputs at mixed scales and rotated or
+flipped outputs; the portal path (`xdg-desktop-portal-wlr` with direct
+capture turned off by `SHOTLET_NO_DIRECT=1`, `xdg-desktop-portal-kde` when
+Shotlet is not installed and KWin refuses it) with restore tokens; and the
+text search with Tesseract (English and Spanish). Scenarios count the
+consent prompts: zero on the direct path. Shotlet is installed in each
+container with `install.sh`. Each scenario runs in a throwaway
 container (Debian trixie, `--rm`, no network) with its own session bus,
 PipeWire and a headless compositor; nothing is installed on the host and
 nothing reaches its display, bus or PipeWire. The image
@@ -298,15 +316,19 @@ either the suite skips).
 
 `shotlet-wldrive` (`tools/container/wldrive.zig`) is the input driver:
 wlroots' virtual pointer and keyboard plus screencopy, or KWin's fake input
-plus its ScreenShot2 D-Bus interface. The wlroots portal's output chooser
-is a script that answers without a dialog and logs each call; the KDE
-portal's dialog is clicked through. Screen capture needs a GPU render node
-(`/dev/dri/renderD*`, passed to the container when the host has one, never
-a display node; `CTR_GPU=0` to not pass it): `xdg-desktop-portal-wlr`
-wants dmabuf-capable screencopy, which wlroots' software renderer lacks,
-and KWin offers screenshots and screencasts only when compositing with
-OpenGL. Without one, the capture scenarios and KWin skip and the rest runs
-on software rendering. CI runs it nightly and on demand
+plus its ScreenShot2 D-Bus interface, authorized like Shotlet by a desktop
+entry. The wlroots portal's output chooser is a script that answers
+without a dialog and logs each call; the KDE portal's dialog is clicked
+through. A GPU render node (`/dev/dri/renderD*`, passed to the container
+when the host has one, never a display node; `CTR_GPU=0` to not pass it)
+is needed by `xdg-desktop-portal-wlr` (dmabuf-capable screencopy) and by
+KWin (screenshots and screencasts only when compositing with OpenGL);
+without one, the wlroots portal scenarios and KWin skip, and the rest,
+direct capture on wlroots included, runs on software rendering. Debian
+trixie's wlroots offers only wlr-screencopy; `Containerfile.sid` builds
+`shotlet-e2e:sid` (sway on a newer wlroots) for the
+ext-image-copy-capture path: `CTR_IMAGE=shotlet-e2e:sid
+tools/container/run.sh sway:capture sway:multimon sway:rotated`. CI runs it nightly and on demand
 (`.github/workflows/e2e-container.yml`).
 
 ## License

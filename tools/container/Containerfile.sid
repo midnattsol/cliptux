@@ -1,0 +1,16 @@
+# Debian sid with sway on a newer wlroots (0.19+), which offers
+# ext-image-copy-capture-v1: for the direct capture scenarios on that
+# protocol. `CTR_IMAGE=shotlet-e2e:sid tools/container/run.sh sway:capture`
+FROM debian:sid
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dbus dbus-bin dbus-daemon libglib2.0-bin procps ca-certificates \
+        pipewire pipewire-bin wireplumber libpipewire-0.3-0t64 \
+        sway wl-clipboard wayland-utils wlr-randr libxkbcommon-tools \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 -s /bin/bash tester
+USER tester
+WORKDIR /home/tester
