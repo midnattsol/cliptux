@@ -247,6 +247,28 @@ pub fn bufferSize(logical_w: u32, logical_h: u32, scale120: u32, fractional: boo
     return .{ logical_w * k, logical_h * k };
 }
 
+/// A surface that exactly covers one output gets a buffer of the output's
+/// physical pixels. fractional-scale-v1 rounds the scale to 1/120 steps, so
+/// logical * scale120 / 120 can miss the panel by a few pixels (1712 x 179/120
+/// = 2554 on a 2560-pixel panel at 1.4953) and the compositor would then
+/// resample the whole UI. Null when the surface does not match the output's
+/// logical size or the mode is not plausibly that output at about `approx`.
+pub fn outputBufferSize(logical_w: u32, logical_h: u32, approx: [2]u32, out_w: i32, out_h: i32, mode_w: i32, mode_h: i32) ?[2]u32 {
+    if (out_w != @as(i64, logical_w) or out_h != @as(i64, logical_h) or mode_w <= 0 or mode_h <= 0) return null;
+    // the mode is in the panel's native orientation; rotated outputs swap it
+    var mw: u32 = @intCast(mode_w);
+    var mh: u32 = @intCast(mode_h);
+    if ((mw > mh) != (logical_w > logical_h) and mw != mh) std.mem.swap(u32, &mw, &mh);
+    const close = struct {
+        fn f(a: u32, b: u32) bool {
+            const d = if (a > b) a - b else b - a;
+            return d <= b / 100 + 2;
+        }
+    }.f;
+    if (!close(mw, approx[0]) or !close(mh, approx[1])) return null;
+    return .{ mw, mh };
+}
+
 /// Integer buffer scale: the compositor's preferred_buffer_scale when it
 /// sent one, else the largest scale among the outputs the surface is on,
 /// else the assigned output's, else 1.
@@ -771,7 +793,12 @@ pub const Window = struct {
         if (s.logical_w == 0 or s.logical_h == 0) return;
         const fractional = s.fs_obj != 0;
         if (!fractional) s.scale120 = @intCast(s.int_scale * 120);
-        const size = bufferSize(s.logical_w, s.logical_h, s.scale120, fractional, s.int_scale);
+        var size = bufferSize(s.logical_w, s.logical_h, s.scale120, fractional, s.int_scale);
+        if (fractional) {
+            if (self.coveredOutput(s)) |o| {
+                if (outputBufferSize(s.logical_w, s.logical_h, size, o.logicalRect().w, o.logicalRect().h, o.mode_w, o.mode_h)) |px| size = px;
+            }
+        }
         if (size[0] == 0 or size[1] == 0) return;
         if (size[0] != s.width or size[1] != s.height or s.pool == 0) {
             try self.createBuffers(idx, size[0], size[1]);
@@ -783,6 +810,22 @@ pub const Window = struct {
             });
         }
         if (idx == 0) self.syncPrimary();
+    }
+
+    /// The output a surface is fullscreen on: its assigned one, else the
+    /// only output it entered.
+    fn coveredOutput(self: *const Window, s: *const Surface) ?*const Output {
+        var found: ?*const Output = null;
+        for (&self.outputs, 0..) |*o, slot| {
+            if (o.id == 0) continue;
+            if (s.output != 0) {
+                if (o.global == s.output) return o;
+            } else if (s.entered & (@as(u32, 1) << @intCast(slot)) != 0) {
+                if (found != null) return null;
+                found = o;
+            }
+        }
+        return found;
     }
 
     /// Integer-scale path (no wp_fractional_scale): follow the compositor's
@@ -1146,6 +1189,8 @@ pub const Window = struct {
                         const bit = @as(u32, 1) << @intCast(slot);
                         if (opcode == wl.wl_surface.ev_enter) s.entered |= bit else s.entered &= ~bit;
                         try self.updateIntScale(idx);
+                        // the output decides the exact buffer size (outputBufferSize)
+                        if (s.fs_obj != 0 and s.configured and s.output == 0) try self.applySize(idx);
                     }
                 },
                 wl.wl_surface.ev_preferred_buffer_scale => {
@@ -1264,15 +1309,15 @@ pub const Window = struct {
                 const surf = try r.uint();
                 self.ptr_surface = self.surfaceIndexOf(surf) orelse 0;
                 const f = self.pointerScale();
-                self.ptr_x = (try r.fixed()) * f;
-                self.ptr_y = (try r.fixed()) * f;
+                self.ptr_x = (try r.fixed()) * f[0];
+                self.ptr_y = (try r.fixed()) * f[1];
                 try self.applyCursor();
             },
             wl.wl_pointer.ev_motion => {
                 _ = try r.uint(); // time
                 const f = self.pointerScale();
-                self.ptr_x = (try r.fixed()) * f;
-                self.ptr_y = (try r.fixed()) * f;
+                self.ptr_x = (try r.fixed()) * f[0];
+                self.ptr_y = (try r.fixed()) * f[1];
                 const ev: InputEvent = .{ .pointer_motion = .{ .x = self.ptr_x, .y = self.ptr_y, .surface = self.ptr_surface } };
                 // coalesce with a queued motion on the same surface
                 if (self.queue.items.len > 0) {
@@ -1332,9 +1377,18 @@ pub const Window = struct {
         self.axis_pending = false;
     }
 
-    fn pointerScale(self: *const Window) f64 {
+    /// Buffer pixels per logical pixel, per axis (see outputBufferSize:
+    /// the buffer is not always exactly logical * scale120 / 120).
+    fn pointerScale(self: *const Window) [2]f64 {
         const s = &self.surfaces[self.ptr_surface];
-        return @as(f64, @floatFromInt(s.scale120)) / 120.0;
+        if (s.logical_w == 0 or s.logical_h == 0 or s.width == 0 or s.height == 0) {
+            const f = @as(f64, @floatFromInt(s.scale120)) / 120.0;
+            return .{ f, f };
+        }
+        return .{
+            @as(f64, @floatFromInt(s.width)) / @as(f64, @floatFromInt(s.logical_w)),
+            @as(f64, @floatFromInt(s.height)) / @as(f64, @floatFromInt(s.logical_h)),
+        };
     }
 
     fn translateKey(self: *Window, code: u32, pressed: bool, use_compose: bool) Key {
@@ -1398,8 +1452,10 @@ pub const Window = struct {
             wl.wl_keyboard.ev_enter => {
                 self.input_serial = try r.uint();
                 self.key_surface = self.surfaceIndexOf(try r.uint()) orelse 0;
+                std.log.debug("keyboard focus: surface {d}", .{self.key_surface});
             },
             wl.wl_keyboard.ev_leave => {
+                std.log.debug("keyboard focus lost", .{});
                 self.kb.leave();
             },
             else => {},
@@ -1856,6 +1912,20 @@ pub const Window = struct {
 
 test "window decls compile" {
     std.testing.refAllDecls(Window);
+}
+
+test "a surface covering one output gets the output's pixels" {
+    const t = std.testing;
+    // 2560x1440 panel at 1.4953: logical 1712x963, scale120 179 -> 2554x1436
+    const approx = bufferSize(1712, 963, 179, true, 1);
+    try t.expectEqual([2]u32{ 2554, 1436 }, approx);
+    try t.expectEqual([2]u32{ 2560, 1440 }, outputBufferSize(1712, 963, approx, 1712, 963, 2560, 1440).?);
+    // rotated panel: the mode is reported in native orientation
+    try t.expectEqual([2]u32{ 1440, 2560 }, outputBufferSize(963, 1712, .{ 1436, 2554 }, 963, 1712, 2560, 1440).?);
+    // not covering the output, or an implausible mode: keep the computed size
+    try t.expect(outputBufferSize(800, 600, .{ 1200, 900 }, 1712, 963, 2560, 1440) == null);
+    try t.expect(outputBufferSize(1712, 963, approx, 1712, 963, 3840, 2160) == null);
+    try t.expect(outputBufferSize(1712, 963, approx, 1712, 963, 0, 0) == null);
 }
 
 test "buffer size for fractional and integer scales" {
