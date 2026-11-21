@@ -32,6 +32,12 @@ pub const bus_name = "dev.shotlet.Shell1";
 
 const ext_js = @embedFile("gnome_ext_js");
 const ext_metadata = @embedFile("gnome_ext_metadata");
+/// extension.js's own modules: file name, contents
+const ext_modules = [_][2][]const u8{
+    .{ "modes.js", @embedFile("gnome_ext_modes_js") },
+    .{ "windowpick.js", @embedFile("gnome_ext_windowpick_js") },
+    .{ "scroll.js", @embedFile("gnome_ext_scroll_js") },
+};
 const ext_schema = @embedFile("gnome_ext_schema");
 const ext_schema_compiled = @embedFile("gnome_ext_schema_compiled");
 const schema_file = "org.gnome.shell.extensions.shotlet.gschema.xml";
@@ -123,6 +129,7 @@ pub fn writeBundled(home: []const u8) ![]const u8 {
     var p: [1100]u8 = undefined;
     try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/extension.js", .{dir}), ext_js);
     try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/metadata.json", .{dir}), ext_metadata);
+    for (ext_modules) |mod| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, mod[0] }), mod[1]);
     const schemas = try std.fmt.bufPrint(&p, "{s}/schemas", .{dir});
     sys.mkdirAll(schemas, 0o755);
     var q: [1200]u8 = undefined;
