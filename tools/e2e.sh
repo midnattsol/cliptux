@@ -292,7 +292,8 @@ if [ "${1:-}" = "--inner" ]; then
     start_droptarget() { # start_droptarget [MIME...]
         local i
         : >"$OUT/drop.log"
-        "$(dirname "$DRIVE")/shotlet-droptarget" "$@" >>"$OUT/drop.log" 2>>"$OUT/drop.err" &
+        "$E2E_DROPTARGET" "$@" >>"$OUT/drop.log" 2>>"$OUT/drop.err" &
+        DROP_PID=$!
         for i in $(seq 1 50); do grep -q "^ready" "$OUT/drop.log" && { sleep 0.8; return 0; }; sleep 0.2; done
         return 1
     }
@@ -409,7 +410,8 @@ if [ "${1:-}" = "--inner" ]; then
         check "  ... and as a file (text/uri-list)" drop_said 5 "^drop text/uri-list [0-9]+ file:///"
         f=$(grep -o "file://[^ ]*" "$OUT/drop.log" | head -1 | sed 's|^file://||')
         check "  ... naming a PNG named after the capture time" eq "$(png_size "$f")" 500x300
-        pkill -f shotlet-droptarget
+        # only the one started above: the path is also in this script's argv
+        kill "$DROP_PID" 2>/dev/null
 
         # pin: a second capture, pinned
         n=$(shown_count)
@@ -1234,9 +1236,12 @@ fi
 BIN=${1:-}
 if [ -n "$BIN" ] && [ -x "$BIN" ] && [ -n "${2:-}" ] && [ -x "$2" ]; then
     DRIVE=$2; shift 2
+    # zig build e2e passes the drop target too; it is not beside the driver
+    if [ -n "${1:-}" ] && [ -x "$1" ]; then DROPTARGET=$1; shift; fi
 else
     BIN=$ROOT/zig-out/bin/shotlet DRIVE=$ROOT/zig-out/bin/shotlet-drive
 fi
+DROPTARGET=${DROPTARGET:-$(dirname "$DRIVE")/shotlet-droptarget}
 want=${*:-$scenarios}
 
 missing=
@@ -1254,6 +1259,7 @@ for f in "$BIN" "$DRIVE"; do
     [ -x "$f" ] || { echo "e2e: $f not built (zig build e2e-driver)" >&2; exit 2; }
 done
 BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE")
+[ -x "$DROPTARGET" ] && DROPTARGET=$(realpath "$DROPTARGET")
 # a Python with GTK 4 bindings plays "another app" (python3-gi, gir1.2-gtk-4.0)
 PYGTK=
 for p in /usr/bin/python3 python3; do
@@ -1266,7 +1272,7 @@ E2E_OUT=${E2E_OUT:-$(mktemp -d -t shotlet-e2e-out.XXXXXX)}
 mkdir -p "$E2E_OUT"
 E2E_OUT=$(realpath "$E2E_OUT")
 rm -f "$E2E_OUT/results.txt"
-export E2E_BIN=$BIN E2E_DRIVE=$DRIVE E2E_OUT
+export E2E_BIN=$BIN E2E_DRIVE=$DRIVE E2E_DROPTARGET=$DROPTARGET E2E_OUT
 
 total_fail=0
 # the extension ships its settings schema compiled: it must match the XML

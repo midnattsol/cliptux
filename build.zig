@@ -92,7 +92,7 @@ pub fn build(b: *std.Build) void {
     const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});
     run_e2e.addArtifactArg(exe);
     run_e2e.addArtifactArg(drive);
-    run_e2e.step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
+    run_e2e.addArtifactArg(droptarget);
     run_e2e.addPassthruArgs();
     run_e2e.has_side_effects = true;
     const e2e_step = b.step("e2e", "Run the end-to-end suite (private headless GNOME session)");
