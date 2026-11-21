@@ -221,6 +221,23 @@ modes-keys)
     drv key ctrl+shift+print
     sleep 2
     check "  ... and its old key does nothing" not_grep "capture mode: 2880" "$HL_SHELL_LOG"
+    # Settings: the after-capture choice, and recording a mode's key
+    SHOTLET_SETTINGS_FOCUS=13 run_shotlet settings settings
+    sleep 2
+    keys space
+    sleep 0.5
+    check "Settings cycles what a screen capture does" grep -q "^after_fullscreen=editor" "$HOME/.config/shotlet/config"
+    keys esc
+    wait_exit 5
+    SHOTLET_SETTINGS_VIEW=shortcuts SHOTLET_SETTINGS_FOCUS=1 run_shotlet settings-keys settings
+    sleep 2
+    keys enter
+    sleep 0.3
+    keys ctrl+shift+f
+    sleep 1
+    check "Settings records a capture mode's shortcut" eq "$(ext_gsettings get fullscreen-shortcut)" "['<Ctrl><Shift>f']"
+    keys esc
+    wait_exit 5
     # a mode key that GNOME's screenshot tool holds stays unbound
     ext_gsettings set fullscreen-shortcut "['<Shift>Print']"
     sleep 0.5

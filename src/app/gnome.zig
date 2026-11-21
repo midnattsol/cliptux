@@ -297,7 +297,7 @@ fn extensionPath(gpa: std.mem.Allocator, bus: *dbus.Connection, buf: []u8) ?[]co
 }
 
 /// --schemadir for the extension's settings.
-fn schemaDir(gpa: std.mem.Allocator, env: Env, bus: ?*dbus.Connection, buf: []u8) ![]const u8 {
+pub fn schemaDir(gpa: std.mem.Allocator, env: Env, bus: ?*dbus.Connection, buf: []u8) ![]const u8 {
     var pbuf: [1024]u8 = undefined;
     const dir = (if (bus) |b| extensionPath(gpa, b, &pbuf) else null) orelse try extensionDir(&pbuf, env.home);
     return std.fmt.bufPrint(buf, "{s}/schemas", .{dir});

@@ -243,6 +243,8 @@ test {
     _ = @import("ui/keyboard.zig");
     _ = @import("ui/window.zig");
     _ = @import("ui/settings.zig");
+    _ = @import("ui/settings_modes.zig");
+    _ = @import("ui/settings_steps.zig");
     _ = @import("ui/theme.zig");
     _ = @import("ui/motion.zig");
     _ = @import("ui/icons.zig");
