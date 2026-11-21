@@ -303,7 +303,7 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
 
             // shortcut pill (right aligned)
             var nbuf: [32]u8 = undefined;
-            const bname = if (is_recording) "Press a key..." else config.bindName(cfg.binds[i], &nbuf);
+            const bname = if (is_recording) "Press a key..." else bindLabel(win, cfg.binds[i], &nbuf);
             const bw = text.width(small, bname) + ui.sc(20);
             const bx = w - margin - ui.sc(16) - bw;
             const bh = row_h - ui.sc(8);
@@ -435,6 +435,19 @@ fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region)
 
     try win.present();
     return content_h;
+}
+
+/// Like config.bindName, but the key is named after what it is in the
+/// active layout (e.g. "Ñ" on a Spanish keyboard). Binds stay evdev codes.
+fn bindLabel(win: *Window, b: config.Bind, buf: []u8) []const u8 {
+    if (b.code == 0) return "unset";
+    var kbuf: [32]u8 = undefined;
+    const key = win.kb.keyName(b.code, &kbuf, config.keyCodeName(b.code));
+    return std.fmt.bufPrint(buf, "{s}{s}{s}", .{
+        if (b.ctrl) "Ctrl+" else "",
+        if (b.shift) "Shift+" else "",
+        key,
+    }) catch "?";
 }
 
 fn card(ui: *Ui, x: i32, y: i32, w: i32, h: i32, title: []const u8) void {
