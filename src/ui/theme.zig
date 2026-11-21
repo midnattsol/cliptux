@@ -20,8 +20,9 @@
 //!                         something the theme uses changed
 //!   withAlpha(c, a), mix(a, b, t)  colour helpers
 //!
-//! Colour-scheme values: 1 prefer dark, 2 prefer light, 0 no preference
-//! (treated as dark: a screenshot overlay sits on a dimmed screen).
+//! Colour-scheme values: 1 prefer dark, 2 prefer light, 0 no preference.
+//! No preference is light, as GNOME and every other app on the desktop
+//! read it.
 
 const std = @import("std");
 const dbus = @import("../platform/dbus.zig");
@@ -192,7 +193,7 @@ pub const Theme = struct {
 
 /// What the desktop asks for.
 pub const Prefs = struct {
-    dark: bool = true,
+    dark: bool = false,
     accent: ?u32 = null,
     /// org.gnome.desktop.interface enable-animations; false = reduce motion
     animations: bool = true,
@@ -302,7 +303,7 @@ fn applyValue(prefs: *Prefs, which: Key, r: *dbus.Reader) !void {
     switch (which) {
         .color_scheme => {
             if (!std.mem.eql(u8, sig, "u")) return error.BadType;
-            prefs.dark = (try r.readU32()) != 2;
+            prefs.dark = (try r.readU32()) == 1;
         },
         .accent => {
             if (!std.mem.eql(u8, sig, "(ddd)")) return error.BadType;
