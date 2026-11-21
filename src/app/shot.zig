@@ -126,7 +126,9 @@ fn acquireImage(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *
         defer if (started.restore_token) |t| gpa.free(t);
         if (started.restore_token) |t| {
             cfg.setScToken(t);
-            config.save(gpa, env.home, cfg) catch {};
+            // only this key: never write back a stale snapshot of the rest
+            config.saveScreencastToken(gpa, env.home, t) catch |err|
+                std.log.warn("could not store the screencast token: {t}", .{err});
         }
 
         const fd = portal.scOpenRemote(gpa, conn, session_path) catch |err| {
@@ -255,39 +257,18 @@ fn firstRunPermissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connecti
     return portal.screenshot(gpa, conn, false);
 }
 
-/// Resolve the XDG pictures dir from ~/.config/user-dirs.dirs (it is
-/// localized, e.g. "Imágenes" on Spanish systems). Falls back to ~/Pictures.
-fn picturesDir(gpa: std.mem.Allocator, env: Env, buf: []u8) ![]u8 {
-    var path_buf: [512]u8 = undefined;
-    const cfg_path = try std.fmt.bufPrint(&path_buf, "{s}/.config/user-dirs.dirs", .{env.home});
-    const cfg = try sys.readFileAlloc(gpa, cfg_path, 64 * 1024);
-    defer gpa.free(cfg);
-
-    var lines = std.mem.splitScalar(u8, cfg, '\n');
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t");
-        const prefix = "XDG_PICTURES_DIR=\"";
-        if (!std.mem.startsWith(u8, trimmed, prefix)) continue;
-        var value = trimmed[prefix.len..];
-        if (std.mem.lastIndexOfScalar(u8, value, '"')) |q| value = value[0..q];
-        if (std.mem.startsWith(u8, value, "$HOME/")) {
-            return std.fmt.bufPrint(buf, "{s}/{s}", .{ env.home, value["$HOME/".len..] });
-        }
-        if (std.mem.startsWith(u8, value, "/")) {
-            return std.fmt.bufPrint(buf, "{s}", .{value});
-        }
-    }
-    return error.NotFound;
+/// Where screenshots go: the configured save_dir (with ~ expanded), else the
+/// user's XDG Pictures directory.
+fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const @import("config.zig").Config, buf: []u8) ![]u8 {
+    const env_mod = @import("env.zig");
+    if (cfg.saveDir()) |d| return env_mod.expandHome(buf, env.home, d);
+    return env_mod.picturesDir(gpa, buf, env.home);
 }
 
 fn savePng(gpa: std.mem.Allocator, env: Env, cfg: *const @import("config.zig").Config, data: []const u8) ![]u8 {
-    var dir_buf: [512]u8 = undefined;
-    const dir = if (cfg.saveDir()) |d|
-        try std.fmt.bufPrint(&dir_buf, "{s}", .{d})
-    else
-        picturesDir(gpa, env, &dir_buf) catch
-            try std.fmt.bufPrint(&dir_buf, "{s}/Pictures", .{env.home});
-    sys.mkdir(dir); // best effort; may already exist
+    var dir_buf: [1024]u8 = undefined;
+    const dir = try saveDir(gpa, env, cfg, &dir_buf);
+    sys.mkdirAll(dir, 0o755); // best effort; may already exist
 
     var ts: std.os.linux.timespec = undefined;
     _ = std.os.linux.clock_gettime(.REALTIME, &ts);

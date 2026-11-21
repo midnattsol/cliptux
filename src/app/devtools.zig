@@ -57,7 +57,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
         const t1 = nowMs();
         if (sc.restore_token) |t| {
             cfg.setScToken(t);
-            @import("config.zig").save(gpa, env.home, &cfg) catch {};
+            @import("config.zig").saveScreencastToken(gpa, env.home, t) catch {};
         }
         std.debug.print("session: node={d} fd={d} portal={d}ms token={s}\n", .{
             sc.node_id, sc.pw_fd, t1 - t0, if (sc.restore_token != null) "new" else "reused",
