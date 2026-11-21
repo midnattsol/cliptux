@@ -52,6 +52,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     // with the GNOME Shell extension, the shell takes the screenshot (no
     // prompt) and starts another shotlet on it
     if (!from.any() and gnome.isGnome() and gnome.extensionActive(&conn)) {
+        @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
         switch (gnome.requestCapture(gpa, &conn)) {
             .started => {
                 std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
@@ -129,7 +130,7 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen) !void {
+pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen) !void {
     const editor_mod = @import("../ui/editor.zig");
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;

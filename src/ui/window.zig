@@ -2412,6 +2412,23 @@ pub const Window = struct {
         return try readBounded(alloc, fds[0], max_bytes, sys.monoMs() + timeout_ms);
     }
 
+    /// The clipboard's content in the first of accept_mimes it offers
+    /// (caller frees .data); null when it offers none of them.
+    pub fn clipboardAccepted(self: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?Dropped {
+        const slot = self.offerSlot(self.selection_offer) orelse return null;
+        const bits = self.offers[slot].accept;
+        if (bits == 0) return null;
+        const mime = self.accept_mimes[@ctz(bits)];
+        const fds = try sys.pipe();
+        defer sys.close(fds[0]);
+        {
+            defer sys.close(fds[1]);
+            try self.conn.request(self.selection_offer, wl.wl_data_offer.receive, &.{ .{ .string = mime }, .{ .fd = fds[1] } });
+            try self.conn.flush();
+        }
+        return .{ .mime = mime, .data = try readBounded(alloc, fds[0], max_bytes, sys.monoMs() + timeout_ms) };
+    }
+
     fn handleClipboardSource(self: *Window, opcode: u16, r: *wl.ArgReader) !void {
         switch (opcode) {
             wl.wl_data_source.ev_send => {

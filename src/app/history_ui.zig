@@ -689,6 +689,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     std.log.info("history: text search {s}", .{if (p.searchable) "on (tesseract)" else "off (no libtesseract)"});
     const w: u32 = panel_w + 2 * pad;
     const h: u32 = @intCast(p.panelH() + 2 * pad);
+    // an image dropped here opens in the editor
+    p.win.accept_mimes = &@import("clipimg.zig").drop_mimes;
     try p.win.open("Recent captures", .{ .fullscreen = false, .transparent = true, .width = w, .height = h });
     p.win.report_leave = true;
     p.win.setCursor(.arrow) catch {};
@@ -709,6 +711,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
         };
         if (!try p.onEvent(ev)) break;
         while (try p.win.nextEventTimeout(0)) |e2| if (!try p.onEvent(e2)) break;
+        @import("clipimg.zig").takeDrop(gpa, env, &p.win);
         p.pollOcr();
     }
     p.win.closeWindow();

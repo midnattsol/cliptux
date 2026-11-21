@@ -21,6 +21,8 @@ const eyedrop = @import("eyedrop.zig");
 const tui = @import("tui.zig");
 const crop = @import("crop.zig");
 const crop_mode = @import("crop_mode.zig");
+const open = @import("open.zig");
+const launch = @import("launch.zig");
 
 const Editor = editor_mod.Editor;
 const Shape = shapes.Shape;
@@ -64,6 +66,14 @@ pub const State = struct {
     /// pictures before and after each crop, and opened ones
     crops: crop.Store = .{},
 };
+
+/// Once, when the editor first shows: how it was started.
+pub fn start(ed: *Editor) void {
+    ed.tools.text_capture = launch.text_capture;
+    if (launch.select_all) ed.doc.sel = ed.doc.imageRect();
+    // images dropped on the editor open in it
+    ed.win.accept_mimes = &open.drop_mimes;
+}
 
 pub fn deinit(ed: *Editor) void {
     ed.tools.crops.deinit(ed.alloc);
@@ -111,6 +121,7 @@ pub fn cancel(ed: *Editor) bool {
 /// Timers and background work, once per loop; the longest the loop may
 /// wait for the next event (ms).
 pub fn tick(ed: *Editor, now: i64) i32 {
+    open.poll(ed);
     var wait: i64 = 1000;
     if (ed.tools.toast.tick(now)) |left| {
         if (left == 0) ed.needs_render = true;
@@ -315,6 +326,7 @@ pub fn onAction(ed: *Editor, a: config.Action) !void {
         .spotlight => try ed.setTool(.spotlight),
         .eyedropper => try eyedrop.toggle(ed),
         .crop => try crop_mode.enter(ed),
+        .pin => try open.pinExport(ed),
         else => {},
     }
 }
@@ -325,6 +337,7 @@ pub fn onButton(ed: *Editor, e: Ext) !void {
         .eyedropper => try eyedrop.toggle(ed),
         .crop, .crop_apply => try crop_mode.enter(ed),
         .crop_cancel => _ = cancel(ed),
+        .pin => try open.pinExport(ed),
         .aspect => |a| try crop_mode.setAspect(ed, a),
         .picked => |i| if (i < ed.tools.history.len) {
             _ = try eyedrop.useColor(ed, ed.tools.history.items[i]);
@@ -336,6 +349,7 @@ pub fn onButton(ed: *Editor, e: Ext) !void {
 test {
     _ = color;
     _ = crop;
+    _ = launch;
     _ = ruler;
     _ = spotlight;
     _ = edges;

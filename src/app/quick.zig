@@ -916,6 +916,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
         q.hint = if (q.bus_()) |b| !gnome.extensionActive(b) else true;
         if (q.hint) std.log.info("quick access: no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});
     }
+    // an image dropped on a thumbnail opens in the editor
+    q.win.accept_mimes = &@import("clipimg.zig").drop_mimes;
     try q.add(root, id);
     std.log.info("quick access: showing {s} ({s})", .{ id, if (q.layer) "layer shell" else if (q.hint) "plain window" else "window placed by the GNOME extension" });
 
@@ -930,6 +932,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
         while (try q.win.nextEventTimeout(0)) |ev| q.onEvent(ev);
         if (nfds == 2 and fds[1].revents != 0) q.acceptClients();
         q.checkDrag();
+        @import("clipimg.zig").takeDrop(gpa, env, &q.win);
         q.tick();
         if (q.cards.items.len == 0) break;
         try q.render();

@@ -510,7 +510,7 @@ fn segRows(self: *const Editor, out: *[2][3]?Seg) usize {
     return n;
 }
 
-const menu_items = [_]ButtonKind{ .beautify, .save_as, .help, .cancel };
+const menu_items = [_]ButtonKind{ .{ .ext = .pin }, .beautify, .save_as, .help, .cancel };
 
 fn layoutPopover(self: *Editor) !void {
     const f = self.uf();

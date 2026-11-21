@@ -522,6 +522,7 @@ pub const Editor = struct {
         }
         if (!self.ui_init) {
             self.ui_init = true;
+            tools.start(self);
             self.thickness = std.math.clamp(self.cfg_thickness, 1, 32);
         }
         self.n_panes = @max(self.n_panes, idx + 1);
@@ -1801,7 +1802,7 @@ pub const Editor = struct {
         self.needs_render = true;
     }
 
-    fn finish(self: *Editor, action: Action) void {
+    pub fn finish(self: *Editor, action: Action) void {
         self.action = action;
         self.running = false;
     }
@@ -2345,7 +2346,7 @@ pub const Editor = struct {
         return tools.exportPixels(self);
     }
 
-    fn exportPng(self: *Editor) ![]u8 {
+    pub fn exportPng(self: *Editor) ![]u8 {
         const exported = try self.exportPixels();
         defer self.alloc.free(exported.pixels);
         // RGBA only for a transparent beautify background; everything else

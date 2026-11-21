@@ -5,6 +5,7 @@ const devtools = @import("app/devtools.zig");
 const shellcap = @import("app/shellcap.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
+const launch = @import("ui/tools/launch.zig");
 
 const usage =
     \\Shotlet - Wayland-native screenshot tool with annotation editor
@@ -12,8 +13,11 @@ const usage =
     \\usage:
     \\  shotlet             capture + editor (copy/save)
     \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
+    \\  shotlet text        capture text: select a region, its text (OCR)
+    \\                      goes to the clipboard
+    \\  shotlet edit FILE   open a PNG, JPEG or WebP in the editor
     \\  shotlet history     recent captures (history clear: forget them)
-    \\  shotlet pin FILE    pin a PNG to the screen
+    \\  shotlet pin [FILE]  pin an image (default: the clipboard's) to the screen
     \\  shotlet gnome-integration [status|install|uninstall]
     \\                      the GNOME Shell extension: prompt-free captures,
     \\                      floating windows
@@ -50,6 +54,7 @@ pub fn main(init: std.process.Init) !void {
         .envp = init.minimal.environ.block.slice.ptr,
         .tz = vars.get("TZ"),
     };
+    launch.env = env;
     env_mod.xdg = .{
         .config_home = env_mod.absolute(vars.get("XDG_CONFIG_HOME")),
         .state_home = env_mod.absolute(vars.get("XDG_STATE_HOME")),
@@ -61,8 +66,11 @@ pub fn main(init: std.process.Init) !void {
     // starts a capture: `shotlet shot --from-shell ID ...`
     const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
     const cmd = if (shell_launch) "shot" else if (args.len > 1) args[1] else "shot";
+    if (shell_launch) launch.takeHandOff(env.runtime_dir);
+    // `shotlet text` is a capture whose region's text is copied
+    if (std.mem.eql(u8, cmd, "text")) launch.text_capture = true;
 
-    if (std.mem.eql(u8, cmd, "shot")) {
+    if (std.mem.eql(u8, cmd, "shot") or std.mem.eql(u8, cmd, "text")) {
         // dev/testing flags: --from FILE (skip portal), --sel X,Y,W,H
         // (preset selection), --smoke MS (auto-cancel, for leak runs),
         // --from-monitors A.png,B.png (one image per monitor, side by side)
@@ -130,12 +138,14 @@ pub fn main(init: std.process.Init) !void {
         else
             0;
         try @import("app/history_ui.zig").run(gpa, env, smoke);
-    } else if (std.mem.eql(u8, cmd, "pin") and args.len > 2) {
-        try @import("app/pin.zig").run(gpa, env, args[2]);
+    } else if (std.mem.eql(u8, cmd, "pin")) {
+        if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
     } else if (std.mem.eql(u8, cmd, "gnome-integration")) {
         try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
     } else if (std.mem.eql(u8, cmd, "edit") and args.len > 3) {
         try shot.runEdit(gpa, env, args[2], args[3]);
+    } else if (std.mem.eql(u8, cmd, "edit") and args.len == 3) {
+        try @import("app/editfile.zig").run(gpa, env, args[2]);
     } else if (try devtools.run(gpa, env, cmd, args)) {
         // handled
     } else {
@@ -192,6 +202,8 @@ test {
     _ = @import("app/shellcap.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/pin.zig");
+    _ = @import("app/clipimg.zig");
+    _ = @import("app/editfile.zig");
     _ = @import("app/history_ui.zig");
     _ = @import("platform/ocr.zig");
     _ = @import("ui/floatui.zig");
