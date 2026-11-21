@@ -127,7 +127,10 @@ fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, after: setti
 /// capture and opens in the editor.
 fn scrolling(c: Ctx, cap: *capture.Capture) !Outcome {
     const s = settings.load(c.gpa, c.env.home);
-    var tall = (try scroll.run(c, cap, s)) orelse return .done;
+    var tall = (scroll.run(c, cap, s) catch |err| {
+        std.log.warn("scrolling capture failed ({t}): it needs the GNOME integration or a compositor Shotlet can capture directly", .{err});
+        return .done;
+    }) orelse return .done;
     errdefer tall.deinit(c.gpa);
     const single = try capture.Capture.single(c.gpa, tall);
     cap.deinit(c.gpa);
