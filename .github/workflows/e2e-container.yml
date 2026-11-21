@@ -3,8 +3,9 @@ name: E2E (containers)
 # The container suite runs shotlet on sway, labwc and KWin, each scenario
 # in a throwaway Debian container (tools/container/run.sh). Slow and
 # dependent on Debian's packages, so it never gates pull requests: it runs
-# nightly and on demand. Runners have no GPU, so screen capture and KWin
-# skip there (see the README's "Tests").
+# nightly and on demand. Runners have no GPU, so KWin and the wlroots
+# portal skip there; direct capture on sway and labwc still runs (see the
+# README's "Tests").
 on:
   workflow_dispatch:
     inputs:
