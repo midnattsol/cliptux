@@ -24,7 +24,7 @@ pub fn draw(canvas: *render.Canvas, g: Glyph, x: i32, y: i32, size: i32, color: 
     if (size <= 0 or size > 256) return;
     const n: usize = @intCast(size);
     var mask: [256 * 256]u8 = undefined;
-    path.rasterize(mask[0 .. n * n], n, data(g), 24, if (g == .pause) 2.5 else 1.75) catch return;
+    path.rasterizeFitted(mask[0 .. n * n], n, data(g), 24, if (g == .pause) 2.5 else 1.75) catch return;
     const ca: u32 = color >> 24;
     const rgb = color & 0x00FFFFFF;
     for (0..n) |row| for (0..n) |col| {
