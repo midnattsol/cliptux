@@ -14,7 +14,8 @@ const stitchStreams = @import("shot/screencast.zig").stitchStreams;
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
 
-/// Returns true when `cmd` was a recognized dev command.
+/// Returns true when `cmd` was a recognized dev command; `args`: the
+/// arguments after it.
 pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]const u8) !bool {
     if (std.mem.eql(u8, cmd, "test-window")) {
         try testWindow(gpa, env);
@@ -110,13 +111,13 @@ fn grabAndStitch(gpa: std.mem.Allocator, conn: *dbus.Connection, sc: *const port
 /// [out.png [font.ttf]]` renders the given lines (with that font first in
 /// the fallback chain).
 fn testFont(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    text.initWith(gpa, if (args.len >= 5) args[4] else null);
+    text.initWith(gpa, if (args.len >= 3) args[2] else null);
     defer text.deinit();
-    if (args.len >= 3) {
-        const out = try fontLines(gpa, args[2]);
+    if (args.len >= 1) {
+        const out = try fontLines(gpa, args[0]);
         defer gpa.free(out);
-        if (args.len >= 4) {
-            try sys.writeFile(args[3], out);
+        if (args.len >= 2) {
+            try sys.writeFile(args[1], out);
         } else try writeDebug(gpa, env, "shotlet-font.png", out);
         return;
     }
@@ -163,8 +164,8 @@ fn fontSample(gpa: std.mem.Allocator) ![]u8 {
 
 /// `test-decode FILE`: decodes a PNG and writes it back re-encoded.
 fn testDecode(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    if (args.len < 3) return error.MissingArg;
-    const data = try sys.readFileAlloc(gpa, args[2], 256 * 1024 * 1024);
+    if (args.len < 1) return error.MissingArg;
+    const data = try sys.readFileAlloc(gpa, args[0], 256 * 1024 * 1024);
     defer gpa.free(data);
     var img = try png.decode(gpa, data);
     defer img.deinit(gpa);

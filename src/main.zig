@@ -1,47 +1,19 @@
 const std = @import("std");
-const shot = @import("app/shot.zig");
-const daemon = @import("app/daemon.zig");
-const devtools = @import("app/devtools.zig");
-const shellcap = @import("app/shellcap.zig");
+const front = @import("cli/front.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
 const launch = @import("ui/tools/launch.zig");
-
-const usage =
-    \\Shotlet - Wayland-native screenshot tool with annotation editor
-    \\
-    \\usage:
-    \\  shotlet             capture + editor (copy/save)
-    \\  shotlet fullscreen|screens|previous|window|scroll [--delay S]
-    \\                      capture modes: the screen under the pointer,
-    \\                      all screens, the last area, a window, a
-    \\                      scrolling capture; --delay: the self-timer
-    \\  shotlet timer [3|5|10]   area capture after a countdown
-    \\  shotlet --daemon    run the system tray daemon (detaches; -f stays)
-    \\  shotlet text        capture text: select a region, its text (OCR)
-    \\                      goes to the clipboard
-    \\  shotlet edit FILE   open a PNG, JPEG or WebP in the editor
-    \\  shotlet history     recent captures (history clear: forget them)
-    \\  shotlet record      record an area or the screen (MP4 or GIF);
-    \\                      again (or --stop, --pause, --resume) stops it
-    \\  shotlet pin [FILE]  pin an image (default: the clipboard's) to the screen
-    \\  shotlet gnome-integration [status|install|uninstall]
-    \\                      the GNOME Shell extension: prompt-free captures,
-    \\                      floating windows
-    \\  shotlet gnome-integration shortcut [KEY...|none]
-    \\                      its capture shortcut (default Print)
-    \\  shotlet permissions [reset [--dry-run]]
-    \\                      what Shotlet captures with and what it remembered;
-    \\                      reset forgets it, so the next capture asks again
-    \\  shotlet --help      show this help
-    \\
-;
 
 const is_debug = @import("builtin").mode == .debug;
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
+    // help, the version and mistyped command lines need no session
+    const parsed = switch (try front.handle(arena, args, nonEmpty(init.environ_map.get("NO_COLOR")) != null)) {
+        .run => |p| p,
+        .exit => |code| std.process.exit(code),
+    };
 
     // DebugAllocator catches leaks in Debug; smp_allocator is the fast
     // thread-safe choice for release builds
@@ -54,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
     const env = try readEnv(arena, init);
     launch.env = env;
     setXdgDirs(init.environ_map);
-    try dispatch(gpa, env, args);
+    try @import("app/dispatch.zig").run(gpa, env, parsed);
 }
 
 /// The process environment Shotlet needs, from the variables.
@@ -81,149 +53,6 @@ fn setXdgDirs(vars: anytype) void {
         .pictures_dir = env_mod.absolute(vars.get("XDG_PICTURES_DIR")),
         .cache_home = env_mod.absolute(vars.get("XDG_CACHE_HOME")),
     };
-}
-
-/// Runs the command `args` name; unknown ones print the usage.
-fn dispatch(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    // `shotlet --from-shell ID ...` is how the GNOME Shell extension
-    // starts a capture: `shotlet shot --from-shell ID ...`
-    const shell_launch = args.len > 1 and std.mem.eql(u8, args[1], "--from-shell");
-    const cmd = if (shell_launch) "shot" else if (args.len > 1) args[1] else "shot";
-    if (shell_launch) {
-        launch.takeHandOff(env.runtime_dir);
-        // the extension runs: an install that waited for it can finish
-        @import("app/gnome.zig").finishPendingSetup(env);
-    }
-    // `shotlet text` is a capture whose region's text is copied
-    if (std.mem.eql(u8, cmd, "text")) launch.text_capture = true;
-    const eql = std.mem.eql;
-
-    if (eql(u8, cmd, "shot") or eql(u8, cmd, "text")) {
-        try runShot(gpa, env, args[@min(args.len, @as(usize, if (shell_launch) 1 else 2))..]);
-    } else if (eql(u8, cmd, "--daemon") or eql(u8, cmd, "daemon")) {
-        const foreground = args.len > 2 and
-            (eql(u8, args[2], "--foreground") or eql(u8, args[2], "-f"));
-        try daemon.run(gpa, env, foreground);
-    } else if (eql(u8, cmd, "settings")) {
-        try @import("ui/settings.zig").run(gpa, env, smokeArg(args));
-    } else if (eql(u8, cmd, "quick") and args.len > 3) {
-        try @import("app/quick.zig").run(gpa, env, args[2], args[3]);
-    } else if (eql(u8, cmd, "history")) {
-        try runHistory(gpa, env, args);
-    } else if (eql(u8, cmd, "quick-video") and args.len > 3) {
-        try @import("record/quickvid.zig").run(gpa, env, args[2], args[3]);
-    } else if (eql(u8, cmd, "trim") and args.len > 3) {
-        try @import("ui/recui/trimui.zig").run(gpa, env, args[2], args[3], args[4..]);
-    } else if (eql(u8, cmd, "record")) {
-        try @import("record/cli.zig").main(gpa, env, args[2..]);
-    } else if (eql(u8, cmd, "pin")) {
-        if (args.len > 2) try @import("app/pin.zig").run(gpa, env, args[2]) else try @import("app/clipimg.zig").pinClipboard(gpa, env);
-    } else if (eql(u8, cmd, "gnome-integration")) {
-        try @import("app/gnome.zig").runCli(gpa, env, if (args.len > 2) args[2] else "status", if (args.len > 3) args[3..] else &.{});
-    } else if (eql(u8, cmd, "permissions")) {
-        try @import("app/permissions.zig").run(gpa, env, args[2..]);
-    } else if (eql(u8, cmd, "edit") and args.len > 3) {
-        try shot.runEdit(gpa, env, args[2], args[3]);
-    } else if (eql(u8, cmd, "toast") and args.len > 2) {
-        try @import("app/toastwin.zig").run(gpa, env, args[2], if (args.len > 3) args[3] else "");
-    } else if (eql(u8, cmd, "edit") and args.len == 3) {
-        try @import("app/editfile.zig").run(gpa, env, args[2]);
-    } else if (try @import("app/modes/cli.zig").run(gpa, env, cmd, args[2..])) {
-        // a capture mode
-    } else if (try devtools.run(gpa, env, cmd, args)) {
-        // handled
-    } else {
-        std.debug.print("{s}", .{usage});
-    }
-}
-
-/// `CMD --smoke MS`: auto-close after MS (leak runs); 0 when absent.
-fn smokeArg(args: []const [:0]const u8) i64 {
-    return if (args.len > 3 and std.mem.eql(u8, args[2], "--smoke"))
-        std.fmt.parseInt(i64, args[3], 10) catch 0
-    else
-        0;
-}
-
-/// `shotlet history [clear | --smoke MS]`.
-fn runHistory(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    if (args.len > 2 and std.mem.eql(u8, args[2], "clear")) {
-        var buf: [1024]u8 = undefined;
-        @import("app/history.zig").clear(try @import("app/history.zig").historyRoot(&buf, env.home));
-        std.debug.print("history cleared\n", .{});
-        return;
-    }
-    try @import("app/history_ui.zig").run(gpa, env, smokeArg(args));
-}
-
-/// Options of `shotlet shot`, from its flag/value pairs.
-const ShotArgs = struct {
-    from: ?[]const u8 = null,
-    from_monitors: ?[]const u8 = null,
-    from_shell: ?shellcap.Args = null,
-    shell_monitors: []const u8 = "",
-    shell_pieces: []const u8 = "",
-    t0: ?i64 = null,
-    sel: ?[4]i32 = null,
-    smoke_ms: i64 = 0,
-    then_record: bool = false,
-    req: @import("app/modes/mode.zig").Request = .{},
-};
-
-/// `shotlet shot|text [FLAG VALUE]...`. Dev/testing flags: --from FILE
-/// (skip portal), --sel X,Y,W,H (preset selection), --smoke MS
-/// (auto-cancel, for leak runs), --from-monitors A.png,B.png (one image
-/// per monitor, side by side).
-fn runShot(gpa: std.mem.Allocator, env: Env, flags: []const [:0]const u8) !void {
-    var o: ShotArgs = .{};
-    var i: usize = 0;
-    while (i + 1 < flags.len) : (i += 2) try parseShotFlag(&o, flags[i], flags[i + 1]);
-    if (o.from_shell) |*fs| {
-        fs.monitors = o.shell_monitors;
-        fs.pieces = o.shell_pieces;
-        fs.t0_ms = o.t0;
-    }
-    if (o.then_record and o.from_shell != null) return @import("record/cli.zig").fromShell(gpa, env, o.from_shell.?);
-    try shot.run(gpa, env, .{ .file = o.from, .monitors = o.from_monitors, .shell = o.from_shell, .req = o.req }, o.sel, o.smoke_ms);
-}
-
-fn parseShotFlag(o: *ShotArgs, flag: []const u8, value: [:0]const u8) !void {
-    const eql = std.mem.eql;
-    if (eql(u8, flag, "--from")) {
-        o.from = value;
-    } else if (eql(u8, flag, "--from-monitors")) {
-        o.from_monitors = value;
-    } else if (eql(u8, flag, "--from-shell")) {
-        // the GNOME Shell extension's capture (src/app/shellcap.zig)
-        o.from_shell = .{ .id = value };
-    } else if (eql(u8, flag, "--monitors")) {
-        o.shell_monitors = value;
-    } else if (eql(u8, flag, "--pieces")) {
-        o.shell_pieces = value;
-    } else if (eql(u8, flag, "--then")) {
-        // the extension's record shortcut: the picker on this capture
-        if (eql(u8, value, "record")) o.then_record = true;
-    } else if (eql(u8, flag, "--mode")) {
-        o.req.withModeArg(value);
-    } else if (eql(u8, flag, "--pointer")) {
-        o.req.withPointerArg(value);
-    } else if (eql(u8, flag, "--t0")) {
-        o.t0 = std.fmt.parseInt(i64, value, 10) catch null;
-    } else if (eql(u8, flag, "--smoke")) {
-        o.smoke_ms = std.fmt.parseInt(i64, value, 10) catch 0;
-    } else if (eql(u8, flag, "--sel")) {
-        o.sel = try parseSel(value);
-    }
-}
-
-/// "X,Y,W,H" for --sel.
-fn parseSel(value: []const u8) ![4]i32 {
-    var it = std.mem.splitScalar(u8, value, ',');
-    var vals: [4]i32 = undefined;
-    for (&vals) |*v| {
-        v.* = std.fmt.parseInt(i32, it.next() orelse return error.BadSelArg, 10) catch return error.BadSelArg;
-    }
-    return vals;
 }
 
 fn nonEmpty(v: ?[]const u8) ?[]const u8 {
@@ -262,6 +91,8 @@ test "default bus address escapes the runtime dir" {
 }
 
 test {
+    _ = @import("cli/tests.zig");
+    _ = @import("app/dispatch.zig");
     _ = @import("platform/dbus.zig");
     _ = @import("platform/permstore.zig");
     _ = @import("platform/portal.zig");
