@@ -101,7 +101,8 @@ keys esc
 wait_exit 5 || stop_shotlet
 
 # --- the magnifier follows the pointer and leaves nothing behind: swept
-# over plain blue, then away, its dark ring (#1c1c1e) is nowhere on the path
+# over plain blue, then away, neither its white centre frame nor its
+# label (#1c1c1e) is anywhere on the path
 run_shotlet loupe shot --from "$IMG"
 wait_editor 10
 arrive 300 600
@@ -111,9 +112,50 @@ done
 drv move 0 1100 760 && drv sleep 300
 shot 0 loupe
 # (the mode strip's dark icons sit at the bottom centre, from x 650, y 814)
-check "the magnifier leaves no trail" eval 'no_find_exact 0 1c1c1e 12 1 260 520 780 805 && no_find_exact 0 1c1c1e 12 1 260 805 640 880'
+check "the magnifier leaves no trail" eval 'for c in 1c1c1e ffffff; do no_find_exact 0 $c 12 1 260 520 780 805 && no_find_exact 0 $c 12 1 260 805 640 880 || return 1; done'
 keys esc
 wait_exit 5 || stop_shotlet
+
+# --- the magnifier's keys: over the orange box C copies the pixel's
+# colour (not Crop: there is no selection), the wheel and - = zoom it,
+# the zoom is remembered; loupe=selecting shows it only while dragging,
+# loupe=never not at all
+run_shotlet magnifier shot --from "$IMG"
+wait_editor 10
+arrive 1000 400
+shot 0 magnifier
+check "magnifier: shows by the pointer (its white centre frame)" drv find 0 ffffff 12 1 1020 420 1200 600
+keys c
+sleep 0.3
+check "  ... C copies the pixel's colour" eq "$(clip_text)" "#FF8800"
+check "  ... and logs it, not a crop" eval 'wait_log 3 "magnifier: copied #FF8800" && not_grep "crop: started" "$SHOT_LOG"'
+drv wheel -1
+check "  ... the wheel zooms in" wait_log 3 "magnifier: zoom 12x"
+keys minus minus
+check "  ... and - out" wait_log 3 "magnifier: zoom 4x"
+keys esc
+wait_exit 5 || stop_shotlet
+check "  ... the zoom is kept for the next capture" grep -q "^loupe_zoom=4" "$HOME/.config/shotlet/config"
+printf 'loupe=selecting\n' >>"$HOME/.config/shotlet/config"
+run_shotlet magnifier-selecting shot --from "$IMG"
+wait_editor 10
+arrive 1000 400
+check "  ... loupe=selecting: none while pointing" no_find_exact 0 ffffff 12 1 1020 420 1200 600
+drv move 0 950 250 && drv down && drv move 0 980 330 && drv move 0 1000 400 && drv sleep 300
+shot 0 magnifier-selecting
+check "  ... but while dragging" drv find 0 ffffff 12 1 1020 420 1200 600
+drv up
+keys esc esc
+wait_exit 5 || stop_shotlet
+sed -i 's/^loupe=.*/loupe=never/' "$HOME/.config/shotlet/config"
+run_shotlet magnifier-never shot --from "$IMG"
+wait_editor 10
+arrive 1000 400
+shot 0 magnifier-never
+check "  ... loupe=never: no magnifier" no_find_exact 0 ffffff 12 1 1020 420 1200 600
+keys esc
+wait_exit 5 || stop_shotlet
+sed -i '/^loupe=/d' "$HOME/.config/shotlet/config"
 
 # --- beautify is per capture: an old beautify=true is not carried over;
 # the panel's pin ("Apply to every capture") keeps it on for new ones
