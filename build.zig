@@ -94,6 +94,8 @@ pub fn build(b: *std.Build) void {
     });
     // compiled with the tests so they cannot rot unnoticed
     test_step.dependOn(&drive.step);
+    // and the driver's own (its film's frame fit)
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = drive.root_module })).step);
     test_step.dependOn(&droptarget.step);
     test_step.dependOn(&wldrive.step);
     const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});

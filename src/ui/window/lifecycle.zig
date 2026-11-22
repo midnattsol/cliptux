@@ -14,6 +14,7 @@ const data_device = @import("data_device.zig");
 const clipboard = @import("clipboard.zig");
 const drag = @import("drag.zig");
 const dump = @import("dump.zig");
+const vanish = @import("vanish.zig");
 
 const Window = window.Window;
 const Output = output.Output;
@@ -108,11 +109,15 @@ fn allConfigured(w: *const Window) bool {
 }
 
 /// Destroy the visible window(s) (keeps the connection alive so an
-/// offered clipboard selection can still be served).
+/// offered clipboard selection can still be served). Fullscreen ones
+/// show a clear frame first (vanish.zig).
 pub fn closeWindow(w: *Window) void {
     dump.dumpFrames(w);
+    var clear: vanish.Clear = .{};
+    vanish.vanish(w, &clear);
     text_input.destroy(w);
     for (0..w.n_surfaces) |i| surface.destroy(w, @intCast(i));
+    clear.release(&w.conn);
     w.conn.flush() catch {};
 }
 

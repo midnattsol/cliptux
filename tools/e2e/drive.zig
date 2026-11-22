@@ -25,6 +25,10 @@
 //!   pixel PATH X Y        answer one pixel as AARRGGBB hex
 //!   runs PATH X RRGGBB [TOL]  how many vertical runs of that colour
 //!                         column X of the PNG has
+//!   film MON              start filming the monitor (drive/film.zig)
+//!   cut DIR|- [X0 Y0 X1 Y1]  stop filming; answer "frames N ghosts G
+//!                         blends B worst I PERMILLE" (the box, monitor
+//!                         pixels, left out); DIR gets each frame as PNG
 //!   sni-watcher MS        own org.kde.StatusNotifierWatcher; answer the
 //!                         first RegisterStatusNotifierItem within MS
 //!   sleep MS
@@ -36,6 +40,7 @@ const dbus = kit.dbus;
 const sys = kit.sys;
 const pixels = @import("drive/pixels.zig");
 const keys = @import("drive/keys.zig");
+const film = @import("drive/film.zig");
 
 const rd_dest = "org.gnome.Mutter.RemoteDesktop";
 const sc_dest = "org.gnome.Mutter.ScreenCast";
@@ -171,6 +176,7 @@ const Driver = struct {
     mons: []Monitor,
     runtime: []const u8,
     out: [64]u8 = undefined,
+    film: ?*film.Film = null,
 
     /// Run one line (blank and # lines are ignored) and reply to it;
     /// whether it was `quit`.
@@ -205,6 +211,8 @@ const Driver = struct {
         if (eql(cmd, "find")) return self.cmdFind(&it);
         if (eql(cmd, "runs")) return self.cmdRuns(&it);
         if (eql(cmd, "png") or eql(cmd, "pixel")) return self.cmdImage(cmd, &it);
+        if (eql(cmd, "film")) return self.cmdFilm(&it);
+        if (eql(cmd, "cut")) return self.cmdCut(&it);
         if (eql(cmd, "sni-watcher")) return self.cmdSniWatcher(&it);
         if (eql(cmd, "sleep")) {
             sleepMs(try std.fmt.parseInt(u32, try arg(&it), 10));
@@ -346,6 +354,50 @@ const Driver = struct {
         return std.fmt.bufPrint(&self.out, "{x:0>8}", .{img.pixels[@as(usize, y) * img.width + x]});
     }
 
+    /// film MON: film until `cut`, from the first frame on
+    fn cmdFilm(self: *Driver, it: *Args) ![]const u8 {
+        if (self.film != null) return error.Filming;
+        const mon = try self.monitor(try arg(it));
+        var probe = try self.grab(mon);
+        const w = probe.width;
+        const h = probe.height;
+        probe.deinit();
+        const f = try film.Film.start(self.gpa, mon.node, w, h);
+        self.film = f;
+        const deadline = sys.monoMs() + 5000;
+        while (f.count() == 0) {
+            if (sys.monoMs() > deadline) return error.NoFrames;
+            sleepMs(5);
+        }
+        return "";
+    }
+
+    /// cut DIR|- [X0 Y0 X1 Y1]
+    fn cmdCut(self: *Driver, it: *Args) ![]const u8 {
+        const f = self.film orelse return error.NotFilming;
+        self.film = null;
+        f.stop();
+        defer f.deinit();
+        const n = f.count();
+        const dir = try arg(it);
+        var mask: ?film.Mask = null;
+        if (it.next()) |first| {
+            var m: film.Mask = undefined;
+            m[0] = try std.fmt.parseInt(u32, first, 10) / film.shrink;
+            for (m[1..]) |*v| v.* = try std.fmt.parseInt(u32, try arg(it), 10) / film.shrink;
+            mask = m;
+        }
+        if (!eql(dir, "-")) for (0..n) |i| {
+            var name: [512]u8 = undefined;
+            const path = try std.fmt.bufPrint(&name, "{s}/f{d:0>4}.png", .{ dir, i });
+            const data = try kit.png.encode(self.gpa, f.frame(@intCast(i)), f.fw, f.fh);
+            defer self.gpa.free(data);
+            try sys.writeFile(path, data);
+        };
+        const v = film.judge(f, n, mask);
+        return std.fmt.bufPrint(&self.out, "frames {d} ghosts {d} blends {d} worst {d} {d}{s}", .{ v.frames, v.ghosts, v.blends, v.worst, v.worst_permille, if (f.full) " full" else "" });
+    }
+
     /// sni-watcher MS: play org.kde.StatusNotifierWatcher until an item
     /// registers
     fn cmdSniWatcher(self: *Driver, it: *Args) ![]const u8 {
@@ -435,6 +487,10 @@ const Driver = struct {
         return std.fmt.bufPrint(&self.out, "{d}x{d}", .{ frame.width, frame.height }) catch "";
     }
 };
+
+test {
+    _ = film;
+}
 
 fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);

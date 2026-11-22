@@ -1,9 +1,17 @@
 //! The editor's own dim transition, in place of the compositor's window
-//! effects (the GNOME extension turns those off for it): it opens on the
-//! frozen frame exactly as the desktop looked and dims in; it closes by
-//! easing everything it drew (dim, chrome, annotations) back to that
-//! plain frame, so taking the window away afterwards changes nothing on
-//! screen. Reduced motion makes both instant.
+//! effects: it opens on the frozen frame exactly as the desktop looked
+//! and dims in; it closes by easing everything it drew (dim, chrome,
+//! annotations) back to that plain frame, then the window shows a clear
+//! last frame (window/vanish.zig), so taking it away changes nothing on
+//! screen, whatever effect the compositor runs. Reduced motion makes both
+//! instant.
+//!
+//! The open has no such cure on GNOME without the extension (which skips
+//! mutter's map effect): mutter zooms the first frame in. A clear first
+//! frame shows black there (mutter backs a fullscreen window that is not
+//! opaque with black), and a window mapped clear before it goes
+//! fullscreen hides the top bar while nothing covers its place, or gets
+//! the resize effect instead.
 
 const std = @import("std");
 const editor = @import("../editor.zig");

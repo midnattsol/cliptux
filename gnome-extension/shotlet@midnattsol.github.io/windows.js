@@ -18,6 +18,8 @@
 // a frozen frame of the desktop and fade their own dim in and out: they
 // map and go away without mutter's zoom effects, which would scale that
 // frame over the live desktop (two desktops overlapping for a few frames).
+// (They also go away on a clear frame, which keeps the close clean without
+// this extension; the open needs it.)
 //
 // Tagged windows are left out of Alt+Tab (both switchers build their lists
 // from Meta.Display.get_tab_list, filtered here): a Wayland client cannot

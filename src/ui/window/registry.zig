@@ -34,6 +34,25 @@ pub const Globals = struct {
     layer_shell_version: u32 = 0,
     /// zxdg_exporter_v2, else zxdg_exporter_v1 (window/foreign.zig)
     exporter: u32 = 0,
+    /// whose window effects a closing window gets (window/vanish.zig)
+    effects: Effects = .none,
+};
+
+/// Compositors known to animate windows that close, told apart by a
+/// global only they offer; .none for the rest (wlroots' sway and labwc
+/// animate nothing).
+pub const Effects = enum {
+    none,
+    /// GNOME's mutter (gtk_shell1)
+    mutter,
+    /// KDE's KWin (org_kde_kwin_blur_manager)
+    kwin,
+
+    fn of(iface: []const u8) ?Effects {
+        if (std.mem.eql(u8, iface, "gtk_shell1")) return .mutter;
+        if (std.mem.eql(u8, iface, "org_kde_kwin_blur_manager")) return .kwin;
+        return null;
+    }
 };
 
 pub fn init(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
@@ -87,6 +106,7 @@ pub fn handleEvent(w: *Window, opcode: u16, r: *wl.ArgReader) !void {
 }
 
 fn handleGlobal(w: *Window, name: u32, iface: []const u8, version: u32) !void {
+    if (Effects.of(iface)) |e| w.globals.effects = e;
     if (try bindCore(w, name, iface, version)) return;
     if (try bindExtension(w, name, iface, version)) return;
     if (std.mem.eql(u8, iface, "wl_output")) try output.add(w, name, iface, version);

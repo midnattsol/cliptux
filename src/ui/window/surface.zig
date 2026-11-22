@@ -40,6 +40,8 @@ pub const Surface = struct {
     maximized: bool = false,
     /// argb8888 buffers with premultiplied alpha (OpenOptions.transparent)
     transparent: bool = false,
+    /// an xdg toplevel asked to be fullscreen (vanish.zig clears it last)
+    fullscreen: bool = false,
 
     // --- protocol objects and state ---
     wl_surface: u32 = 0,
@@ -106,6 +108,7 @@ pub fn create(w: *Window, idx: u8, title: []const u8, opts: OpenOptions, output_
     if (opts.layer) |l| if (w.globals.layer_shell != 0) {
         return createLayer(w, s, l, output_id);
     };
+    s.fullscreen = opts.fullscreen;
     try createToplevel(w, s, title, opts, output_id);
 }
 

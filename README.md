@@ -589,7 +589,11 @@ shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the
 expected height, its marker band exactly once, scrolling in the editor),
 `modes-scroll-manual` (the person scrolls, Stop ends it)
 and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
-run without the extension. `tools` (`tools/e2e/tools.sh`) checks the
+run without the extension. `blink` and `blink-ext` (`tools/e2e/scenarios/blink.sh`)
+film the editor's open and close frame by frame with GNOME's animations on
+(`shotlet-drive`'s `film` and `cut`) and fail on any frame that is neither
+the desktop, the editor nor a cross-fade of the two: without the extension
+the close (Esc, Copy) must have none, with it the open too. `tools` (`tools/e2e/tools.sh`) checks the
 editor's tools on a known picture: the colour picker's copies (read back
 with `wl-paste`), the ruler's snapped length, the spotlight's dimming and
 crop (and its undo) in the copies, `shotlet edit FILE`, `shotlet pin`

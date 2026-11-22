@@ -3,6 +3,7 @@
 
 pub const dbus = @import("platform/dbus.zig");
 pub const pw = @import("platform/pw.zig");
+pub const pwstream = @import("platform/pwstream.zig");
 pub const sys = @import("platform/sys.zig");
 pub const png = @import("gfx/png.zig");
 pub const window = @import("ui/window.zig");
