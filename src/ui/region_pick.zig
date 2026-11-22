@@ -15,6 +15,9 @@ const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const view_mod = @import("view.zig");
 const window = @import("../platform/api.zig").window;
+const dim = @import("dim.zig");
+const selchrome = @import("selchrome.zig");
+const theme = @import("theme.zig");
 const Rect = geom.Rect;
 const View = view_mod.View;
 
@@ -32,7 +35,6 @@ pub const Result = union(enum) {
 
 const accent: u32 = 0xFF0A84FF;
 const pill_bg: u32 = 0xE01C1C1E;
-const dim_keep: u32 = 0x5A; // of 255, kept outside the selection: about 65% dim
 
 const Pane = struct {
     view: View = .{},
@@ -53,6 +55,8 @@ pub const Picker = struct {
     win: *window.Window,
     cap: *const capture.Capture,
     kind: Kind,
+    /// of 256, what the dim outside the selection keeps (ui/dim.zig)
+    keep: u32 = 256,
     panes: [window.max_surfaces]Pane = @splat(.{}),
     sel: ?Rect = null,
     anchor: ?[2]i32 = null,
@@ -91,13 +95,7 @@ pub const Picker = struct {
         p.dimmed = try self.gpa.alloc(u32, p.bright.len);
         const img = &self.cap.image;
         view_mod.resample(img.pixels, img.width, img.height, p.view, p.bright, w, h, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) });
-        for (p.dimmed, p.bright) |*d, b| d.* = dimmed(b);
-    }
-
-    fn dimmed(px: u32) u32 {
-        var out: u32 = 0xFF000000;
-        inline for (.{ 0, 8, 16 }) |sh| out |= (((px >> sh) & 0xFF) * dim_keep / 255) << sh;
-        return out;
+        dim.dimRow(p.bright, p.dimmed, self.keep);
     }
 
     fn paint(self: *Picker, i: usize) !void {
@@ -128,7 +126,7 @@ pub const Picker = struct {
                 const row = y * @as(usize, p.w) + @as(usize, @intCast(c.x));
                 @memcpy(cv.px[row..][0..@intCast(c.w)], p.bright[row..][0..@intCast(c.w)]);
             };
-            cv.rectOutline(b.x - 2, b.y - 2, b.w + 4, b.h + 4, @max(2, @as(i32, @intFromFloat(2 * k))), accent);
+            selchrome.edge(cv, .{ .x = b.x, .y = b.y, .w = b.w, .h = b.h }, theme.of(.{}));
             if (self.anchor == null) self.drawStart(i, cv, k, b, label);
         }
         if (self.sel == null) self.drawHint(cv, k, "Drag over what to scroll \u{00b7} Esc to cancel");
@@ -282,7 +280,7 @@ pub const Picker = struct {
 };
 
 pub fn pick(gpa: std.mem.Allocator, win: *window.Window, cap: *const capture.Capture, kind: Kind) !Result {
-    var p: Picker = .{ .gpa = gpa, .win = win, .cap = cap, .kind = kind };
+    var p: Picker = .{ .gpa = gpa, .win = win, .cap = cap, .kind = kind, .keep = dim.keepFor(cap.image.pixels, cap.image.width, cap.image.height) };
     defer p.deinit();
     return p.run("Shotlet");
 }
