@@ -151,6 +151,38 @@ scenario_settings() {
     open_settings 14 enter
     check "Enable installs the GNOME Shell extension" test -f "$HOME/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io/extension.js"
     check "  ... enabled for the next login" eval "gsettings get org.gnome.shell enabled-extensions | grep -q shotlet@midnattsol.github.io"
+    settings_snapped
+}
+
+# Maximized, then tiled, the window is square and edge to edge (its
+# corners are its own background); floating again, it is back on the
+# desktop at its size
+settings_snapped() {
+    run_shotlet settings-snap settings
+    sleep 2
+    keys super+up
+    sleep 1.5
+    shot 0 settings-max
+    check "maximized Settings reaches the screen's corners" same_px settings-max 0 899 300 899
+    check "  ... both bottom ones" same_px settings-max 1599 899 300 899
+    keys super+left
+    sleep 1.5
+    shot 0 settings-tiled
+    check "tiled left, it fills its half to the corner" same_px settings-tiled 0 899 40 899
+    keys super+down
+    sleep 1.5
+    shot 0 settings-floating
+    check "  ... and floats again on the desktop" eval '! same_px settings-floating 0 899 460 500 2>/dev/null'
+    check "  ... at its size" same_px settings-floating 460 500 1140 500
+    keys esc
+    wait_exit 5
+}
+same_px() { # same_px SHOT X0 Y0 X1 Y1: two pixels of a screenshot match
+    local a
+    drv pixel "$OUT/$1.png" "$2" "$3" || return 1
+    a=$VAL
+    drv pixel "$OUT/$1.png" "$4" "$5" || return 1
+    [ "$a" = "$VAL" ] || { echo "  $a is not $VAL" >&2; return 1; }
 }
 
 # Reset permissions: Shotlet's grant and token go, another app's stays
