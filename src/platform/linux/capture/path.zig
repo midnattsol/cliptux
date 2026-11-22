@@ -1,6 +1,6 @@
 //! How the last capture got its pixels ($XDG_STATE_HOME/shotlet/
 //! capture-path), for Settings and `shotlet permissions`: the GNOME
-//! integration, the compositor directly (app/direct.zig), or a portal.
+//! integration, the compositor directly (capture/direct.zig), or a portal.
 
 const std = @import("std");
 const sys = @import("../sys.zig");

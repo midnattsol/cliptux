@@ -1,5 +1,5 @@
-//! KWin's org.kde.KWin.ScreenShot2 for direct capture (app/direct.zig)
-//! and window capture (app/modes/window_direct.zig): the call, KWin's
+//! KWin's org.kde.KWin.ScreenShot2 for direct capture (capture/direct.zig)
+//! and window capture (capture/window_direct.zig): the call, KWin's
 //! refusal reasons, and the image KWin writes into a pipe.
 
 const std = @import("std");

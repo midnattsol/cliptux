@@ -1,5 +1,5 @@
 //! Clicking a window while selecting an area, as on macOS: with the
-//! windows' frames from the capture (app/winrects.zig), the window under
+//! windows' frames from the capture (api.capture.windows), the window under
 //! the pointer is lit (bright, the rest dimmed, an accent outline); a
 //! click without a drag selects exactly it, a drag still draws a free
 //! area. With no frames (a desktop that does not say where its windows

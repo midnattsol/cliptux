@@ -1,8 +1,8 @@
 //! Where a scrolling capture's frames come from, and who scrolls:
 //!
-//! - GNOME: the Shotlet extension's scroll session (modes/shell_bus.zig):
+//! - GNOME: the Shotlet extension's scroll session (gnome/shell_bus.zig):
 //!   it grabs the region, and turns the wheel there itself when asked to;
-//! - wlroots and KWin: direct capture of the outputs (app/direct.zig),
+//! - wlroots and KWin: direct capture of the outputs (capture/direct.zig),
 //!   cropped to the region; the wheel through inject_wl.zig when the
 //!   compositor offers a way, else the person scrolls.
 

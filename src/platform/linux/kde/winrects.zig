@@ -1,4 +1,4 @@
-//! KWin's windows for app/winrects.zig: a one-off KWin script, loaded
+//! KWin's windows for capture/winrects.zig: a one-off KWin script, loaded
 //! through org.kde.kwin.Scripting (open to any session client, unlike
 //! ScreenShot2), lists the windows of the current desktop topmost first
 //! and calls this connection back with their frames; then it is unloaded.

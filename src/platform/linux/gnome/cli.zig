@@ -80,7 +80,7 @@ fn restoreTakenShortcuts(gpa: std.mem.Allocator, env: Env) void {
 fn runShortcut(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, rest: []const []const u8) !void {
     var sd_buf: [1100]u8 = undefined;
     const sd = try extension.schemaDir(gpa, env, bus, &sd_buf);
-    // a capture mode's own key (app/modes/gnome_keys.zig)
+    // a capture mode's own key (gnome/mode_keys.zig)
     if (rest.len > 0 and @import("../../../app/modes/mode.zig").shortcutNamed(rest[0]) != null)
         return gnome_keys.cli(gpa, env, sd, rest);
     if (rest.len > 0) try setCaptureShortcut(gpa, env, sd, rest);

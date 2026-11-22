@@ -43,7 +43,7 @@ fn parseFlag(o: *ShotArgs, flag: []const u8, value: [:0]const u8) !void {
     } else if (eql(u8, flag, "--from-monitors")) {
         o.from_monitors = value;
     } else if (eql(u8, flag, "--from-shell")) {
-        // the GNOME Shell extension's capture (src/app/shellcap.zig)
+        // the GNOME Shell extension's capture (api.shell.loadHanded)
         o.from_shell = .{ .id = value };
     } else if (eql(u8, flag, "--monitors")) {
         o.shell_monitors = value;

@@ -1,6 +1,6 @@
 //! The capture path a capture would take now, found the way app/shot.zig
 //! picks it but without capturing: the GNOME integration when its
-//! extension runs, the compositor's own interface (app/direct.zig), else
+//! extension runs, the compositor's own interface (capture/direct.zig), else
 //! the screen-sharing portal.
 
 const std = @import("std");
