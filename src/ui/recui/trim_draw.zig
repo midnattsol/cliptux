@@ -6,6 +6,7 @@ const std = @import("std");
 const render = @import("../../gfx/render.zig");
 const text = @import("../../gfx/text.zig");
 const fui = @import("../floatui.zig");
+const resample = @import("../../gfx/resample.zig");
 const glyphs = @import("glyphs.zig");
 const Rect = @import("../shapes.zig").Rect;
 
@@ -94,22 +95,23 @@ fn paintPreview(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const S
     const h: u32 = @intCast(r.h);
     const buf = gpa.alloc(u32, @as(usize, w) * h) catch return;
     defer gpa.free(buf);
-    fitInto(buf, w, h, st.pic, st.pic_w, st.pic_h);
+    fitInto(gpa, buf, w, h, st.pic, st.pic_w, st.pic_h);
     for (0..h) |y| @memcpy(cv.px[(@as(usize, @intCast(r.y)) + y) * @as(usize, @intCast(cv.w)) + @as(usize, @intCast(r.x)) ..][0..w], buf[y * w ..][0..w]);
 }
 
-/// Letterboxed (never cropped), smooth enough for a preview.
-fn fitInto(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
+/// Letterboxed (never cropped), area-filtered.
+fn fitInto(gpa: std.mem.Allocator, dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
     @memset(dst, 0xFF000000);
     const s = @min(@as(f64, @floatFromInt(dw)) / @as(f64, @floatFromInt(sw)), @as(f64, @floatFromInt(dh)) / @as(f64, @floatFromInt(sh)));
-    const tw: u32 = @intFromFloat(@as(f64, @floatFromInt(sw)) * s);
-    const th: u32 = @intFromFloat(@as(f64, @floatFromInt(sh)) * s);
+    const tw: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sw)) * s))), 1, dw);
+    const th: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sh)) * s))), 1, dh);
+    const tmp = gpa.alloc(u32, @as(usize, tw) * th) catch return;
+    defer gpa.free(tmp);
+    resample.scale(gpa, src, sw, sh, tmp, tw, th) catch return;
     const ox = (dw - tw) / 2;
     const oy = (dh - th) / 2;
     for (0..th) |y| for (0..tw) |x| {
-        const fx = (@as(f64, @floatFromInt(x)) + 0.5) / s - 0.5;
-        const fy = (@as(f64, @floatFromInt(y)) + 0.5) / s - 0.5;
-        dst[(oy + y) * dw + ox + x] = fui.sampleBilinear(src, sw, sh, fx, fy) | 0xFF000000;
+        dst[(oy + y) * dw + ox + x] = tmp[y * tw + x] | 0xFF000000;
     };
 }
 

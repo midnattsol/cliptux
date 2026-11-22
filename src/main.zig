@@ -154,6 +154,7 @@ test {
     _ = @import("gfx/imgload.zig");
     _ = @import("gfx/codec_libs.zig");
     _ = @import("gfx/effects.zig");
+    _ = @import("gfx/resample.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/direct.zig");
     _ = @import("app/direct_kwin.zig");

@@ -12,6 +12,7 @@ const std = @import("std");
 const render = @import("../gfx/render.zig");
 const effects = @import("../gfx/effects.zig");
 const text = @import("../gfx/text.zig");
+const resample = @import("../gfx/resample.zig");
 
 pub const Canvas = render.Canvas;
 pub const Rect = effects.Rect;
@@ -118,54 +119,40 @@ pub fn placeCard(dst: []u32, dw: u32, dh: u32, card: []const u32, cw: u32, ch: u
 }
 
 /// Draw `src` scaled to cover (or, for very different shapes, to fit in)
-/// the whole of `dst`, over a dark backdrop. Box filter / nearest.
-pub fn drawImageFill(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
+/// the whole of `dst`, over a dark backdrop, area-filtered (see
+/// gfx/resample.zig). Callers keep the result: it is worth caching.
+pub fn drawImageFill(gpa: std.mem.Allocator, dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
     @memset(dst, card_bg);
-    if (sw == 0 or sh == 0) return;
-    const ar_src = @as(f64, @floatFromInt(sw)) / @as(f64, @floatFromInt(sh));
-    const ar_dst = @as(f64, @floatFromInt(dw)) / @as(f64, @floatFromInt(dh));
-    const ratio = ar_src / ar_dst;
-    const cover = ratio > 0.7 and ratio < 1.4;
-    const s = if (cover)
-        @max(@as(f64, @floatFromInt(dw)) / @as(f64, @floatFromInt(sw)), @as(f64, @floatFromInt(dh)) / @as(f64, @floatFromInt(sh)))
-    else
-        @min(@as(f64, @floatFromInt(dw)) / @as(f64, @floatFromInt(sw)), @as(f64, @floatFromInt(dh)) / @as(f64, @floatFromInt(sh)));
-    const tw: f64 = @as(f64, @floatFromInt(sw)) * s;
-    const th: f64 = @as(f64, @floatFromInt(sh)) * s;
-    const ox = (@as(f64, @floatFromInt(dw)) - tw) / 2;
-    const oy = (@as(f64, @floatFromInt(dh)) - th) / 2;
-    for (0..dh) |y| {
-        const fy = (@as(f64, @floatFromInt(y)) + 0.5 - oy) / s;
-        if (fy < 0 or fy >= @as(f64, @floatFromInt(sh))) continue;
-        const sy: usize = @intFromFloat(fy);
-        for (0..dw) |x| {
-            const fx = (@as(f64, @floatFromInt(x)) + 0.5 - ox) / s;
-            if (fx < 0 or fx >= @as(f64, @floatFromInt(sw))) continue;
-            const p = src[sy * sw + @as(usize, @intFromFloat(fx))];
-            dst[y * dw + x] = effects.over(dst[y * dw + x], p);
-        }
-    }
+    if (sw == 0 or sh == 0 or dw == 0 or dh == 0) return;
+    const f = fillPlan(sw, sh, dw, dh);
+    const tmp = gpa.alloc(u32, @as(usize, f.w) * f.h) catch return;
+    defer gpa.free(tmp);
+    resample.region(gpa, src, sw, sh, f.src, tmp, f.w, f.h) catch return;
+    blitOver(dst, dw, dh, tmp, f.w, f.h, f.x, f.y);
 }
 
-/// Bilinear sample for smoother small thumbnails.
-pub fn sampleBilinear(src: []const u32, sw: u32, sh: u32, fx: f64, fy: f64) u32 {
-    const x0: u32 = @intFromFloat(std.math.clamp(@floor(fx), 0, @as(f64, @floatFromInt(sw - 1))));
-    const y0: u32 = @intFromFloat(std.math.clamp(@floor(fy), 0, @as(f64, @floatFromInt(sh - 1))));
-    const x1 = @min(x0 + 1, sw - 1);
-    const y1 = @min(y0 + 1, sh - 1);
-    const tx = std.math.clamp(fx - @as(f64, @floatFromInt(x0)), 0, 1);
-    const ty = std.math.clamp(fy - @as(f64, @floatFromInt(y0)), 0, 1);
-    var out: u32 = 0;
-    inline for (0..4) |c| {
-        const sh_: u5 = c * 8;
-        const a: f64 = @floatFromInt((src[y0 * sw + x0] >> sh_) & 0xFF);
-        const b: f64 = @floatFromInt((src[y0 * sw + x1] >> sh_) & 0xFF);
-        const cc: f64 = @floatFromInt((src[y1 * sw + x0] >> sh_) & 0xFF);
-        const d: f64 = @floatFromInt((src[y1 * sw + x1] >> sh_) & 0xFF);
-        const v = (a * (1 - tx) + b * tx) * (1 - ty) + (cc * (1 - tx) + d * tx) * ty;
-        out |= @as(u32, @intFromFloat(@round(v))) << sh_;
+/// Where drawImageFill puts the picture: the part of the source shown
+/// and the target rectangle it fills.
+const FillPlan = struct { src: resample.Region, x: i32, y: i32, w: u32, h: u32 };
+
+fn fillPlan(sw: u32, sh: u32, dw: u32, dh: u32) FillPlan {
+    const fsw: f64 = @floatFromInt(sw);
+    const fsh: f64 = @floatFromInt(sh);
+    const fdw: f64 = @floatFromInt(dw);
+    const fdh: f64 = @floatFromInt(dh);
+    const ratio = (fsw / fsh) / (fdw / fdh);
+    if (ratio > 0.7 and ratio < 1.4) {
+        // cover: the centred part of the source with the target's shape
+        const s = @max(fdw / fsw, fdh / fsh);
+        const cw = fdw / s;
+        const ch = fdh / s;
+        return .{ .src = .{ .x = (fsw - cw) / 2, .y = (fsh - ch) / 2, .w = cw, .h = ch }, .x = 0, .y = 0, .w = dw, .h = dh };
     }
-    return out;
+    // contain: all of the source, centred
+    const s = @min(fdw / fsw, fdh / fsh);
+    const w: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsw * s))), 1, dw);
+    const h: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsh * s))), 1, dh);
+    return .{ .src = .{ .x = 0, .y = 0, .w = fsw, .h = fsh }, .x = @intCast((dw - w) / 2), .y = @intCast((dh - h) / 2), .w = w, .h = h };
 }
 
 pub const Icon = enum { close, pencil, pin, search, trash, copy, save, check };
@@ -247,4 +234,20 @@ test "premultiply and fades keep opaque pixels and clear transparent ones" {
     try std.testing.expectEqual(@as(u32, 0x7F), f[0] >> 24);
     try std.testing.expectEqual(@as(u32, 0x123456), f[0] & 0xFFFFFF);
     try std.testing.expectEqual(@as(u32, 0x40), f[1] >> 24);
+}
+
+test "pictures cover close shapes and fit very different ones" {
+    // 1600x1000 into 240x150 (same shape): all of it, edge to edge
+    const a = fillPlan(1600, 1000, 240, 150);
+    try std.testing.expectApproxEqAbs(@as(f64, 1600), a.src.w, 1e-6);
+    try std.testing.expectEqual(@as(u32, 240), a.w);
+    // 1600x1200 into 240x150: cropped top and bottom, centred
+    const b = fillPlan(1600, 1200, 240, 150);
+    try std.testing.expectApproxEqAbs(@as(f64, 1000), b.src.h, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f64, 100), b.src.y, 1e-6);
+    // a tall strip into a wide box: whole, letterboxed in the middle
+    const c = fillPlan(100, 1000, 240, 150);
+    try std.testing.expectEqual(@as(u32, 15), c.w);
+    try std.testing.expectEqual(@as(u32, 150), c.h);
+    try std.testing.expectEqual(@as(i32, 112), c.x);
 }

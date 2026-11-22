@@ -17,11 +17,11 @@
 const std = @import("std");
 const env_mod = @import("env.zig");
 const gnome = @import("gnome.zig");
-const keep = @import("keep.zig");
 const dbus = @import("../platform/dbus.zig");
 const sys = @import("../platform/sys.zig");
 const wl = @import("../platform/wayland.zig");
 const png = @import("../gfx/png.zig");
+const resample = @import("../gfx/resample.zig");
 const text = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
 const window = @import("../ui/window.zig");
@@ -231,7 +231,7 @@ const Pin = struct {
         p.gpa.free(p.scaled);
         p.scaled = &.{};
         p.scaled = try p.gpa.alloc(u32, @as(usize, pw) * ph);
-        keep.scaleInto(p.img.pixels, p.img.width, p.img.height, p.scaled, pw, ph);
+        try resample.scale(p.gpa, p.img.pixels, p.img.width, p.img.height, p.scaled, pw, ph);
         p.scaled_w = pw;
         p.scaled_h = ph;
     }

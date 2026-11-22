@@ -7,6 +7,7 @@ const env_mod = @import("env.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
 const png = @import("../gfx/png.zig");
+const resample = @import("../gfx/resample.zig");
 const sys = @import("../platform/sys.zig");
 const shapes = @import("../ui/shapes.zig");
 const doc_mod = @import("../ui/doc.zig");
@@ -155,8 +156,7 @@ pub fn sourceCrop(d: *const doc_mod.Document) shapes.Rect {
 
 pub const Pixels = struct { pixels: []u32, width: u32, height: u32 };
 
-/// Scale down to fit max_w x max_h (never up), averaging boxes of source
-/// pixels; alpha is averaged too.
+/// Scale down to fit max_w x max_h (never up), area-filtered.
 pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, max_w: u32, max_h: u32) !Pixels {
     const fx = @as(f64, @floatFromInt(max_w)) / @as(f64, @floatFromInt(@max(1, sw)));
     const fy = @as(f64, @floatFromInt(max_h)) / @as(f64, @floatFromInt(@max(1, sh)));
@@ -164,31 +164,9 @@ pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, m
     const dw: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sw)) * f))));
     const dh: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sh)) * f))));
     const out = try alloc.alloc(u32, @as(usize, dw) * dh);
-    scaleInto(src, sw, sh, out, dw, dh);
+    errdefer alloc.free(out);
+    try resample.scale(alloc, src, sw, sh, out, dw, dh);
     return .{ .pixels = out, .width = dw, .height = dh };
-}
-
-/// Box-filter `src` into `dst` (any size; upscaling repeats pixels).
-pub fn scaleInto(src: []const u32, sw: u32, sh: u32, dst: []u32, dw: u32, dh: u32) void {
-    for (0..dh) |y| {
-        const y0 = y * sh / dh;
-        const y1 = @max(y0 + 1, (y + 1) * sh / dh);
-        for (0..dw) |x| {
-            const x0 = x * sw / dw;
-            const x1 = @max(x0 + 1, (x + 1) * sw / dw);
-            var acc: [4]u64 = .{ 0, 0, 0, 0 };
-            var yy = y0;
-            while (yy < y1) : (yy += 1) {
-                for (src[yy * sw + x0 .. yy * sw + x1]) |p| {
-                    inline for (0..4) |c| acc[c] += (p >> (c * 8)) & 0xFF;
-                }
-            }
-            const n: u64 = (y1 - y0) * (x1 - x0);
-            var o: u32 = 0;
-            inline for (0..4) |c| o |= @as(u32, @intCast((acc[c] + n / 2) / n)) << (c * 8);
-            dst[y * dw + x] = o;
-        }
-    }
 }
 
 /// Run `shotlet ARGS...` detached (double fork: never a zombie, and it

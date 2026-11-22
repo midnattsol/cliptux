@@ -3,9 +3,7 @@
 //! shadow, faded as a whole; and the GNOME hint above the stack.
 
 const std = @import("std");
-const keep = @import("../keep.zig");
 const sys = @import("../../platform/sys.zig");
-const png = @import("../../gfx/png.zig");
 const text = @import("../../gfx/text.zig");
 const shapes = @import("../../ui/shapes.zig");
 const fui = @import("../../ui/floatui.zig");
@@ -148,9 +146,7 @@ fn ensureScaled(gpa: std.mem.Allocator, c: *Card, cw: u32, ch: u32) !void {
     c.scaled = try gpa.alloc(u32, @as(usize, cw) * ch);
     c.scaled_w = cw;
     c.scaled_h = ch;
-    const cov = try coverScaled(gpa, c.thumb, cw, ch);
-    defer gpa.free(cov.pixels);
-    fui.drawImageFill(c.scaled, cw, ch, cov.pixels, cov.width, cov.height);
+    fui.drawImageFill(gpa, c.scaled, cw, ch, c.thumb.pixels, c.thumb.width, c.thumb.height);
 }
 
 fn drawMenu(self: *const Quick, cv: *Canvas, c: *const Card, i: usize, r: Rect, k: f64) void {
@@ -231,21 +227,4 @@ fn composite(self: *Quick, dst: Target, card: []const u32, r: Rect, alpha: f64, 
 
 pub fn sc(v: i32, k: f64) i32 {
     return @intFromFloat(@round(@as(f64, @floatFromInt(v)) * k));
-}
-
-/// The thumbnail box-filtered to the size it is drawn at in a w x h box
-/// (cover, or contain for very different shapes: see drawImageFill).
-pub fn coverScaled(gpa: std.mem.Allocator, t: png.Image, w: u32, h: u32) !keep.Pixels {
-    const ar_src = @as(f64, @floatFromInt(t.width)) / @as(f64, @floatFromInt(t.height));
-    const ar_dst = @as(f64, @floatFromInt(w)) / @as(f64, @floatFromInt(h));
-    const ratio = ar_src / ar_dst;
-    const cover = ratio > 0.7 and ratio < 1.4;
-    const fw = @as(f64, @floatFromInt(w)) / @as(f64, @floatFromInt(t.width));
-    const fh = @as(f64, @floatFromInt(h)) / @as(f64, @floatFromInt(t.height));
-    const s = if (cover) @max(fw, fh) else @min(fw, fh);
-    const dw: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(t.width)) * s))));
-    const dh: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(t.height)) * s))));
-    const out = try gpa.alloc(u32, @as(usize, dw) * dh);
-    keep.scaleInto(t.pixels, t.width, t.height, out, dw, dh);
-    return .{ .pixels = out, .width = dw, .height = dh };
 }

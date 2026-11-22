@@ -15,7 +15,6 @@ const window = @import("../../ui/window.zig");
 const fui = @import("../../ui/floatui.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
-const card_draw = @import("card.zig");
 
 const Quick = stack.Quick;
 const Action = layout.Action;
@@ -191,9 +190,7 @@ fn dragIcon(self: *Quick, c: *const stack.Card, icon_px: []u32, iw: u32, ih: u32
     @memset(icon_px, 0);
     const pic = try self.gpa.alloc(u32, @as(usize, iw) * ih);
     defer self.gpa.free(pic);
-    const cov = card_draw.coverScaled(self.gpa, c.thumb, iw, ih) catch null;
-    defer if (cov) |p| self.gpa.free(p.pixels);
-    if (cov) |p| fui.drawImageFill(pic, iw, ih, p.pixels, p.width, p.height) else @memset(pic, fui.card_bg);
+    fui.drawImageFill(self.gpa, pic, iw, ih, c.thumb.pixels, c.thumb.width, c.thumb.height);
     effects.blitRounded(icon_px, iw, ih, pic, iw, ih, 0, 0, @intCast(10 * k));
     fui.fadeAlpha(icon_px, 0.92);
     fui.premultiply(icon_px, iw, ih, .{ .x = 0, .y = 0, .w = @intCast(iw), .h = @intCast(ih) });

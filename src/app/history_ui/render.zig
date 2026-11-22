@@ -5,9 +5,7 @@
 
 const std = @import("std");
 const clock = @import("../clock.zig");
-const keep = @import("../keep.zig");
 const sys = @import("../../platform/sys.zig");
-const png = @import("../../gfx/png.zig");
 const text = @import("../../gfx/text.zig");
 const effects = @import("../../gfx/effects.zig");
 const shapes = @import("../../ui/shapes.zig");
@@ -161,9 +159,7 @@ fn ensureScaled(gpa: std.mem.Allocator, it: *Item, tw: u32, tth: u32) !void {
     it.sw = tw;
     it.sh = tth;
     if (it.thumb) |t| {
-        const cov = try coverScaled(gpa, t, tw, tth);
-        defer gpa.free(cov.pixels);
-        fui.drawImageFill(it.scaled, tw, tth, cov.pixels, cov.width, cov.height);
+        fui.drawImageFill(gpa, it.scaled, tw, tth, t.pixels, t.width, t.height);
     } else @memset(it.scaled, fui.card_bg);
 }
 
@@ -234,16 +230,4 @@ fn drawNotice(self: *const Panel, cv: *Canvas, pw: u32, ph: u32, kk: f64) void {
 /// blitRounded onto an opaque buffer, clipped (rows may fall outside).
 fn blitRoundedClipped(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32, x: i32, y: i32, radius: u32) void {
     effects.blitRounded(dst, dw, dh, src, sw, sh, x, y, radius);
-}
-
-fn coverScaled(gpa: std.mem.Allocator, t: png.Image, w: u32, h: u32) !keep.Pixels {
-    const fw = @as(f64, @floatFromInt(w)) / @as(f64, @floatFromInt(t.width));
-    const fh = @as(f64, @floatFromInt(h)) / @as(f64, @floatFromInt(t.height));
-    const ratio = fw / fh;
-    const sc = if (ratio > 0.7 and ratio < 1.4) @max(fw, fh) else @min(fw, fh);
-    const dw: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(t.width)) * sc))));
-    const dh: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(t.height)) * sc))));
-    const out = try gpa.alloc(u32, @as(usize, dw) * dh);
-    keep.scaleInto(t.pixels, t.width, t.height, out, dw, dh);
-    return .{ .pixels = out, .width = dw, .height = dh };
 }

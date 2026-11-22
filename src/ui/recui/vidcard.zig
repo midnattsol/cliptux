@@ -67,7 +67,7 @@ pub fn paint(gpa: std.mem.Allocator, px: []u32, bw: u32, bh: u32, k: f64, v: *co
     const card = gpa.alloc(u32, @as(usize, cw) * ch) catch return;
     defer gpa.free(card);
     @memset(card, fui.card_bg);
-    fui.drawImageFill(card, cw, ch, v.pic, v.pic_w, v.pic_h);
+    fui.drawImageFill(gpa, card, cw, ch, v.pic, v.pic_w, v.pic_h);
     var cv = render.Canvas.init(card, cw, ch);
     badge(&cv, k, v);
     if (v.hovered) controls(&cv, k, v);
