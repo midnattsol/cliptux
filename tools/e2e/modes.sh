@@ -13,9 +13,12 @@
 #                 stitched to the right height, the marker once
 #   modes-keys    `shotlet gnome-integration shortcut MODE KEY`
 
-# the scrolling capture's Stop: the default accent darkened for its white
-# label (theme.accentFill(0a84ff))
-stop_fill=0974df
+# the scrolling capture's Stop and Continue: the desktop's accent (GNOME's
+# blue, 3584e4) darkened for their white labels (theme.accentFill)
+stop_fill=2f76cb
+# the control's bottom row (its buttons), the control right of a region
+# at 300,300 600x400: away from the page in its preview
+hud_row="896 600 1200 660"
 
 mode_cfg() { # mode_cfg AFTER [KEY=VALUE...]: Shotlet's settings
     mkdir -p "$HOME/.config/shotlet"
@@ -207,8 +210,8 @@ modes-scroll)
     check "  ... the page scrolls by itself" eval 'for i in $(seq 1 50); do grep -q "^scrolled [1-9]" "$OUT/page.log" && break; sleep 0.2; done; grep -q "^scrolled [1-9]" "$OUT/page.log"'
     sleep 1
     shot 0 scrolling
-    check "  ... beside the control showing it grow" drv find 0 "$stop_fill" 24 100
-    check "it stops at the end of the page" shell_wait 60 "scrolling capture: reached the end" 1
+    check "  ... beside the control showing it grow" drv find 0 "$stop_fill" 24 100 $hud_row
+    check "it stops at the end of the page, and says so" shell_wait 60 "stopped: end_of_page (Reached the end of the page)" 1
     check "  ... and opens the tall image in the editor" shell_wait 10 "startup: capture=" 1
     check "  ... the virtual pointer gone with the session" shell_wait 5 "scrolling capture ended" 1
     sleep 1
@@ -235,7 +238,7 @@ modes-scroll-manual)
     modes_start Meta-0
     mode_cfg copy scroll_auto=false
     : >"$OUT/page.log"
-    "$PYGTK" "$ROOT/tools/e2e/scrolltarget.py" 3000 >>"$OUT/page.log" 2>>"$OUT/page.err" &
+    "$PYGTK" "$ROOT/tools/e2e/scrolltarget.py" 3000 "$OUT/page.ctl" >>"$OUT/page.log" 2>>"$OUT/page.err" &
     for i in $(seq 1 50); do grep -q "^viewport" "$OUT/page.log" && break; sleep 0.2; done
     sleep 1
     drv key ctrl+super+print
@@ -247,8 +250,17 @@ modes-scroll-manual)
     sleep 1
     for i in $(seq 1 10); do drv move 0 600 500; drv wheel 2; sleep 0.6; done
     check "  ... the page moved by hand" grep -q "^scrolled [1-9]" "$OUT/page.log"
-    drv find 0 "$stop_fill" 24 100 && read -r bx by _ <<<"$VAL"
+    shot 0 manual-running
+    # too far in one go: a warning, and scrolling back lines it up again
+    at=$(grep "^scrolled" "$OUT/page.log" | tail -1 | cut -d' ' -f2)
+    echo "goto 2500" >"$OUT/page.ctl"
+    check "  ... a jump past what lines up warns: couldn't match" shell_wait 10 "warning: no_match (Couldn" 1
+    shot 0 manual-warning
+    echo "goto $((${at:-0} + 40))" >"$OUT/page.ctl"
+    check "  ... scrolling back lines it up again" shell_wait 10 "lined up again" 1
+    drv find 0 "$stop_fill" 24 100 $hud_row && read -r bx by _ <<<"$VAL"
     check "Stop on the control ends it" eval 'click 0 "$bx" "$by" && shell_wait 15 "startup: capture=" 1'
+    check "  ... logged as the person's stop" shell_wait 2 "stopped: user_stopped" 1
     sleep 1
     keys enter
     check "  ... and the editor copies what was scrolled" wait_clip manual 10
@@ -295,4 +307,5 @@ modes-keys)
     "$BIN" gnome-integration shortcut >"$OUT/status.log" 2>&1
     check "a key GNOME's screenshot tool holds stays unbound (and says so)" grep -q "fullscreen.*GNOME" "$OUT/status.log"
     ;;
+modes-scroll-stops | modes-scroll-dark) . "$ROOT/tools/e2e/scroll.sh" ;;
 esac

@@ -114,6 +114,8 @@ test {
     _ = @import("app/modes/window_frame.zig");
     _ = @import("app/modes/cli.zig");
     _ = @import("app/scroll/capture.zig");
+    _ = @import("app/scroll/session.zig");
+    _ = @import("app/scroll/stop.zig");
     _ = @import("app/gsettings.zig");
     _ = @import("app/permissions.zig");
     _ = @import("app/pin.zig");
@@ -127,6 +129,7 @@ test {
     _ = @import("ui/rect_list.zig");
     _ = @import("ui/caret.zig");
     _ = @import("ui/scroll_steps.zig");
+    _ = @import("ui/scroll_hud.zig");
     _ = @import("ui/transfer.zig");
     _ = @import("app/editfile.zig");
     _ = @import("app/toastwin.zig");

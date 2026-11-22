@@ -4,14 +4,19 @@
 # and a block at its own x (no two rows alike), and one magenta marker
 # band in the middle. Prints "viewport H" (the visible height of the page)
 # and "scrolled Y" as it scrolls.
-# usage: scrolltarget.py [LEN]
+# usage: scrolltarget.py [LEN [CTL]]
+# CTL, a file read every 0.1 s, makes the page misbehave for the stop
+# reasons of a scrolling capture: "lock" (the wheel does nothing),
+# "jump" (each notch jumps two views on: nothing lines up), "goto Y"
+# (scroll to Y, once per change); anything else, or no file: normal.
 import sys
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gio, Gtk  # noqa: E402
+from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
 LEN = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
+CTL = sys.argv[2] if len(sys.argv) > 2 else None
 BAND = 50
 MARKER = (LEN // 2 // BAND) * BAND  # the marker band starts here
 MARKER_H = 30
@@ -41,6 +46,36 @@ def draw(_area, cr, width, height):
     cr.fill()
 
 
+class Control:
+    def __init__(self, adj):
+        self.adj = adj
+        self.mode = ""
+        self.last = None
+
+    def poll(self):
+        try:
+            with open(CTL) as f:
+                cmd = f.read().strip()
+        except OSError:
+            cmd = ""
+        if cmd != self.last:
+            self.last = cmd
+            out("control", cmd or "-")
+            if cmd.startswith("goto "):
+                self.adj.set_value(int(cmd.split()[1]))
+        self.mode = cmd
+        return GLib.SOURCE_CONTINUE
+
+    def scroll(self, _ctl, _dx, dy):
+        if self.mode == "lock":
+            return True
+        if self.mode == "jump" and dy > 0:
+            a = self.adj
+            a.set_value(min(a.get_upper() - a.get_page_size(), a.get_value() + 2 * a.get_page_size()))
+            return True
+        return False
+
+
 class Page(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="org.shotlet.E2eScroll", flags=Gio.ApplicationFlags.NON_UNIQUE)
@@ -55,6 +90,13 @@ class Page(Gtk.Application):
         adj = sw.get_vadjustment()
         adj.connect("notify::page-size", lambda a, _p: out("viewport", int(a.get_page_size())))
         adj.connect("value-changed", lambda a: out("scrolled", int(a.get_value())))
+        if CTL:
+            self.ctl = Control(adj)
+            GLib.timeout_add(100, self.ctl.poll)
+            wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
+            wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            wheel.connect("scroll", self.ctl.scroll)
+            win.add_controller(wheel)
         win.maximize()
         win.present()
 

@@ -174,7 +174,13 @@ timed capture too.
   (sticky headers and footers kept once, repeated rows handled, frames
   verified pixel by pixel) until the page stops moving, you press Stop,
   or the image reaches `scroll_max_height=20000` px; a small control
-  beside the region shows the image growing. The result opens in the
+  beside the region shows the image growing and says why it stopped
+  ("Reached the end of the page", "Stopped at the 20 000 px limit").
+  When it stops short ("The page didn't move", "Couldn't match the next
+  part", "Lost sight of the region") it pauses with **Continue** (C or
+  Space: carry on from there, keeping what is stitched; after a jump,
+  scroll back a little until the parts line up), **Finish** (Enter: the
+  editor with what was captured) and **Cancel** (Esc). The result opens in the
   editor, where a tall image fits the screen's width and the wheel scrolls
   it (Ctrl+wheel: size). On GNOME the extension scrolls (see below); on
   wlroots Shotlet uses the virtual pointer (`zwlr_virtual_pointer_v1`)
@@ -587,7 +593,11 @@ on screen but not in the capture), `modes-window` (a 640x480 GTK window
 captured at exactly its size with see-through corners, then with its
 shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the
 expected height, its marker band exactly once, scrolling in the editor),
-`modes-scroll-manual` (the person scrolls, Stop ends it)
+`modes-scroll-manual` (the person scrolls, a jump warns and scrolling back
+lines it up, Stop ends it), `modes-scroll-stops` and `modes-scroll-dark`
+(each stop reason in the light and dark control: the page didn't move and C
+continues, couldn't match and Continue then scrolling back keeps what was
+stitched, the height limit, Esc on a pause; `tools/e2e/scroll.sh`)
 and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
 run without the extension. `blink` and `blink-ext` (`tools/e2e/scenarios/blink.sh`)
 film the editor's open and close frame by frame with GNOME's animations on
