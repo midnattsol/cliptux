@@ -247,9 +247,16 @@ Save As opens the file chooser over the editor; cancelling it returns to
 the editor as it was. With a thumbnail showing, saving sends no desktop
 notification (`notify=true` still does when there is none).
 
-**Pins** show the capture at 1:1 in a frameless window: scroll (or `-`
-`=` `0`) to zoom, drag to move, `Esc` or the × to close. Any number of
-them.
+**Pins** show the capture at 1:1 in a frameless window, where the
+capture was (pinned from the editor, a thumbnail or Recent captures):
+scroll (or `-` `=` `0`) to zoom, drag to move, `Esc` or the × to close.
+Any number of them. Right-click a pin (or its ⋯ button, or the Menu key)
+for its menu: Copy (`Ctrl+C`), Save… (`Ctrl+S`), Annotate (`Ctrl+E`:
+the editor opens on it, and what you copy, save or pin there replaces the
+pin in place; Cancel leaves it as it was), Opacity 100/75/50/25% (`1`–`4`),
+Lock in Place (`Ctrl+L`: clicks go through the pin to the window below,
+but for a lock badge in its corner that unlocks it), Close (`Ctrl+W`) and
+Close All Pins (`Ctrl+Shift+W`).
 
 **Recent captures** (`shotlet history`, or the tray menu) lists the last
 captures that were copied or saved, newest first, with when they were
@@ -359,7 +366,9 @@ flashes), and seconds with its dialog the first time.
 Without the extension everything still works, but the thumbnail is an
 ordinary window wherever GNOME opens it (and it takes the keyboard focus,
 as any new window does), and a pin stays above other windows only if you
-choose "Always on Top" in its window menu (right-click the pin). The
+choose "Always on Top" in its window menu (Keep on Top… in the pin's
+menu), and opens wherever GNOME puts it rather than where the capture
+was. The
 thumbnail never covers more than itself: around the cards it lets clicks
 through to the window below.
 
@@ -608,7 +617,9 @@ prints PASS/FAIL per check and skips when the session cannot run.
 Needs `gnome-shell`, `xdg-desktop-portal-gnome`, `pipewire`, `wireplumber`,
 `wl-clipboard`, `python3` and `gdbus`; the IME scenario also uses
 `ibus-hangul` (skipped without it), and the quick-access scenarios
-(`quick`, `quick-plain`, `annotate`, `history`) use Python's GTK 4
+(`quick`, `quick-plain`, `annotate`, `history`, and `pin`: where a pin
+opens, its menu, opacity, Copy, Lock, Annotate and Close All Pins in the
+light and dark appearance) use Python's GTK 4
 bindings for "another app" (`tools/e2e/target.py`: focus, clicks, drops;
 `python3-gi gir1.2-gtk-4.0`). They load the bundled GNOME Shell extension
 into the private session (`HL_EXTENSIONS`), except `quick-plain`, which

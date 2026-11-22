@@ -35,6 +35,13 @@ pub fn minimize(w: *Window) !void {
     try w.conn.flush();
 }
 
+/// Clicks outside a surface's input region reach the window below on
+/// every compositor: wl_surface.set_input_region is core Wayland.
+pub fn passesClicks(w: *const Window) bool {
+    _ = w;
+    return true;
+}
+
 /// Where surface idx takes pointer input, in its logical coordinates;
 /// null: everywhere. Elsewhere clicks reach the window below. Applied
 /// with the next present.
@@ -101,18 +108,19 @@ pub fn setLayerPlacement(w: *Window, idx: u8, width: u32, height: u32, margin: [
     try c.flush();
 }
 
-/// Let a layer surface take keyboard focus when clicked (on demand) or
-/// never; some compositors (labwc) focus an on-demand surface as soon
-/// as it maps, so a window that must not steal the keyboard opens with
-/// none and asks for on-demand only while the pointer is over it.
-pub fn setLayerKeyboard(w: *Window, idx: u8, on_demand: bool) !void {
+/// Let a layer surface take keyboard focus when clicked (on demand),
+/// never, or all of it while it shows (exclusive: a menu); some
+/// compositors (labwc) focus an on-demand surface as soon as it maps, so
+/// a window that must not steal the keyboard opens with none and asks for
+/// on-demand only while the pointer is over it.
+pub fn setLayerKeyboard(w: *Window, idx: u8, keyboard: window.Layer.Keyboard) !void {
     const s = &w.surfaces[idx];
+    // before version 4 (on demand) a surface keeps what it opened with
     if (!s.alive or s.layer_surf == 0 or w.globals.layer_shell_version < 4) return;
-    const L = wl.zwlr_layer_surface_v1;
-    const kb = if (on_demand) L.keyboard_on_demand else L.keyboard_none;
+    const kb: u32 = @backingInt(keyboard);
     if (kb == s.layer_kb) return;
     s.layer_kb = kb;
-    try w.conn.request(s.layer_surf, L.set_keyboard_interactivity, &.{.{ .uint = kb }});
+    try w.conn.request(s.layer_surf, wl.zwlr_layer_surface_v1.set_keyboard_interactivity, &.{.{ .uint = kb }});
     try w.conn.request(s.wl_surface, wl.wl_surface.commit, &.{});
     try w.conn.flush();
 }

@@ -22,6 +22,8 @@ const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
 const window = @import("../platform/api.zig").window;
 const editor_mod = @import("../ui/editor.zig");
+const open_tool = @import("../ui/tools/open.zig");
+const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
 
 pub const baseName = save.baseName;
@@ -114,7 +116,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 /// declined): this process has nothing left to do.
 fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
     if (!shell.applies() or !shell.active(conn)) return false;
-    @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
+    launch.handOff(env.runtime_dir);
     switch (shell.requestCapture(gpa, conn, req)) {
         .started => {
             std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
@@ -320,7 +322,9 @@ const Finish = struct {
     /// saved) is kept for the history and the thumbnail meanwhile.
     fn close(f: Finish, data: ?[]const u8, saved_path: []const u8) void {
         const ed = f.ed;
-        const what: ?keep_mod.What = if (data) |d| .{ .image_png = d, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace } else null;
+        // annotating a pin: it shows the result (or comes back as it was)
+        _ = launch.backToPin(data);
+        const what: ?keep_mod.What = if (data) |d| .{ .image_png = d, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace, .at = open_tool.selectionCentre(ed) } else null;
         handoff.close(.{ .gpa = f.gpa, .env = f.env, .cfg = f.cfg, .win = f.win, .ed = ed }, what, f.cfg.showsThumbnail(saved_path.len > 0));
         ed.releaseCaches(); // serving may outlive the session; drop ~140MB
     }

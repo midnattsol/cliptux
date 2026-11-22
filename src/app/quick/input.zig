@@ -38,7 +38,7 @@ pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
 
 /// Hover, and a drag out once a pressed card moved far enough.
 fn onMotion(self: *Quick, x: f64, y: f64) void {
-    if (self.layer) self.win.setLayerKeyboard(0, self.win.pointer_in) catch {};
+    if (self.layer) self.win.setLayerKeyboard(0, if (self.win.pointer_in) .on_demand else .none) catch {};
     const h = self.hitAt(x, y);
     if (!std.meta.eql(h, self.hover)) self.dirty = true;
     self.hover = h;

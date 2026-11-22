@@ -9,9 +9,22 @@ pub var env: ?Env = null;
 pub var text_capture = false;
 /// start with the whole picture selected (an opened file)
 pub var select_all = false;
+/// a pin's Annotate (`edit FILE --pin-fd N`): what is copied, saved or
+/// pinned goes back to that pin through this pipe (app/pin/annotate.zig)
+pub var pin_fd: ?sys.fd_t = null;
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
+
+/// Hand `png` back to the pin this edit is for, once, and let it show
+/// again (null: a Cancel, it stays as it was). False when no pin asked.
+pub fn backToPin(png: ?[]const u8) bool {
+    const fd = pin_fd orelse return false;
+    pin_fd = null;
+    defer sys.close(fd);
+    if (png) |d| sys.writeAllBlocking(fd, d) catch |err| std.log.warn("pin: could not hand the picture back: {t}", .{err});
+    return true;
+}
 
 /// With the GNOME integration the shell takes the screenshot and starts a
 /// new shotlet on it: a text capture leaves a note for that one.

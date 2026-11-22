@@ -75,6 +75,7 @@ pub const list = [_]Command{
             .{ .name = "FILE", .kind = .file, .required = true, .help = "The image to open" },
             .{ .name = "ID", .hidden = true, .help = "With a history directory as FILE: edit that capture again" },
         },
+        .options = &.{.{ .long = "pin-fd", .value = "FD", .vis = .hidden, .help = "A pin's Annotate: what is copied, saved or pinned goes back to it through FD" }},
         .examples = &.{.{ .cmd = "edit ~/Pictures/shot.png", .what = "Annotate an image" }},
     },
     .{

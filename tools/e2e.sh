@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
+scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
 
 # ---------------------------------------------------------------- inner side
 # (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:
@@ -23,14 +23,14 @@ scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyb
 # the scenario's settings, before anything starts
 prepare_scenario() {
     case $scenario in
-    capture | blink* | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell* | perms* | gnome-install)
+    capture | blink* | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell* | perms* | gnome-install | pin)
         # these check what happens without the floating thumbnail
         mkdir -p "$HOME/.config/shotlet"
         printf 'thumbnail=never\n' >"$HOME/.config/shotlet/config"
         ;;
     esac
     case $scenario in
-    quick | annotate | history | blink-ext)
+    quick | annotate | pin | history | blink-ext)
         # these load the extension for the floating windows but follow
         # shotlet started here: its captures go through the portal (the
         # extension cannot start this shotlet: Capture() is refused)
@@ -125,7 +125,7 @@ session_env() {
     sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
     ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
     [ "$1" = ime ] && ibus=hangul
-    case $1 in quick | annotate | history | blink-ext | shell* | perms-shell | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
+    case $1 in quick | annotate | pin | history | blink-ext | shell* | perms-shell | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
 }
 
 # run_session SCENARIO: the scenario in a fresh session (its own HOME,
