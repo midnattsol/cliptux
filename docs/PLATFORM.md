@@ -8,88 +8,119 @@ seams between the two and how a backend is chosen.
 ## The rule
 
 ```
-src/platform/linux/   everything that speaks Wayland, D-Bus, the portals,
-                      PipeWire, GNOME Shell, KWin, wlroots or raw Linux
-                      syscalls (the only place std.os.linux may appear)
-src/platform/api/     the seams' platform-neutral types (input events,
-                      key codes, layer placement, appearance, capture
-                      results...): plain data, no OS code
-src/platform/api.zig  the seam: picks the backend at compile time,
-                      checks it implements the contract, re-exports it
-src/platform/stub/    a do-nothing backend that only has to compile; used
-                      by `zig build check-portable`, never shipped
-everything else       the portable core
+src/platform/api.zig    the seam: picks the backend at compile time,
+                        checks it against the contract, re-exports it
+src/platform/api/       the seams' platform-neutral types (input events,
+                        key codes, floating-surface placement, appearance,
+                        capture paths, recording frames...): plain data
+src/platform/stub/      the contract: every declaration the core may use,
+                        with its type and no behaviour; compiled by
+                        `zig build check-portable`, never shipped
+src/platform/linux/     the Linux backend: everything that speaks Wayland,
+                        D-Bus, the portals, PipeWire, GNOME Shell, KWin,
+                        wlroots or raw syscalls (the only place
+                        std.os.linux may appear)
+everything else         the portable core
 ```
 
 The core imports `platform/api.zig` (and `platform/api/*.zig` for types),
-never a file under `platform/linux/` and never `std.os.linux`.
-`zig build check-layers` enforces it (it runs with `zig build test`), and
-`zig build check-portable` compiles the core for `x86_64-windows` and
-`aarch64-macos` against the stub backend to prove it builds without Linux.
+never a file under `platform/linux/`, never `std.os.linux`, never the raw
+`api.backend`. Two build steps hold the line, both run by `zig build test`:
+
+- `zig build check-layers` (tools/check-layers.sh) fails on any of those
+  outside `src/platform/linux`. Its allowlist (tools/layers-allowlist.txt)
+  is empty and may only stay so. The e2e drivers' module root
+  (`src/testkit.zig`, Linux tooling) is the one file that takes the Linux
+  plumbing, through `api.backend.native`.
+- `zig build check-portable` compiles the whole program and its tests
+  for `x86_64-windows` and `aarch64-macos` against the stub backend
+  (analysis only, nothing is emitted). It catches what text cannot, like
+  `std.DynLib` (no Windows support in std) or `c_ulong` being 32 bits.
 
 ## Backend selection
 
 - **Compile time, by OS.** `api.zig` switches on `builtin.os.tag`:
-  `.linux` → `linux/backend.zig`; any other OS stops with
-  `@compileError("shotlet: no platform backend for <os> yet ...")` at the
-  seam. A build option (`-Dplatform-stub`, set only by `check-portable`)
-  selects `stub/backend.zig` instead. The selected backend is a plain
-  struct of declarations: no vtables, so drawing, input and the event loop
-  cost exactly what they did when they called Wayland directly.
-- **The contract is checked.** `api/contract.zig` lists every declaration
-  the core may use, by seam; `api.zig` asserts at compile time that the
-  backend has each one (a missing one is a compile error naming the seam
-  and the declaration, not an error deep inside the editor).
-- **Run time, among desktops.** Inside the Linux backend, as before: the
-  GNOME Shell extension when active, KWin's ScreenShot2, wlroots
-  screencopy, then the xdg-desktop-portal; PipeWire, libxkbcommon,
-  fontconfig, Tesseract and the video libraries are dlopened when
-  present. Runtime choice uses ordinary `switch`/`if` on detected
-  capabilities (`linux/env` and friends); a vtable is used only where
-  several implementations must coexist in one run (none needed so far).
+  `.linux` is `linux/backend.zig`; any other OS stops there with one
+  error: `shotlet: no platform backend for windows yet. A port adds
+  src/platform/windows/backend.zig ...` (try `zig build
+  -Dtarget=x86_64-windows`). The `platform_options.stub` build option,
+  set only by check-portable, selects `stub/backend.zig` instead.
+- **Plain declarations, no vtables.** A backend is a struct of
+  declarations; the core calls them directly, so drawing, input and the
+  event loop cost what they did when they called Wayland directly.
+  Backend types (`Window`, `desktop.Session`, `record.Stream`...) are
+  used by value or pointer like any struct.
+- **The contract is checked.** `api/contract.zig` asserts at compile time
+  that the backend has every declaration the stub has, and every type
+  there has the stub type's declarations and fields (a missing one is
+  `platform contract: backend.window.Window.flush is missing from the
+  backend`). The stub is the contract written down; check-portable
+  proves the core uses nothing beyond it.
+- **Run time, among Linux desktops: inside the backend**, as before. The
+  GNOME Shell extension when it runs, the compositor directly (KWin's
+  ScreenShot2, wlroots screencopy), then the ScreenCast portal over
+  PipeWire, then the Screenshot portal; libpipewire, libxkbcommon,
+  fontconfig, Tesseract and the video libraries are opened when present.
+  Ordinary `if`s on detected capabilities, in `linux/capture.zig`,
+  `linux/record.zig`, `linux/shell.zig`.
 
 ## The seams
 
-| Seam | What the core gets | Linux implementation |
+Each is `api.<name>`; the stub file of the same name lists it in full.
+
+| Seam | The core gets | Linux |
 | --- | --- | --- |
-| **Window** (`Window`, `api/input.zig`) | software-rendered surfaces (one, or one per output), back buffers and present, input events (pointer, keys as evdev code + keysym + UTF-8, IME preedit), cursors, scale and outputs, layer placement (anchors, keyboard focus) for floating cards, move/maximize/minimize, input regions | `linux/window/` on the raw Wayland client (`linux/wayland/`), xdg-shell, wlr-layer-shell, text-input-v3, `linux/keyboard/` (dlopened libxkbcommon) |
-| **Clipboard & drag-and-drop** (methods of `Window`) | own the clipboard (PNG, text, any mime list), read it, accept drops, drag a file out | `wl_data_device` in `linux/window/{clipboard,data_device,drag}.zig` |
-| **Session** (`Session`, `desktop`) | a handle to the desktop session's services, opened once per process | the D-Bus session bus with the app's identity (`linux/portal/app_scope.zig`) |
-| **Desktop integration** (`desktop`) | appearance (accent, dark, reduced motion, text scale) read and watched, notifications, "show in Files", file chooser (save as, pick a folder), parent handle for dialogs, tray, global shortcuts / shell integration status and install | Settings/FileChooser/Notification portals, FileManager1, StatusNotifierItem, the GNOME Shell extension (`linux/gnome/`), KWin (`linux/kde/`) |
-| **Capture** (`capture`) | the frozen frame of every monitor, window frames for click-a-window, a window's own pixels, the capture path taken, permissions status and reset, frames and wheel for scrolling capture | the extension, KWin ScreenShot2, wlroots screencopy, ScreenCast + PipeWire, Screenshot portal with the first-run dialog, permission store (`linux/capture/`, `linux/pw/`, `linux/portal/`) |
-| **Screen recording** (`record`) | a source of timed BGRA frames and sound for an area, start/pause/stop | the extension's recorder or a ScreenCast portal session, PipeWire streams |
-| **OS services** (`sys`) | clocks, sleep, randomness, files and directories, fds/pipes/poll, local sockets (one-instance IPC), process spawn/daemonize, memory maps, env | raw syscalls (`linux/sys/`) |
-| **Threads** (`sync`) | a mutex and an event usable from foreign threads | futexes |
-| **Dynamic libraries & engines** (`libs`, `ocr`, `fonts`) | candidate file names of optional libraries (WebP, TurboJPEG, libav*, VA-API), OCR (`available`, `recognizeTsv`), font discovery | `lib<name>.so.<v>`, Tesseract, fontconfig and XDG font dirs |
+| `window` | `Window`: one surface or one per output (`open`, `openOutputs`, `openOnOutputAt`), back buffers and `present*`, events (`nextEvent*`, `pollTimeoutMs`, `pollFd`, `flush`), cursors, input method (`setTextInput`, `preedit`), roles (move, maximize, minimize, input region, geometry, title, floating-surface placement and keyboard), `parentHandle` for dialogs, `keyName`; clipboard (`setClipboard*`, `claimClipboardSource`, `serveClipboard`, `clipboardText`, `clipboardAccepted`) and drag and drop (`startDrag`, `accept_mimes`/`dropped`); `Surface`, `Output`. Types in `api/window.zig`: keys as evdev code + X keysym + UTF-8 | `linux/window/` on the raw Wayland client, `linux/keyboard/` (libxkbcommon) |
+| `desktop` | `Session` (`connect`, `connectBrief`, `identify`, `addresses`), appearance (`readAppearance`, `watchAppearance`, `pump`), file dialogs (`askSavePath`, `chooseFolder`, `dialogChoice`), `notify`, `revealFile`, `pollFd`/`hasPending`, the tray `daemon` | D-Bus session bus, Settings/FileChooser portals, Notifications, FileManager1, StatusNotifierItem |
+| `shell` | the shell integration: `applies`, `active`, `activeNow`, `state`, `install`, `captureInfo`, `note`, `requestCapture`, `loadHanded`, `place`, `finishPendingSetup`, `runCli`, the capture modes' global shortcuts (`shortcutStore`, `getShortcut`, `setShortcut`, `setTimerSeconds`) | the Shotlet GNOME Shell extension (`linux/gnome/`) |
+| `capture` | `screens` (every monitor frozen, asking where needed), `warmup`, `windows`/`canCaptureWindow`/`captureWindow`, `ScrollSource`/`openScroll`, the capture `Path` (`remember`, `lastPath`), `resetPermissions`/`resetSummary`, `permissionsCli` | `linux/capture/` (direct, ScreenCast + PipeWire, Screenshot portal, first-run window, permission store), `linux/kde/`, `linux/wlroots/` |
+| `record` | `open` a `Source` for an area (its `Stream`: `addVideo`, `addAudio`, `failed`, `videoFrames`, `close`), `shellHasControls`, `pickInShell`, `watchStop`, `pollStop`; frame types in `api/record.zig` | the extension's recorder or a ScreenCast session, PipeWire streams |
+| `sys` | clocks, sleep, futex, randomness, files, directories, descriptors, pipes, `poll`, local sockets, mapped files, `isTerminal`, `processId` (POSIX-shaped: a port maps handles onto small integers) | raw syscalls (`linux/sys/`) |
+| `proc` | programs with pipes (`spawn`, `output`, `which`), Shotlet itself detached (`spawnSelf`), `processEnv`, `hwEncodeDevices` | fork/exec, `/proc/self/exe`, VA-API render nodes |
+| `libs` | optional libraries by base name and version (`open`, `Lib.lookup`) | `lib<name>.so.<v>` with `std.DynLib` |
+| `fonts` | `Db`: the UI faces and a face for a codepoint | fontconfig, else the XDG font directories |
+| `ocr` | `available`, `recognize`, `recognizeTsv` | Tesseract (`src/ocr/tesseract.zig`, portable code over `libs`) |
+| `devtools` | `shotlet test-window` and friends | Wayland/portal/PipeWire probes |
 
-Encoders (GIF, MP4 via libav or the ffmpeg program), the document model,
-annotations, rendering, text shaping, OCR post-processing, redaction,
-history, config, the command table, the quick-access and history UIs,
-scroll stitching and the recording UI stay in the core and use only the
-seams above.
+The core keeps: the editor, the document model and annotations, gfx
+(rendering, text shaping, codecs), the encoders (GIF; MP4 through libav
+or the ffmpeg program, which go through `libs` and `proc`), OCR
+post-processing and search, redaction, history, config, the command
+table, the quick-access, history, pin, settings and recording UIs,
+scroll stitching, the recording engine (timeline, frames, sound mixing),
+and the capture flow around them (`app/shot.zig` asks the shell, then
+`capture.screens`).
 
-## Where things live
+Still Linux-flavoured in the core, by choice: `Env.bus_addr` and
+`Env.wayland_display` are opaque session addresses the backend fills
+(`desktop.addresses`); keys are evdev codes and X keysyms; accelerators
+use GTK's notation (`<Ctrl>Print`, `app/accel.zig`); the Settings window's
+words about the integration name GNOME.
+
+## Where things moved
 
 | Before | After |
 | --- | --- |
-| `platform/{wayland,dbus,portal,pw,pwstream,permstore,sys}*` | `platform/linux/` (same names) |
-| `platform/ocr.zig` | `platform/linux/tesseract.zig` |
-| `ui/window.zig`, `ui/window/`, `ui/keyboard.zig`, `ui/keyboard/` | `platform/linux/window*`, `platform/linux/keyboard*` (keysyms: `platform/api/keysyms.zig`) |
-| `ui/window.zig`'s `InputEvent`, `Key`, key codes, `Rect`, `Cursor`, `Layer` | `platform/api/input.zig` |
-| `app/gnome*`, `app/gsettings.zig`, `app/accel.zig`, `app/shellcap.zig`, `app/modes/{shell_bus,gnome_keys}.zig`, `record/shellrec.zig` | `platform/linux/gnome/` |
-| `app/direct_kwin.zig`, `app/winrects/kwin.zig` | `platform/linux/kde/` |
-| `app/scroll/inject_wl.zig` | `platform/linux/wlroots/` |
-| `app/direct*`, `app/first_run.zig`, `app/shot/screencast.zig`, `app/winrects.zig`, `app/modes/window_direct.zig`, `app/scroll/source.zig`, `app/capture_path.zig`, `app/permissions.zig`, `app/perms/` | `platform/linux/capture/` |
-| `record/{portal_rec,source,engine,frames,audio,sync}.zig` | `platform/linux/record/` |
-| `app/{tray*,daemon,filemanager}.zig`, appearance reading from `ui/theme.zig` | `platform/linux/desktop/` |
-| `app/devtools.zig`, `src/testkit.zig`'s Linux parts | `platform/linux/` |
-
-The table is the plan; `zig build check-layers` is the truth.
+| `platform/{wayland,dbus,portal,pw,pwstream,permstore,sys}*`, `portal_test.zig` | `platform/linux/` (same names) |
+| `ui/window*`, `ui/keyboard*` | `platform/linux/window*`, `platform/linux/keyboard*` (types: `api/window.zig`) |
+| `platform/ocr.zig` | `ocr/tesseract.zig` (+ `ocr/search.zig`, `ocr/spinlock.zig`) |
+| `gfx/fontdb.zig` | `platform/linux/fonts.zig` (types: `api/fonts.zig`) |
+| `encode/proc.zig` | `platform/linux/proc.zig` |
+| `app/gnome*`, `gnome_bundle.zig`, `gsettings.zig`, `shellcap.zig`, `modes/{shell_bus,gnome_keys}.zig`, `record/shellrec.zig` | `platform/linux/gnome/` |
+| `app/direct_kwin.zig`, `app/winrects/kwin.zig` | `platform/linux/kde/{screenshot2,winrects}.zig` |
+| `app/scroll/inject_wl.zig` | `platform/linux/wlroots/inject.zig` |
+| `app/{direct*,first_run,winrects,capture_path,permissions}.zig`, `app/perms/`, `app/shot/screencast.zig`, `app/modes/window_direct.zig`, `app/scroll/source.zig` | `platform/linux/capture/` |
+| `record/{portal_rec,source}.zig` | `platform/linux/record/` |
+| `app/{tray*,daemon,filemanager}.zig`, `app/shot/dialog.zig`, the Settings portal half of `ui/theme.zig`, the bus address from `main.zig` | `platform/linux/desktop/` |
+| `app/devtools.zig` | `platform/linux/devtools.zig` |
 
 ## Porting
 
 A Windows or macOS backend is `src/platform/<os>/backend.zig` exporting
-every declaration in `api/contract.zig`, plus one line in `api.zig`'s
-switch. `stub/backend.zig` is the template: it has every declaration with
-the right type and no behaviour. `zig build check-portable` already
-proves the core compiles for both targets; a port makes the stub real.
+every declaration of `stub/backend.zig`, plus one line in `api.zig`'s
+switch. Copy the stub and make it real, seam by seam; the contract check
+names whatever is still missing, and the build already knows the core
+compiles for the target (`zig build check-portable`). The behaviour a
+declaration must have is in the stub's doc comments and, in full, in the
+Linux implementation it mirrors (`linux/window.zig` describes surfaces,
+events and the input method; `linux/capture.zig` the capture chain).

@@ -572,6 +572,22 @@ own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
 The settings file is plain `key=value`. Shotlet only rewrites the keys it
 changes, so editing it by hand while Shotlet runs is safe.
 
+## Architecture and contributing
+
+Shotlet is a portable core (the editor, rendering and text, encoders,
+OCR, history, the floating windows' logic) over a platform backend:
+everything that speaks Wayland, D-Bus, the portals, PipeWire, GNOME
+Shell, KWin or wlroots lives in `src/platform/linux/`, and the core
+reaches it only through `src/platform/api.zig`. `docs/PLATFORM.md` maps
+the seams, how a backend is chosen and what a Windows or macOS port
+implements.
+
+`zig build test` also runs the guards: `check-size` (files up to 600
+lines), `check-layers` (nothing outside `src/platform/linux` imports it)
+and `check-portable` (the core compiles for Windows and macOS against a
+stub backend). Keep functions within 60 lines (`zig build long-fns --
+60`) and the tree formatted (`zig fmt --check src build.zig tools`).
+
 ## Tests
 
 ```sh
