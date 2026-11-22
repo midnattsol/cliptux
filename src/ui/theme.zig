@@ -119,6 +119,8 @@ pub const Theme = struct {
     seg_on: u32,
     bar_shadow: Shadow,
     popover_shadow: Shadow,
+    /// the magnifier's lens: tighter than a bar's, it sits by the pointer
+    loupe_shadow: Shadow,
 
     // --- the capture overlay ---
     /// the selection's two-tone edge: a light line inside a dark one, so
@@ -183,6 +185,7 @@ const dark_base: Theme = .{
     .seg_on = 0xFF636366,
     .bar_shadow = .{ .color = 0x47000000, .blur = 40, .dy = 12 },
     .popover_shadow = .{ .color = 0x52000000, .blur = 50, .dy = 18 },
+    .loupe_shadow = .{ .color = 0x59000000, .blur = 22, .dy = 8 },
     .window_bg = 0xFF242424,
     .header_bg = 0xFF2E2E32,
     .card = 0xFF363636,
@@ -215,6 +218,7 @@ const light_base: Theme = .{
     .seg_on = 0xFFFFFFFF,
     .bar_shadow = .{ .color = 0x38000000, .blur = 40, .dy = 12 },
     .popover_shadow = .{ .color = 0x42000000, .blur = 50, .dy = 18 },
+    .loupe_shadow = .{ .color = 0x47000000, .blur = 22, .dy = 8 },
     .window_bg = 0xFFFAFAFB,
     .header_bg = 0xFFFFFFFF,
     .card = 0xFFFFFFFF,

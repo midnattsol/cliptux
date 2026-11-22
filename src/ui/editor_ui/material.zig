@@ -36,7 +36,7 @@ pub const Backdrop = struct {
     }
 };
 
-pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice, strip };
+pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice, strip, loupe };
 pub const n_slots = @typeInfo(Slot).@"enum".field_names.len;
 
 /// What a floating surface with `sh` covers: itself plus its shadow.
@@ -185,8 +185,9 @@ fn erf(x: f64) f64 {
 }
 
 /// A CSS-like box shadow around the rounded rect `r`, outside it only
-/// (the material is translucent: no shadow shows through it).
-fn drawShadow(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow, alpha: f64) void {
+/// (the material is translucent: no shadow shows through it); `alpha`
+/// fades it.
+pub fn drawShadow(self: *Editor, canvas: *Canvas, slot: Slot, r: Rect, radius: f64, sh: theme.Shadow, alpha: f64) void {
     const bd = &self.pn().backdrops[@backingInt(slot)];
     const b = self.sc(sh.blur);
     const dy = self.sc(sh.dy);

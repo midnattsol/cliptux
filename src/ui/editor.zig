@@ -143,6 +143,8 @@ pub const Editor = struct {
     focus_into_popover: bool = false,
     /// mid-edge selection handle under the pointer (-1: none)
     sel_hover: i8 = -1,
+    /// the magnifier (editor_ui/loupe.zig)
+    loupe: ui.LoupeState = .{},
 
     /// the look, from the desktop's preferences (see theme.zig)
     prefs: theme_mod.Prefs = .{},

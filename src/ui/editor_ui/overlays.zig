@@ -47,9 +47,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     }
     if (self.show_hint) list.add(selection.hintRect(self).expand(1));
     if (winpick.footprint(self)) |r| addOutline(list, r, chromePad(self));
-    if (self.isMousePane()) {
-        if (loupe.loupeFootprint(self)) |r| list.add(r);
-    }
+    if (loupe.footprint(self)) |r| list.add(r);
     if (!self.isTbPane()) return;
     collectFloating(self, list);
     tools.collectOverlays(self, list);

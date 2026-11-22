@@ -232,6 +232,8 @@ fn configureEditor(ed: *editor_mod.Editor, conn: *desktop.Session, cfg: *const c
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
     ed.binds = cfg.binds;
+    ed.loupe.mode = cfg.loupe;
+    ed.loupe.zoom = cfg.loupe_zoom;
     ed.beautify = .{
         .enabled = cfg.beautify_always,
         .bg = cfg.beautify_background,

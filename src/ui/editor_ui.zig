@@ -77,11 +77,20 @@ pub const pickerKey = picker.pickerKey;
 pub const hsvToRgb = picker.hsvToRgb;
 pub const rgbToHsv = picker.rgbToHsv;
 
-pub const loupeVisible = loupe.loupeVisible;
+pub const LoupeState = loupe.State;
+pub const loupeWanted = loupe.wanted;
+pub const loupeActive = loupe.active;
+pub const loupeCapturing = loupe.capturing;
+pub const syncLoupe = loupe.sync;
+pub const loupeDueMs = loupe.dueMs;
+pub const loupeColor = loupe.colorAt;
+pub const loupeCopied = loupe.copied;
 pub const drawCopyNotice = notice.drawCopyNotice;
 
 // keep the submodules' tests reachable from the test root
 comptime {
     _ = buttons;
     _ = @import("editor_ui/strip.zig");
+    _ = loupe;
+    _ = @import("editor_ui/loupe_place.zig");
 }

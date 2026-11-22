@@ -76,7 +76,7 @@ fn hover(ed: *Editor, m: Point) !void {
         ed.sel_hover = hh;
         ed.needs_render = true;
     }
-    if (ui.loupeVisible(ed)) ed.needs_render = true;
+    if (ui.loupeActive(ed)) ed.needs_render = true;
     winpick.hover(ed);
     tools.onHover(ed);
 }

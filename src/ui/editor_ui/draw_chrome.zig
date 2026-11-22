@@ -43,7 +43,7 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     winpick.drawOutline(self, canvas);
     if (self.textHandleShape()) |i| drawTextHandle(self, canvas, i);
     selection.drawSelectionChrome(self, canvas);
-    if (self.isMousePane()) loupe.drawLoupe(self, canvas);
+    loupe.draw(self, canvas);
     tools.drawChrome(self, canvas);
     if (!self.isTbPane()) return;
     strip.draw(self, canvas);

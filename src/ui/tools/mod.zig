@@ -150,14 +150,12 @@ pub fn tick(ed: *Editor, now: i64) i32 {
 // --- chrome ---
 
 pub fn collectOverlays(ed: *Editor, list: anytype) void {
-    if (eyedrop.loupeRect(ed)) |r| list.add(r.expand(ed.sc(4)));
     if (crop_mode.overlay(ed)) |r| list.add(r);
     if (toast_mod.footprint(ed)) |r| list.add(r);
 }
 
 pub fn drawChrome(ed: *Editor, canvas: *render.Canvas) void {
     crop_mode.draw(ed, canvas);
-    eyedrop.drawLoupe(ed, canvas);
 }
 
 /// Over everything but the help: the toast.

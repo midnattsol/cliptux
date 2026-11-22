@@ -67,6 +67,7 @@ pub fn renderFrame(ed: *Editor) !void {
     chooseTbPane(ed);
     ed.pane_i = ed.tb_pane;
     try ui.layoutToolbar(ed);
+    ui.syncLoupe(ed);
     if (caretRect(ed)) |cr| {
         ed.pane_i = ed.mouse_pane;
         ed.win.setTextInput(true, .{ .x = cr.x, .y = cr.y, .w = cr.w, .h = cr.h }) catch {};

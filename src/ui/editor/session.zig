@@ -67,6 +67,10 @@ fn waitMs(ed: *Editor, now: i64, scripted: bool) i32 {
     if (anim) ed.needs_render = true;
     var wait: i32 = if (scripted) 5 else if (anim) 8 else 100;
     wait = @min(wait, tools.tick(ed, now));
+    const note = ui.loupeDueMs(ed);
+    if (note != 0) {
+        if (note <= now) ed.needs_render = true else wait = @min(wait, @as(i32, @intCast(std.math.clamp(note - now, 1, 100))));
+    }
     const tip = ui.tooltipDueMs(ed);
     if (tip != 0) {
         if (tip <= now) ed.needs_render = true else wait = @min(wait, @as(i32, @intCast(std.math.clamp(tip - now, 1, 100))));
