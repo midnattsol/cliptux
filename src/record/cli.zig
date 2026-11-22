@@ -5,7 +5,7 @@
 //!     shotlet record --region X,Y,W,H an area (logical pixels), no picker
 //!     shotlet record --stop | --pause | --resume | --discard
 //!                                     control the recording under way
-//!     options: --gif | --mp4, --fps N, --mic, --system-audio, --clicks,
+//!     options: --gif | --mp4 | --format mp4|gif, --fps N, --mic, --system-audio, --clicks,
 //!              --keys, --no-countdown, --seconds N (stop after),
 //!              --out FILE, --no-control (no floating control)
 //!
@@ -61,6 +61,9 @@ pub fn parse(args: []const []const u8, a: *Args, set: *settings_mod.Settings) !v
             i += 1;
         } else if (eq(arg, "--fps")) {
             set.apply(if (set.format == .gif) "record_gif_fps" else "record_fps", next);
+            i += 1;
+        } else if (eq(arg, "--format")) {
+            set.format = std.meta.stringToEnum(@TypeOf(set.format), next) orelse return error.BadArgs;
             i += 1;
         } else if (eq(arg, "--gif")) {
             set.format = .gif;
@@ -188,4 +191,6 @@ test "record options parse" {
     try std.testing.expectEqualStrings("stop", b.command.?);
     try std.testing.expectError(error.BadArgs, parse(&.{"--bogus"}, &b, &s));
     try std.testing.expectEqualStrings("--bogus", b.unknown.?);
+    try parse(&.{ "--format", "mp4" }, &b, &s);
+    try std.testing.expectEqual(.mp4, s.format);
 }
