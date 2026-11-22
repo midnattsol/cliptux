@@ -159,72 +159,80 @@ pub const Theme = struct {
 
     pub fn get(dark: bool, accent_opt: ?u32) Theme {
         const accent = (accent_opt orelse default_accent) | 0xFF000000;
-        const hover_accent = mix(accent, if (dark) 0xFFFFFFFF else 0xFF000000, 0.12);
-        const fill = accentFill(accent);
-        const fill_hover = mix(fill, 0xFF000000, 0.12);
-        if (dark) return .{
-            .dark = true,
-            .accent = accent,
-            .accent_hover = hover_accent,
-            .accent_fill = fill,
-            .accent_fill_hover = fill_hover,
-            .accent_text = legible(accent, 0xFF242424, aa_text),
-            .fg = 0xFFF5F5F7,
-            .muted = 0xBFEBEBF5,
-            .material = 0xCC242426,
-            .material_solid = 0xFF2C2C2E,
-            .hairline = 0x1FFFFFFF,
-            .hover = 0x14FFFFFF,
-            .pressed = 0x24FFFFFF,
-            .track = 0x1FFFFFFF,
-            .seg_on = 0xFF636366,
-            .bar_shadow = .{ .color = 0x47000000, .blur = 40, .dy = 12 },
-            .popover_shadow = .{ .color = 0x52000000, .blur = 50, .dy = 18 },
-            .window_bg = 0xFF242424,
-            .header_bg = 0xFF2E2E32,
-            .card = 0xFF363636,
-            .line = 0x14FFFFFF,
-            .chip = 0x1AFFFFFF,
-            .switch_off = 0x2EFFFFFF,
-            .text = 0xFFFFFFFF,
-            .text_muted = 0x99FFFFFF,
-            .view_sel = 0x1AFFFFFF,
-            .panel = 0xCC242426,
-            .field = 0x14FFFFFF,
-            .destructive = 0xFFFF453A,
-        };
-        return .{
-            .dark = false,
-            .accent = accent,
-            .accent_hover = hover_accent,
-            .accent_fill = fill,
-            .accent_fill_hover = fill_hover,
-            .accent_text = legible(accent, 0xFFFAFAFB, aa_text),
-            .fg = 0xFF1D1D1F,
-            .muted = 0xCC3C3C43,
-            .material = 0xCCF6F6F8,
-            .material_solid = 0xFFF2F2F7,
-            .hairline = 0x1A000000,
-            .hover = 0x0D000000,
-            .pressed = 0x1A000000,
-            .track = 0x14000000,
-            .seg_on = 0xFFFFFFFF,
-            .bar_shadow = .{ .color = 0x38000000, .blur = 40, .dy = 12 },
-            .popover_shadow = .{ .color = 0x42000000, .blur = 50, .dy = 18 },
-            .window_bg = 0xFFFAFAFB,
-            .header_bg = 0xFFFFFFFF,
-            .card = 0xFFFFFFFF,
-            .line = 0x14000006,
-            .chip = 0x12000006,
-            .switch_off = 0x26000006,
-            .text = 0xCC000006,
-            .text_muted = 0x99000006,
-            .view_sel = 0x12000006,
-            .panel = 0xDBFAFAFC,
-            .field = 0x0D000000,
-            .destructive = 0xFFFF3B30,
-        };
+        var t = if (dark) dark_base else light_base;
+        t.accent = accent;
+        t.accent_hover = mix(accent, if (dark) 0xFFFFFFFF else 0xFF000000, 0.12);
+        t.accent_fill = accentFill(accent);
+        t.accent_fill_hover = mix(t.accent_fill, 0xFF000000, 0.12);
+        t.accent_text = legible(accent, t.window_bg, aa_text);
+        return t;
     }
+};
+
+/// The two appearances before the accent is applied (Theme.get sets
+/// every accent field from the system's accent).
+const dark_base: Theme = .{
+    .dark = true,
+    .accent = default_accent,
+    .accent_hover = default_accent,
+    .accent_fill = default_accent,
+    .accent_fill_hover = default_accent,
+    .accent_text = default_accent,
+    .fg = 0xFFF5F5F7,
+    .muted = 0xBFEBEBF5,
+    .material = 0xCC242426,
+    .material_solid = 0xFF2C2C2E,
+    .hairline = 0x1FFFFFFF,
+    .hover = 0x14FFFFFF,
+    .pressed = 0x24FFFFFF,
+    .track = 0x1FFFFFFF,
+    .seg_on = 0xFF636366,
+    .bar_shadow = .{ .color = 0x47000000, .blur = 40, .dy = 12 },
+    .popover_shadow = .{ .color = 0x52000000, .blur = 50, .dy = 18 },
+    .window_bg = 0xFF242424,
+    .header_bg = 0xFF2E2E32,
+    .card = 0xFF363636,
+    .line = 0x14FFFFFF,
+    .chip = 0x1AFFFFFF,
+    .switch_off = 0x2EFFFFFF,
+    .text = 0xFFFFFFFF,
+    .text_muted = 0x99FFFFFF,
+    .view_sel = 0x1AFFFFFF,
+    .panel = 0xCC242426,
+    .field = 0x14FFFFFF,
+    .destructive = 0xFFFF453A,
+};
+
+const light_base: Theme = .{
+    .dark = false,
+    .accent = default_accent,
+    .accent_hover = default_accent,
+    .accent_fill = default_accent,
+    .accent_fill_hover = default_accent,
+    .accent_text = default_accent,
+    .fg = 0xFF1D1D1F,
+    .muted = 0xCC3C3C43,
+    .material = 0xCCF6F6F8,
+    .material_solid = 0xFFF2F2F7,
+    .hairline = 0x1A000000,
+    .hover = 0x0D000000,
+    .pressed = 0x1A000000,
+    .track = 0x14000000,
+    .seg_on = 0xFFFFFFFF,
+    .bar_shadow = .{ .color = 0x38000000, .blur = 40, .dy = 12 },
+    .popover_shadow = .{ .color = 0x42000000, .blur = 50, .dy = 18 },
+    .window_bg = 0xFFFAFAFB,
+    .header_bg = 0xFFFFFFFF,
+    .card = 0xFFFFFFFF,
+    .line = 0x14000006,
+    .chip = 0x12000006,
+    .switch_off = 0x26000006,
+    .text = 0xCC000006,
+    .text_muted = 0x99000006,
+    .view_sel = 0x12000006,
+    .panel = 0xDBFAFAFC,
+    .field = 0x0D000000,
+    .destructive = 0xFFFF3B30,
 };
 
 /// What the desktop asks for.
