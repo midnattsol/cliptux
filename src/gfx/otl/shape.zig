@@ -288,6 +288,34 @@ test "chained context on a hand-built GSUB; mutated tables never misbehave" {
     }
 }
 
+test "one optional feature, from the default script, on a hand-built GSUB" {
+    // 'DFLT' only; 'tnum' -> lookup 0: single substitution, glyph 5 -> 105
+    const alloc = std.testing.allocator;
+    const words = [_]u16{
+        1, 0, 10, 30, 48, // header: scripts @10, features @30, lookups @48
+        1, 0x4446, 0x4C54, 8, // 10: 'DFLT' -> 18
+        4, 0, // 18: default langsys -> 22
+        0, 0xFFFF, 1, 0, // 22: feature 0
+        1, 0x746E, 0x756D, 8, // 30: 'tnum' -> 38
+        0, 1, 0, 0, 0, // 38: lookup 0 (and padding)
+        1, 4, // 48: lookup @52
+        1, 0, 1, 8, // 52: single, 1 subtable @60
+        1, 6, 100, // 60: format 1, coverage @66, delta 100
+        1, 1, 5, // 66: coverage {5}
+    };
+    var t: [words.len * 2]u8 = undefined;
+    for (words, 0..) |v, i| std.mem.writeInt(u16, t[i * 2 ..][0..2], v, .big);
+    var buf: std.ArrayList(Glyph) = .empty;
+    defer buf.deinit(alloc);
+    for ([_]u16{ 4, 5, 6 }, 0..) |g, i| try buf.append(alloc, .{ .gid = g, .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
+    try substitute(alloc, .{ .gsub = &t }, .latn, &.{"tnum"}, &buf);
+    try std.testing.expectEqual(@as(u16, 105), buf.items[1].gid);
+    try std.testing.expectEqual(@as(u16, 4), buf.items[0].gid);
+    // a feature the font does not have changes nothing
+    try substitute(alloc, .{ .gsub = &t }, .latn, &.{"pnum"}, &buf);
+    try std.testing.expectEqual(@as(u16, 105), buf.items[1].gid);
+}
+
 test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
     const alloc = std.testing.allocator;
     const sys = @import("../../platform/sys.zig");
