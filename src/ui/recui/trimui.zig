@@ -37,8 +37,9 @@ const Trim = struct {
     pic_buf: []u32 = &.{},
     done: bool = false,
     frame: frame_mod.Frame = .{},
-    /// a press on no control: move the window (it has no title bar)
-    wants_move: bool = false,
+    /// where a press on no control went down (logical): dragging from
+    /// there moves the window, which has no title bar
+    move_from: ?[2]i32 = null,
 
     /// The strip picture nearest to `ms`.
     fn pictureAt(self: *Trim, ms: i64) void {
@@ -67,7 +68,7 @@ const Trim = struct {
 
     fn onPress(self: *Trim, x: i32, y: i32) void {
         const p = draw.hit(x, y, &self.st) orelse {
-            self.wants_move = true;
+            self.move_from = .{ x, y };
             return;
         };
         switch (p) {
@@ -245,13 +246,16 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
             const x: i32 = @intFromFloat(F.toContent(win, m.x) / k);
             const y: i32 = @intFromFloat(F.toContent(win, m.y) / k);
             t.onDrag(x);
+            if (t.move_from) |p| if (@abs(x - p[0]) + @abs(y - p[1]) > 4) {
+                t.move_from = null;
+                try win.startMove();
+            };
             t.st.hover = if (t.dragging == null) draw.hit(x, y, &t.st) else t.dragging;
         },
         .pointer_button => |b| if (b.button == window.BTN_LEFT) {
-            if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else t.dragging = null;
-            if (t.wants_move) {
-                t.wants_move = false;
-                try win.startMove();
+            if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else {
+                t.dragging = null;
+                t.move_from = null;
             }
         },
         .key => |key| if (key.pressed) switch (key.code) {
