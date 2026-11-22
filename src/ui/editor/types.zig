@@ -25,7 +25,9 @@ pub const Action = enum {
     new_capture,
 };
 
-pub const CopyNotice = enum { none, copying, copied, failed };
+/// A failed copy says so; a copy that worked closes the editor (the
+/// thumbnail, or nothing, is its feedback).
+pub const CopyNotice = enum { none, failed };
 
 pub const Result = struct {
     action: Action,

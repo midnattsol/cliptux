@@ -8,7 +8,6 @@ const sys = @import("../../platform/sys.zig");
 const doc_mod = @import("../doc.zig");
 const tools = @import("../tools/mod.zig");
 const session = @import("session.zig");
-const render = @import("render.zig");
 const history = @import("history.zig");
 const commands = @import("commands.zig");
 
@@ -29,8 +28,6 @@ pub fn exportPng(ed: *Editor) ![]u8 {
 }
 
 pub fn copyToClipboard(ed: *Editor) !void {
-    showCopyNotice(ed, .copying, 0);
-    if (render.renderReady(ed)) try render.renderFrame(ed);
     const exported = try exportPixels(ed);
     ed.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
         ed.alloc.free(exported.pixels);
@@ -39,14 +36,13 @@ pub fn copyToClipboard(ed: *Editor) !void {
         return;
     };
     // like Flameshot, GNOME and CleanShot's overlay: copying finishes
-    showCopyNotice(ed, .copied, 2400);
     commands.finish(ed, .copied);
 }
 
-/// Show `notice`, for `duration_ms` (0: until replaced).
+/// Show `notice` for `duration_ms`.
 fn showCopyNotice(ed: *Editor, notice: editor.CopyNotice, duration_ms: i64) void {
     ed.copy_notice = notice;
-    ed.copy_notice_hide_at_ms = if (duration_ms > 0) session.nowMs() + duration_ms else 0;
+    ed.copy_notice_hide_at_ms = session.nowMs() + duration_ms;
     ed.needs_render = true;
 }
 

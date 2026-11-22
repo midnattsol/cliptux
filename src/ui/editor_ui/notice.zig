@@ -1,5 +1,4 @@
-//! The copy notice: a pill in the corner saying the copy is under way,
-//! done, or failed.
+//! The copy notice: a pill in the corner saying the copy failed.
 
 const text_mod = @import("../../gfx/text.zig");
 const render = @import("../../gfx/render.zig");
@@ -17,8 +16,6 @@ const Rect = shapes_mod.Rect;
 fn noticeMessage(self: *const Editor) []const u8 {
     return switch (self.copy_notice) {
         .none => "",
-        .copying => "Copying\u{2026}",
-        .copied => "Copied to clipboard",
         .failed => "Copy failed",
     };
 }
@@ -47,24 +44,14 @@ pub fn drawCopyNotice(self: *Editor, canvas: *Canvas) void {
     const r = noticeRect(self);
     const message = noticeMessage(self);
     const fs = theme.font_label * f;
-    const accent: u32 = switch (self.copy_notice) {
-        .none => return,
-        .copying, .copied => th.accent,
-        .failed => th.destructive,
-    };
+    if (self.copy_notice == .none) return;
+    const accent = th.destructive;
     material.drawMaterial(self, canvas, .notice, r, ff(r.h) / 2.0, th.bar_shadow);
     const icon_size = self.sc(22);
     const cx = ff(r.x + self.sc(14) + @divTrunc(icon_size, 2));
     const cy = ff(r.y) + ff(r.h) / 2.0;
     const is = self.sc(14);
-    switch (self.copy_notice) {
-        .none => {},
-        .copying => canvas.ringAA(cx, cy, 9.0 * f, 2.0 * f, theme.withAlpha(accent, 0x80)),
-        .copied, .failed => {
-            canvas.fillCircleAA(cx, cy, 11.0 * f, accent);
-            const icon: icons.Icon = if (self.copy_notice == .copied) .check else .close;
-            icons.drawStroke(canvas, icon, @as(i32, @intFromFloat(cx)) - @divTrunc(is, 2), @as(i32, @intFromFloat(cy)) - @divTrunc(is, 2), is, 3, 0xFFFFFFFF);
-        },
-    }
+    canvas.fillCircleAA(cx, cy, 11.0 * f, accent);
+    icons.drawStroke(canvas, .close, @as(i32, @intFromFloat(cx)) - @divTrunc(is, 2), @as(i32, @intFromFloat(cy)) - @divTrunc(is, 2), is, 3, 0xFFFFFFFF);
     text_mod.draw(canvas, r.x + self.sc(14) + icon_size + self.sc(10), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, th.fg, message);
 }

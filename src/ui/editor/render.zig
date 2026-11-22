@@ -12,6 +12,7 @@ const textbox = @import("../textbox.zig");
 const ui = @import("../editor_ui.zig");
 const caches = @import("caches.zig");
 const beauty_cache = @import("beauty_cache.zig");
+const fade = @import("fade.zig");
 
 const Editor = editor.Editor;
 const Canvas = render.Canvas;
@@ -95,6 +96,9 @@ pub fn renderPane(ed: *Editor, idx: u8) !void {
     const px = try ed.win.backBufferOf(idx);
     const bi = ed.win.surfaceList()[idx].cur_buf;
     const p = &ed.pn().pending[bi];
+    // the fade-in blends whole frames: nothing of the last one is reusable
+    const entering = fade.enterLevel(ed);
+    if (entering != null) p.add(ed.screenRect());
     // past ~half the screen one full pass beats many partial ones
     if (p.area() * 2 > @as(i64, ed.pn().width) * ed.pn().height) {
         composeRegion(ed, px, ed.screenRect());
@@ -105,6 +109,7 @@ pub fn renderPane(ed: *Editor, idx: u8) !void {
     canvas.mask = ed.pn().stroke_mask;
     drawLiveShapes(ed, &canvas);
     ui.drawChrome(ed, &canvas);
+    if (entering) |k| fade.blendIn(ed, px, k);
     p.len = 0;
     p.addAll(&ed.pn().overlays);
     ed.pn().last_frame = px;

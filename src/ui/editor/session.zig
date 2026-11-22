@@ -12,6 +12,7 @@ const events = @import("events.zig");
 const render = @import("render.zig");
 const exporter = @import("export.zig");
 const script = @import("script.zig");
+const fade = @import("fade.zig");
 
 const Editor = editor.Editor;
 
@@ -62,7 +63,7 @@ fn hideCopyNoticeWhenDue(ed: *Editor, now: i64) void {
 /// How long to wait for input: transitions draw a frame per refresh, a
 /// tooltip wakes when due, the tools may ask for sooner.
 fn waitMs(ed: *Editor, now: i64, scripted: bool) i32 {
-    const anim = ui.animating(ed);
+    const anim = ui.animating(ed) or fade.entering(ed);
     if (anim) ed.needs_render = true;
     var wait: i32 = if (scripted) 5 else if (anim) 8 else 100;
     wait = @min(wait, tools.tick(ed, now));
