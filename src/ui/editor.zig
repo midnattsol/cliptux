@@ -39,7 +39,7 @@ const hit = @import("editor/hit.zig");
 const render = @import("editor/render.zig");
 const exporter = @import("editor/export.zig");
 const fade = @import("editor/fade.zig");
-const dim = @import("editor/dim.zig");
+const dim = @import("dim.zig");
 const capmode = @import("editor/capmode.zig");
 
 const Window = window.Window;
@@ -150,7 +150,7 @@ pub const Editor = struct {
     /// session bus, to follow appearance changes while open
     bus: ?*desktop.Session = null,
 
-    /// of 256, what the dim outside the selection keeps (editor/dim.zig)
+    /// of 256, what the dim outside the selection keeps (ui/dim.zig)
     dim_keep: u32,
     /// the dim fading in as the editor opens (editor/fade.zig)
     enter: fade.Enter = .{},

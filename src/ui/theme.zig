@@ -76,7 +76,7 @@ pub const aa_text: f64 = 4.5;
 pub const destructive_fill: u32 = 0xFFD70015;
 /// the capture outside the selection is darkened by this (40%), or by
 /// `capture_dim_dark` (55%) when the capture itself is dark
-/// (editor/dim.zig)
+/// (ui/dim.zig)
 pub const capture_dim: u32 = 0x66000000;
 pub const capture_dim_dark: u32 = 0x8C000000;
 pub const destructive_fill_hover: u32 = 0xFFB80012;

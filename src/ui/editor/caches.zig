@@ -9,6 +9,7 @@ const shapes_mod = @import("../shapes.zig");
 const doc_mod = @import("../doc.zig");
 const view_mod = @import("../view.zig");
 const tall_view = @import("../tall_view.zig");
+const dimRow = @import("../dim.zig").dimRow;
 const png = @import("../../gfx/png.zig");
 const tools = @import("../tools/mod.zig");
 const hit = @import("hit.zig");
@@ -186,16 +187,6 @@ pub fn paintTop(ed: *Editor, i: usize) !void {
 
 pub fn recomposeAll(ed: *Editor) !void {
     try recompose(ed, ed.doc.imageRect());
-}
-
-/// `dst` = `src` darkened to `keep`/256, opaque.
-pub fn dimRow(src: []const u32, dst: []u32, keep: u32) void {
-    @setRuntimeSafety(false);
-    for (src, dst) |p, *d| {
-        const rb = ((p & 0x00FF00FF) * keep >> 8) & 0x00FF00FF;
-        const g = ((p & 0x0000FF00) * keep >> 8) & 0x0000FF00;
-        d.* = 0xFF000000 | rb | g;
-    }
 }
 
 /// Mark the on-screen selection area (or its beautify frame) dirty.

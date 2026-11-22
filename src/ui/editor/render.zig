@@ -10,7 +10,7 @@ const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
 const textbox = @import("../textbox.zig");
 const ui = @import("../editor_ui.zig");
-const caches = @import("caches.zig");
+const dim = @import("../dim.zig");
 const beauty_cache = @import("beauty_cache.zig");
 const fade = @import("fade.zig");
 const winpick = @import("winpick.zig");
@@ -183,7 +183,7 @@ fn composeLiveStroke(ed: *Editor, dst: []u32, stride: usize, origin: Point, lr: 
     const col = if (s.tool == .highlight) (s.color & 0x00FFFFFF) | 0x66000000 else s.color;
     const ca: u32 = col >> 24;
     var dimmed: [1]u32 = undefined;
-    caches.dimRow(&.{col}, &dimmed, ed.dim_keep);
+    dim.dimRow(&.{col}, &dimmed, ed.dim_keep);
     var y = lr.y;
     while (y < lr.bottom()) : (y += 1) {
         var x = lr.x;
@@ -242,7 +242,7 @@ fn drawLiveShapes(ed: *Editor, canvas: *Canvas) void {
         for (canvas.px[off..][0..w], before[row * w ..][0..w], 0..) |*px, old, col| {
             if (px.* == old) continue;
             if (sel.contains(lb.x + @as(i32, @intCast(col)), y)) continue;
-            caches.dimRow(&.{px.*}, px[0..1], ed.dim_keep);
+            dim.dimRow(&.{px.*}, px[0..1], ed.dim_keep);
         }
     }
 }
