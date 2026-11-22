@@ -5,14 +5,17 @@
 # zooming or shrinking the editor's frozen picture of the desktop over
 # the live one, or the top bar gone while nothing covers its place.
 #   blink  blink-ext
-# Env: BLINK_FRAMES=1 keeps every filmed frame as PNG under $OUT.
+# Env: BLINK_FRAMES=1 keeps every filmed frame as PNG under $OUT (not
+# only those of a cut with a ghost).
 
-# film_cut NAME: stop filming; the verdict in $VAL ("frames N ghosts G ...")
+# film_cut NAME: stop filming; the verdict in $VAL ("frames N ghosts G
+# ...", echoed); the frames stay under $OUT/NAME when it found a ghost
 film_cut() {
-    local dir=-
-    if [ -n "${BLINK_FRAMES:-}" ]; then dir=$OUT/$1; mkdir -p "$dir"; fi
+    local dir=$OUT/$1
+    mkdir -p "$dir"
     drv cut "$dir"
     echo "  $1: $VAL"
+    [ -z "${BLINK_FRAMES:-}" ] && [ "$(ghosts)" = 0 ] && rm -rf "$dir"
 }
 ghosts() { local v=$VAL; v=${v#*ghosts }; echo "${v%% *}"; }
 
