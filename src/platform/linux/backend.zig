@@ -30,3 +30,35 @@ comptime {
     _ = fonts;
     _ = ocr;
 }
+
+// The tests of modules the seam does not reach.
+test {
+    _ = @import("dbus.zig");
+    _ = @import("permstore.zig");
+    _ = @import("portal.zig");
+    _ = @import("pw.zig");
+    _ = @import("portal_test.zig");
+    _ = @import("gnome.zig");
+    _ = @import("gnome/shellcap.zig");
+    _ = @import("capture/winrects.zig");
+    _ = @import("gnome/gsettings.zig");
+    _ = @import("capture/permissions.zig");
+    _ = @import("capture/direct.zig");
+    _ = @import("kde/screenshot2.zig");
+    _ = @import("desktop/tray.zig");
+    _ = @import("desktop/daemon.zig");
+    _ = @import("wayland.zig");
+    _ = @import("keyboard.zig");
+    _ = @import("desktop/session_env.zig");
+}
+
+/// The Linux plumbing itself, for Linux-only tooling outside the core:
+/// the end-to-end drivers (src/testkit.zig). The core never uses it.
+pub const native = struct {
+    pub const dbus = @import("dbus.zig");
+    pub const pw = @import("pw.zig");
+    pub const pwstream = @import("pwstream.zig");
+    pub const wayland = @import("wayland.zig");
+    pub const window = @import("window.zig");
+    pub const sys = @import("sys.zig");
+};

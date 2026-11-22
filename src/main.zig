@@ -4,6 +4,7 @@ const front = @import("cli/front.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
 const launch = @import("ui/tools/launch.zig");
+const desktop = @import("platform/api.zig").desktop;
 
 const is_debug = @import("builtin").mode == .debug;
 
@@ -34,13 +35,12 @@ pub fn main(init: std.process.Init) !void {
 fn readEnv(arena: std.mem.Allocator, init: std.process.Init) !Env {
     const vars = init.environ_map;
     const runtime_dir = env_mod.absolute(vars.get("XDG_RUNTIME_DIR")) orelse return error.NoRuntimeDir;
+    // the desktop session's services (Linux: D-Bus and Wayland)
+    const addr = try desktop.addresses(arena, vars, runtime_dir);
     return .{
-        // without an explicit address, use the per-user bus systemd and
-        // dbus-broker put in the runtime dir
-        .bus_addr = nonEmpty(vars.get("DBUS_SESSION_BUS_ADDRESS")) orelse
-            try defaultBusAddress(arena, runtime_dir),
+        .bus_addr = addr.bus,
         .runtime_dir = runtime_dir,
-        .wayland_display = nonEmpty(vars.get("WAYLAND_DISPLAY")) orelse "wayland-0",
+        .wayland_display = addr.display,
         .home = env_mod.absolute(vars.get("HOME")) orelse return error.NoHome,
         .envp = init.minimal.environ.block.slice.ptr,
         .tz = vars.get("TZ"),
@@ -61,53 +61,16 @@ fn nonEmpty(v: ?[]const u8) ?[]const u8 {
     return if (s.len == 0) null else s;
 }
 
-/// "unix:path=<runtime_dir>/bus", percent-escaping bytes outside the set the
-/// DBus spec allows unescaped in address values.
-fn defaultBusAddress(arena: std.mem.Allocator, runtime_dir: []const u8) ![]const u8 {
-    var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(arena, "unix:path=");
-    for (runtime_dir) |c| {
-        const plain = std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "-_/.\\*", c) != null;
-        if (plain) {
-            try out.append(arena, c);
-        } else {
-            try out.print(arena, "%{X:0>2}", .{c});
-        }
-    }
-    try out.appendSlice(arena, "/bus");
-    return out.items;
-}
-
-test "default bus address escapes the runtime dir" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = try defaultBusAddress(arena.allocator(), "/run/user/1000");
-    try std.testing.expectEqualStrings("unix:path=/run/user/1000/bus", a);
-    const b = try defaultBusAddress(arena.allocator(), "/tmp/a b;c");
-    try std.testing.expectEqualStrings("unix:path=/tmp/a%20b%3Bc/bus", b);
-    var buf: [128]u8 = undefined;
-    var out: [2]@import("platform/linux/dbus.zig").Address = undefined;
-    const parsed = try @import("platform/linux/dbus.zig").parseAddresses(b, &buf, &out);
-    try std.testing.expectEqualStrings("/tmp/a b;c/bus", parsed[0].path);
-}
-
 test {
     _ = @import("platform/api.zig");
     _ = @import("cli/tests.zig");
     _ = @import("app/dispatch.zig");
-    _ = @import("platform/linux/dbus.zig");
-    _ = @import("platform/linux/permstore.zig");
-    _ = @import("platform/linux/portal.zig");
-    _ = @import("platform/linux/pw.zig");
-    _ = @import("platform/linux/portal_test.zig");
     _ = @import("app/config.zig");
     _ = @import("app/history.zig");
     _ = @import("app/annot.zig");
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
-    _ = @import("platform/linux/gnome.zig");
     _ = @import("app/accel.zig");
-    _ = @import("platform/linux/gnome/shellcap.zig");
     _ = @import("app/scroll/stitch.zig");
     _ = @import("app/modes/mode.zig");
     _ = @import("app/modes/settings.zig");
@@ -115,12 +78,9 @@ test {
     _ = @import("app/modes/last_area.zig");
     _ = @import("app/modes/window_frame.zig");
     _ = @import("app/modes/cli.zig");
-    _ = @import("platform/linux/capture/winrects.zig");
     _ = @import("app/scroll/capture.zig");
     _ = @import("app/scroll/session.zig");
     _ = @import("app/scroll/stop.zig");
-    _ = @import("platform/linux/gnome/gsettings.zig");
-    _ = @import("platform/linux/capture/permissions.zig");
     _ = @import("app/pin.zig");
     _ = @import("app/clipimg.zig");
     _ = @import("app/binds.zig");
@@ -163,17 +123,11 @@ test {
     _ = @import("gfx/effects.zig");
     _ = @import("gfx/resample.zig");
     _ = @import("app/capture.zig");
-    _ = @import("platform/linux/capture/direct.zig");
-    _ = @import("platform/linux/kde/screenshot2.zig");
     _ = @import("app/env.zig");
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");
-    _ = @import("platform/linux/desktop/tray.zig");
-    _ = @import("platform/linux/desktop/daemon.zig");
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
-    _ = @import("platform/linux/wayland.zig");
-    _ = @import("platform/linux/keyboard.zig");
     _ = @import("platform/api.zig").window;
     _ = @import("ui/settings.zig");
     _ = @import("ui/frame.zig");

@@ -1,12 +1,16 @@
-//! The pieces of shotlet that the end-to-end driver (tools/e2e/drive.zig)
-//! reuses: one module root so each source file belongs to one module.
+//! The pieces of shotlet that the end-to-end drivers (tools/e2e/drive.zig,
+//! tools/container/wldrive.zig, tools/e2e/droptarget.zig) reuse: one
+//! module root so each source file belongs to one module. The drivers
+//! are Linux tools: they take the Linux backend's plumbing as it is.
 
-pub const dbus = @import("platform/linux/dbus.zig");
-pub const pw = @import("platform/linux/pw.zig");
-pub const pwstream = @import("platform/linux/pwstream.zig");
-pub const sys = @import("platform/api.zig").sys;
+const native = @import("platform/api.zig").backend.native;
+
+pub const dbus = native.dbus;
+pub const pw = native.pw;
+pub const pwstream = native.pwstream;
+pub const sys = native.sys;
 pub const png = @import("gfx/png.zig");
-pub const window = @import("platform/api.zig").window;
-pub const wayland = @import("platform/linux/wayland.zig");
+pub const window = native.window;
+pub const wayland = native.wayland;
 pub const render = @import("gfx/render.zig");
 pub const text = @import("gfx/text.zig");

@@ -23,6 +23,9 @@ pub const Session = dbus.Connection;
 /// A file dialog in progress, answered through pump().
 pub const Dialog = portal.Request;
 
+/// Where the session's services are, from the environment.
+pub const addresses = @import("desktop/session_env.zig").addresses;
+
 /// Connect to the session, telling the portals who we are.
 pub fn connect(gpa: std.mem.Allocator, env: Env) !Session {
     return portal.connectApp(gpa, env.bus_addr);

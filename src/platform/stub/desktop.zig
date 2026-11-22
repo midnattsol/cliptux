@@ -28,6 +28,12 @@ pub const Dialog = struct {
     }
 };
 
+/// Where the session's services are, from the environment (`vars.get`);
+/// the core keeps them in Env.bus_addr and Env.wayland_display.
+pub fn addresses(arena: std.mem.Allocator, vars: anytype, runtime_dir: []const u8) error{OutOfMemory}!struct { bus: []const u8, display: []const u8 } {
+    _ = .{ arena, vars, runtime_dir };
+    return .{ .bus = "", .display = "" };
+}
 pub fn connect(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Session {
     _ = .{ gpa, env };
     return error.Unavailable;
