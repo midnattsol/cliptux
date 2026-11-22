@@ -16,6 +16,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     addGnomeExtension(b, exe.root_module);
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", @import("build.zig.zon").version);
+    exe.root_module.addOptions("build_options", options);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -33,6 +36,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     addGnomeExtension(b, tests.root_module);
+    tests.root_module.addOptions("build_options", options);
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
