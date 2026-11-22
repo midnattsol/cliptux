@@ -38,7 +38,7 @@ const help_lines = [_][2][]const u8{
     .{ "Tab / Shift+Tab", "Move focus on the toolbar; Enter activates" },
     .{ "Enter  Ctrl+C", "Copy to clipboard and close" },
     .{ "Ctrl+S  Ctrl+Shift+S", "Save, save as" },
-    .{ "Right click / Esc", "Cancel current action; Esc again closes" },
+    .{ "Right click / Esc", "Cancel current action; Esc again closes (twice with annotations)" },
 };
 
 pub fn rect(self: *const Editor) Rect {

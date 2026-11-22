@@ -436,7 +436,7 @@ the editor for the full list.
 | Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
 | `Enter` / `Ctrl+C` | copy to the clipboard and close |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
-| `Esc` / right click | cancel the current action; `Esc` again closes |
+| `Esc` / right click | cancel the current action; `Esc` again closes (with unsaved annotations it asks first: `Esc` once more discards them) |
 | `V` `P` `L` `A` `R` `E` `M` | select, pen, line, arrow, rectangle, ellipse, marker |
 | `X` (again) | blur, then pixelate, then solid redaction |
 | `N` `T` | counter badge, text |
