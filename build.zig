@@ -171,6 +171,7 @@ fn addPortableCheck(b: *std.Build, options: *std.Build.Step.Options, test_step: 
     layers.has_side_effects = true;
     b.step("check-layers", "Fail when a file outside src/platform/linux imports it").dependOn(&layers.step);
     test_step.dependOn(&layers.step);
+    test_step.dependOn(step);
 }
 
 /// `zig build man`: shotlet(1), which `shotlet man-page` writes from the
