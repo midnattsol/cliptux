@@ -44,7 +44,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     }
     if (self.show_hint) list.add(selection.hintRect(self).expand(1));
     if (self.isMousePane()) {
-        if (loupe.loupeRect(self)) |r| list.add(r.expand(2));
+        if (loupe.loupeFootprint(self)) |r| list.add(r);
     }
     if (!self.isTbPane()) return;
     collectFloating(self, list);

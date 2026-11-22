@@ -43,6 +43,26 @@ pub fn loupeRect(self: *const Editor) ?Rect {
     return .{ .x = x, .y = y, .w = size, .h = total_h };
 }
 
+/// Everything drawLoupe paints, for the repaint: the dark ring reaches
+/// past loupeRect on every side, and the label can be wider than it.
+/// (Covering only loupeRect left a trail of ring edges behind the
+/// pointer.)
+pub fn loupeFootprint(self: *const Editor) ?Rect {
+    const r = loupeRect(self) orelse return null;
+    const size = r.w;
+    const lens = Rect{ .x = r.x, .y = r.y, .w = size, .h = size };
+    // the ring is drawn inside lens.expand(ringOut), its anti-aliased
+    // edge one pixel further; the shadow stays within that
+    var buf: [64]u8 = undefined;
+    const label = labelRect(self, r, labelText(self, &buf));
+    return Rect.unite(lens.expand(ringOut(self) + 2), label.expand(2));
+}
+
+/// How far the dark ring reaches past the magnified pixels.
+fn ringOut(self: *const Editor) i32 {
+    return self.sc(3);
+}
+
 pub fn drawLoupe(self: *Editor, canvas: *Canvas) void {
     const r = loupeRect(self) orelse return;
     const f = self.uf();
@@ -54,9 +74,9 @@ pub fn drawLoupe(self: *Editor, canvas: *Canvas) void {
     drawGrid(self, canvas, r, cell);
     // rounded window onto the pixels: mask the corners with a ring
     const lr = Rect{ .x = r.x, .y = r.y, .w = size, .h = size };
-    shapes_mod.roundRectRing(canvas, lr.expand(self.sc(3)), 10 * f + ff(self.sc(3)), ff(self.sc(6)) + 1, 0xFF1C1C1E);
+    shapes_mod.roundRectRing(canvas, lr.expand(ringOut(self)), 10 * f + ff(ringOut(self)), ff(self.sc(6)) + 1, 0xFF1C1C1E);
     shapes_mod.roundRectRing(canvas, lr, 8 * f, 1.5 * f, 0xE6FFFFFF);
-    drawLabel(self, canvas, r, size, ip);
+    drawLabel(self, canvas, r);
 }
 
 /// The pixels around image point `ip`, one `cell` square each (dark
@@ -96,22 +116,32 @@ fn drawGrid(self: *const Editor, canvas: *Canvas, r: Rect, cell: i32) void {
     canvas.rectOutline(c0x - 1, c0y - 1, cell + 2, cell + 2, 1, 0xFFFFFFFF);
 }
 
-/// Coordinates, and the selection size while dragging, in a pill below.
-fn drawLabel(self: *const Editor, canvas: *Canvas, r: Rect, size: i32, ip: Point) void {
-    const f = self.uf();
-    const th = self.theme;
+/// Coordinates, or the selection size while dragging.
+fn labelText(self: *const Editor, buf: []u8) []const u8 {
     const iw: i32 = @intCast(self.img.width);
     const ih: i32 = @intCast(self.img.height);
-    var buf: [64]u8 = undefined;
     const x_sym = if (text_mod.available()) "\u{00D7}" else "x";
-    const label = if (self.drag != .none and self.doc.sel != null) blk: {
+    if (self.drag != .none and self.doc.sel != null) {
         const s = self.doc.sel.?.normalized();
-        break :blk std.fmt.bufPrint(&buf, "{d} {s} {d}", .{ s.w, x_sym, s.h }) catch "?";
-    } else std.fmt.bufPrint(&buf, "{d}, {d}", .{ std.math.clamp(ip.x, 0, iw), std.math.clamp(ip.y, 0, ih) }) catch "?";
-    const fs = theme.font_small * f;
-    const lh = text_mod.height(fs) + self.sc(8);
+        return std.fmt.bufPrint(buf, "{d} {s} {d}", .{ s.w, x_sym, s.h }) catch "?";
+    }
+    const ip = self.pn().view.toImg(self.mouse);
+    return std.fmt.bufPrint(buf, "{d}, {d}", .{ std.math.clamp(ip.x, 0, iw), std.math.clamp(ip.y, 0, ih) }) catch "?";
+}
+
+/// The label's pill, centred below the magnified pixels of `r`.
+fn labelRect(self: *const Editor, r: Rect, label: []const u8) Rect {
+    const fs = theme.font_small * self.uf();
     const lw = text_mod.width(fs, label) + self.sc(20);
-    const ly = r.y + size + self.sc(6);
-    canvas.fillRoundRectAA(r.x + @divTrunc(size - lw, 2), ly, lw, lh, 7 * f, th.pill_bg);
-    text_mod.draw(canvas, r.x + @divTrunc(size - text_mod.width(fs, label), 2), ly + self.sc(4), fs, th.pill_fg, label);
+    return .{ .x = r.x + @divTrunc(r.w - lw, 2), .y = r.y + r.w + self.sc(6), .w = lw, .h = text_mod.height(fs) + self.sc(8) };
+}
+
+/// The label in its pill below.
+fn drawLabel(self: *const Editor, canvas: *Canvas, r: Rect) void {
+    var buf: [64]u8 = undefined;
+    const label = labelText(self, &buf);
+    const lr = labelRect(self, r, label);
+    const fs = theme.font_small * self.uf();
+    canvas.fillRoundRectAA(lr.x, lr.y, lr.w, lr.h, 7 * self.uf(), self.theme.pill_bg);
+    text_mod.draw(canvas, r.x + @divTrunc(r.w - text_mod.width(fs, label), 2), lr.y + self.sc(4), fs, self.theme.pill_fg, label);
 }

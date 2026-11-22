@@ -100,6 +100,20 @@ shot 0 pinned
 keys esc
 wait_exit 5 || stop_shotlet
 
+# --- the magnifier follows the pointer and leaves nothing behind: swept
+# over plain blue, then away, its dark ring (#1c1c1e) is nowhere on the path
+run_shotlet loupe shot --from "$IMG"
+wait_editor 10
+arrive 300 600
+for p in 320,610 350,630 390,650 430,680 480,700 530,720 580,740 620,750; do
+    drv move 0 "${p%,*}" "${p#*,}" && drv sleep 40
+done
+drv move 0 1100 760 && drv sleep 300
+shot 0 loupe
+check "the magnifier leaves no trail" no_find_exact 0 1c1c1e 12 1 260 520 780 880
+keys esc
+wait_exit 5 || stop_shotlet
+
 # --- a PNG file dragged onto the editor opens in it
 if [ -z "$PYGTK" ]; then
     skip "drop onto the editor: no Python GTK 4"
