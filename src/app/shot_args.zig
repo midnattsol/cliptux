@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const shot = @import("shot.zig");
-const shellcap = @import("shellcap.zig");
+const shellcap = @import("../platform/linux/gnome/shellcap.zig");
 const Env = @import("env.zig").Env;
 
 const ShotArgs = struct {

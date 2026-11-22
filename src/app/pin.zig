@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const env_mod = @import("env.zig");
-const gnome = @import("gnome.zig");
+const gnome = @import("../platform/linux/gnome.zig");
 const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/linux/sys.zig");
 const wl = @import("../platform/linux/wayland.zig");

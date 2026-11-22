@@ -6,7 +6,7 @@ const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../../app/env.zig");
-const gnome = @import("../../app/gnome.zig");
+const gnome = @import("../../platform/linux/gnome.zig");
 const settings_modes = @import("../settings_modes.zig");
 const focus = @import("focus.zig");
 
@@ -101,7 +101,7 @@ pub const State = struct {
     /// the portal (app/direct.zig)
     direct: bool = false,
     /// how the last capture went (app/capture_path.zig)
-    last_path: ?@import("../../app/capture_path.zig").Path = null,
+    last_path: ?@import("../../platform/linux/capture/path.zig").Path = null,
     /// what Reset permissions did
     perm_note: @import("permissions.zig").Note = .{},
     pending_focus: ?usize = null,

@@ -20,7 +20,7 @@ const flow = @import("../modes/flow.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
 const stitch = @import("stitch.zig");
 const stop = @import("stop.zig");
-const source = @import("source.zig");
+const source = @import("../../platform/linux/capture/scroll_source.zig");
 
 /// How long a natural stop's reason stays up before the editor opens.
 const done_hold_ms = 900;

@@ -6,7 +6,7 @@ const Env = @import("env.zig").Env;
 const Parsed = @import("../cli/parse.zig").Parsed;
 const errors = @import("../cli/errors.zig");
 const launch = @import("../ui/tools/launch.zig");
-const gnome = @import("gnome.zig");
+const gnome = @import("../platform/linux/gnome.zig");
 
 pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
     const r = p.rest;
@@ -25,13 +25,13 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .history_clear => try clearHistory(env),
         .thumbnail => try @import("lastthumb.zig").run(gpa, env),
         .settings => try @import("../ui/settings.zig").run(gpa, env, smoke(p)),
-        .daemon => try @import("daemon.zig").run(gpa, env, p.flag("foreground")),
+        .daemon => try @import("../platform/linux/desktop/daemon.zig").run(gpa, env, p.flag("foreground")),
         .gnome_integration, .gnome_status => try gnome.runCli(gpa, env, "status", &.{}),
         .gnome_install => try gnome.runCli(gpa, env, "install", r),
         .gnome_uninstall => try gnome.runCli(gpa, env, "uninstall", &.{}),
         .gnome_shortcut => try gnome.runCli(gpa, env, "shortcut", p.positionals),
-        .permissions => try @import("permissions.zig").run(gpa, env, &.{}),
-        .permissions_reset => try @import("permissions.zig").run(gpa, env, if (p.flag("dry-run")) &.{ "reset", "--dry-run" } else &.{"reset"}),
+        .permissions => try @import("../platform/linux/capture/permissions.zig").run(gpa, env, &.{}),
+        .permissions_reset => try @import("../platform/linux/capture/permissions.zig").run(gpa, env, if (p.flag("dry-run")) &.{ "reset", "--dry-run" } else &.{"reset"}),
         // answered by src/cli/front.zig
         .help, .completions, .man_page => unreachable,
         .quick => try @import("quick.zig").run(gpa, env, (try need(p, 2))[0], r[1], readyFd(r[2..])),
@@ -39,7 +39,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .trim => try @import("../ui/recui/trimui.zig").run(gpa, env, (try need(p, 2))[0], r[1], r[2..]),
         .toast => try @import("toastwin.zig").run(gpa, env, (try need(p, 1))[0], if (r.len > 1) r[1] else ""),
         .test_window, .test_grab, .test_font, .test_decode => {
-            _ = try @import("devtools.zig").run(gpa, env, p.chain.items[0].name, r);
+            _ = try @import("../platform/linux/devtools.zig").run(gpa, env, p.chain.items[0].name, r);
         },
     }
 }

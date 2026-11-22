@@ -5,8 +5,8 @@
 
 const std = @import("std");
 const capture = @import("capture.zig");
-const direct = @import("direct.zig");
-const capture_path = @import("capture_path.zig");
+const direct = @import("../platform/linux/capture/direct.zig");
+const capture_path = @import("../platform/linux/capture/path.zig");
 const config = @import("config.zig");
 const dbus = @import("../platform/linux/dbus.zig");
 const env_mod = @import("env.zig");
@@ -16,18 +16,18 @@ const sys = @import("../platform/linux/sys.zig");
 const keep_mod = @import("keep.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
-const gnome = @import("gnome.zig");
-const shellcap = @import("shellcap.zig");
+const gnome = @import("../platform/linux/gnome.zig");
+const shellcap = @import("../platform/linux/gnome/shellcap.zig");
 const modes = @import("modes/mode.zig");
 const mode_flow = @import("modes/flow.zig");
-const shell_bus = @import("modes/shell_bus.zig");
+const shell_bus = @import("../platform/linux/gnome/shell_bus.zig");
 const last_area = @import("modes/last_area.zig");
 const save = @import("shot/save.zig");
 const handoff = @import("shot/handoff.zig");
 const dialog = @import("shot/dialog.zig");
 const next = @import("shot/next.zig");
-const winrects = @import("winrects.zig");
-const screencast = @import("shot/screencast.zig").screencast;
+const winrects = @import("../platform/linux/capture/winrects.zig");
+const screencast = @import("../platform/linux/capture/screencast.zig").screencast;
 const window = @import("../platform/linux/window.zig");
 const editor_mod = @import("../ui/editor.zig");
 const Env = env_mod.Env;
@@ -441,7 +441,7 @@ fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?
         // GNOME only shows its consent dialog to the focused app, so a
         // windowless first run is denied (or, with no app focused, never
         // answered); ask again from a focused window
-        .denied, .timeout => (try @import("first_run.zig").permissionFlow(gpa, env, conn)) orelse return null,
+        .denied, .timeout => (try @import("../platform/linux/capture/first_run.zig").permissionFlow(gpa, env, conn)) orelse return null,
         .unavailable => return error.NoScreenshotPortal,
     };
     defer gpa.free(png_data);

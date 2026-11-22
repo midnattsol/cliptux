@@ -8,7 +8,7 @@ const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const clock = @import("../clock.zig");
 const shot = @import("../shot.zig");
-const gnome = @import("../gnome.zig");
+const gnome = @import("../../platform/linux/gnome.zig");
 const sys = @import("../../platform/linux/sys.zig");
 const effects = @import("../../gfx/effects.zig");
 const window = @import("../../platform/linux/window.zig");
@@ -77,7 +77,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         .show_in_files => {
             if (c.meta.saved.len == 0) return;
             const b = self.bus_() orelse return error.NoBus;
-            try @import("../filemanager.zig").showItem(self.gpa, b, c.meta.saved);
+            try @import("../../platform/linux/desktop/filemanager.zig").showItem(self.gpa, b, c.meta.saved);
             std.log.info("quick access: showing {s} in the file manager", .{c.meta.saved});
         },
         .close => {

@@ -4,11 +4,11 @@
 
 const std = @import("std");
 const env_mod = @import("../env.zig");
-const gnome = @import("../gnome.zig");
+const gnome = @import("../../platform/linux/gnome.zig");
 const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
 const settings = @import("settings.zig");
-const window_direct = @import("window_direct.zig");
+const window_direct = @import("../../platform/linux/capture/window_direct.zig");
 const dbus = @import("../../platform/linux/dbus.zig");
 
 /// The GNOME extension is here to pick windows.

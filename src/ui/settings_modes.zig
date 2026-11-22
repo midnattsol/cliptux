@@ -10,8 +10,8 @@
 const std = @import("std");
 const dbus = @import("../platform/linux/dbus.zig");
 const env_mod = @import("../app/env.zig");
-const gnome = @import("../app/gnome.zig");
-const gsettings = @import("../app/gsettings.zig");
+const gnome = @import("../platform/linux/gnome.zig");
+const gsettings = @import("../platform/linux/gnome/gsettings.zig");
 const mode = @import("../app/modes/mode.zig");
 const msettings = @import("../app/modes/settings.zig");
 const S = @import("settings.zig");
@@ -116,7 +116,7 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
 }
 
 fn displayAccel(buf: []u8, accel: []const u8) []const u8 {
-    return @import("../app/accel.zig").display(buf, accel);
+    return @import("../platform/linux/gnome/accel.zig").display(buf, accel);
 }
 
 pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {

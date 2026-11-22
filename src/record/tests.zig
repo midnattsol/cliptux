@@ -22,7 +22,7 @@ test {
     _ = @import("settings.zig");
     _ = @import("keepvid.zig");
     _ = @import("ctlsock.zig");
-    _ = @import("source.zig");
+    _ = @import("../platform/linux/record/source.zig");
     _ = @import("cli.zig");
     _ = @import("run.zig");
     _ = @import("files.zig");
