@@ -9,6 +9,7 @@ const editor_mod = @import("../editor.zig");
 const icons = @import("../icons.zig");
 const tools = @import("../tools/mod.zig");
 const tui = @import("../tools/tui.zig");
+const capmode = @import("../editor/capmode.zig");
 
 const Editor = editor_mod.Editor;
 const Tool = shapes_mod.Tool;
@@ -67,14 +68,12 @@ pub const ButtonKind = union(enum) {
     cancel,
     /// the extra tools' controls (tools/mod.zig)
     ext: tools.Ext,
-    // other capture modes (app/modes/): the editor closes and they start
-    capture_window,
-    capture_scroll,
-    capture_timer,
+    /// a capture mode on the strip before a selection (editor/capmode.zig)
+    mode: capmode.Mode,
 };
 
 /// Which floating surface a control sits on.
-pub const Layer = enum { bar, panel, popover, menu };
+pub const Layer = enum { bar, panel, popover, menu, strip };
 
 pub const Button = struct {
     rect: Rect,
@@ -95,6 +94,7 @@ pub fn buttonName(kind: ButtonKind) []const u8 {
         .color => |c| shapes_mod.palette_names[c],
         .seg => |s| @tagName(s),
         .ext => |e| tui.name(e),
+        .mode => |m| m.scriptName(),
         else => @tagName(kind),
     };
 }
@@ -105,7 +105,7 @@ pub fn nameLayer(name: []const u8) ?Layer {
     for (shapes_mod.palette_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     inline for (@typeInfo(Seg).@"enum".field_names) |n| if (std.mem.eql(u8, n, name)) return .popover;
     for ([_][]const u8{ "custom_color", "thickness" }) |n| if (std.mem.eql(u8, n, name)) return .popover;
-    for ([_][]const u8{ "save_as", "help", "cancel", "beautify", "capture_window", "capture_scroll", "capture_timer" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
+    for ([_][]const u8{ "save_as", "help", "cancel", "beautify" }) |n| if (std.mem.eql(u8, n, name)) return .menu;
     return tui.nameLayer(name);
 }
 
@@ -140,9 +140,7 @@ pub fn buttonLabel(self: *const Editor, kind: ButtonKind, kb: []u8) Label {
         .help => .{ "Shortcuts", null, "?" },
         .cancel => .{ "Close", null, "Esc" },
         .ext => |e| return tui.label(self, e, kb),
-        .capture_window => .{ "Capture window", null, "" },
-        .capture_scroll => .{ "Scrolling capture", null, "" },
-        .capture_timer => .{ "Timer\u{2026}", null, "" },
+        .mode => |m| .{ m.label(), null, m.keyName() },
     };
     const key = if (action) |a| config.bindName(self.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = name, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
@@ -214,6 +212,7 @@ pub fn buttonActive(self: *const Editor, kind: ButtonKind) bool {
         .beautify => self.beautify.enabled,
         .help => self.help_open,
         .ext => |e| tui.active(self, e),
+        .mode => |m| capmode.current(self) == m,
         else => false,
     };
 }
@@ -226,6 +225,7 @@ pub fn disabledWhy(self: *const Editor, kind: ButtonKind) ?[]const u8 {
         .undo => if (canUndo(self)) null else "Nothing to undo",
         .redo => if (self.doc.redo_stack.items.len > 0) null else "Nothing to redo",
         .ext => |e| tui.disabledWhy(e),
+        .mode => |m| capmode.disabledWhy(self, m),
         else => null,
     };
 }
@@ -274,9 +274,7 @@ pub fn kindIcon(self: *const Editor, kind: ButtonKind) ?Icon {
         .shadow => .shadow,
         .beautify_always => .pin,
         .ext => |e| tui.icon(e),
-        .capture_window => .capture_window,
-        .capture_scroll => .capture_scroll,
-        .capture_timer => .timer,
+        .mode => |m| m.icon(),
         else => null,
     };
 }

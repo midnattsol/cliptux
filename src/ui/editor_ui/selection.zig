@@ -58,6 +58,10 @@ pub fn hintRect(self: *const Editor) Rect {
     const ph = text_mod.height(fs) + self.sc(14);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
+    // above the mode strip, where that shows
+    const strip = self.capmode.rect;
+    if (self.isTbPane() and !strip.isEmpty())
+        return .{ .x = strip.x + @divTrunc(strip.w - tw, 2) - self.sc(16), .y = strip.y - ph - self.sc(12), .w = tw + self.sc(32), .h = ph };
     return .{ .x = @divTrunc(w - tw, 2) - self.sc(16), .y = h - ph - self.sc(48), .w = tw + self.sc(32), .h = ph };
 }
 

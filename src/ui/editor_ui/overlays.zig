@@ -12,6 +12,8 @@ const selection = @import("selection.zig");
 const loupe = @import("loupe.zig");
 const tooltip = @import("tooltip.zig");
 const notice = @import("notice.zig");
+const strip = @import("strip.zig");
+const winpick = @import("../editor/winpick.zig");
 
 const Editor = editor_mod.Editor;
 const RectList = editor_mod.RectList;
@@ -44,6 +46,7 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
         list.add(selection.dimsPillRect(self, s).expand(1));
     }
     if (self.show_hint) list.add(selection.hintRect(self).expand(1));
+    if (winpick.footprint(self)) |r| addOutline(list, r, chromePad(self));
     if (self.isMousePane()) {
         if (loupe.loupeFootprint(self)) |r| list.add(r);
     }
@@ -57,6 +60,7 @@ fn collectFloating(self: *Editor, list: *RectList) void {
     const th = self.theme;
     const foot = material.shadowFootprint;
     if (!self.toolbar_rect.isEmpty()) list.add(foot(self, self.toolbar_rect.expand(self.sc(1)), th.bar_shadow));
+    if (strip.footprint(self)) |r| list.add(r);
     if (!self.panel_rect.isEmpty()) list.add(foot(self, self.panel_rect.expand(self.sc(1)), th.bar_shadow));
     if (!self.pop_rect.isEmpty()) list.add(foot(self, self.pop_rect.expand(self.sc(1)), th.popover_shadow));
     if (!pop_fade.rect(self).isEmpty()) list.add(pop_fade.rect(self));

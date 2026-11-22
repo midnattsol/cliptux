@@ -11,7 +11,8 @@ const Canvas = render.Canvas;
 const Rect = @import("shapes.zig").Rect;
 
 const help_lines = [_][2][]const u8{
-    .{ "Drag", "Select a region; drag inside to move it" },
+    .{ "Drag / click", "Select a region / a window; drag inside to move it" },
+    .{ "G W D J O Q H", "Mode: area, window, screen, scroll, OCR, record, timer" },
     .{ "Shift / Alt + drag", "Square, circle, 45\u{00B0} lines; from the centre" },
     .{ "Space + drag", "Move the region or shape while drawing it" },
     .{ "Arrows / Shift", "Move selection or shape by 1 / 10 px" },
@@ -28,8 +29,7 @@ const help_lines = [_][2][]const u8{
     .{ "1-8, 9", "Preset colours, custom colour" },
     .{ "Scroll, - =", "Stroke and text size" },
     .{ "Click / double-click", "Select a shape (select tool) / edit text" },
-    .{ "Delete", "Delete selected shape" },
-    .{ "Ctrl+D  Ctrl+]", "Duplicate, bring to front" },
+    .{ "Delete  Ctrl+D  Ctrl+]", "Delete, duplicate, bring to front" },
     .{ "Ctrl+Z / Ctrl+Shift+Z, Ctrl+Y", "Undo / redo" },
     .{ "Text: Enter", "New line; Ctrl+Enter, Esc or click outside ends" },
     .{ "Text: Shift+arrows, Ctrl+A", "Select text; Ctrl+C/X/V copy, cut, paste" },

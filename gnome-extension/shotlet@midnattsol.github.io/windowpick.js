@@ -31,6 +31,16 @@ function candidates(isShotlet) {
     return global.display.sort_windows_by_stacking(list).reverse();
 }
 
+// Where those windows are, topmost first: their frames (logical pixels,
+// client-side shadows left out) as one flat [x, y, width, height, ...]
+// list, for Shotlet's own click-a-window in area selection.
+export function windowRects(isShotlet) {
+    return candidates(isShotlet).flatMap(w => {
+        const r = w.get_frame_rect();
+        return r.width > 0 && r.height > 0 ? [r.x, r.y, r.width, r.height] : [];
+    });
+}
+
 function contains(r, x, y) {
     return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
 }

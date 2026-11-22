@@ -16,6 +16,8 @@ const pop_fade = @import("pop_fade.zig");
 const picker = @import("picker.zig");
 const tooltip = @import("tooltip.zig");
 const notice = @import("notice.zig");
+const strip = @import("strip.zig");
+const winpick = @import("../editor/winpick.zig");
 const ff = @import("common.zig").ff;
 
 const Canvas = render.Canvas;
@@ -38,11 +40,13 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
         if (self.isMousePane()) drawPreedit(self, canvas);
     }
     if (self.selected) |i| drawShapeChrome(self, canvas, i);
+    winpick.drawOutline(self, canvas);
     if (self.textHandleShape()) |i| drawTextHandle(self, canvas, i);
     selection.drawSelectionChrome(self, canvas);
     if (self.isMousePane()) loupe.drawLoupe(self, canvas);
     tools.drawChrome(self, canvas);
     if (!self.isTbPane()) return;
+    strip.draw(self, canvas);
     draw_toolbar.drawToolbar(self, canvas);
     if (self.popover != .none and !self.pop_rect.isEmpty()) draw_popover.drawPopover(self, canvas);
     pop_fade.draw(self, canvas);

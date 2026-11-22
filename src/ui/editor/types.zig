@@ -23,6 +23,16 @@ pub const Action = enum {
     save_as,
     /// close and start another capture: `next_capture` names the command
     new_capture,
+    /// the monitor under the pointer, delivered as a screen capture
+    /// (capmode.State.screen_rect)
+    screen,
+    /// close into the recording picker, on the same frozen frame
+    record,
+
+    /// Whether the session's result carries the exported selection.
+    pub fn exports(self: Action) bool {
+        return self == .save or self == .save_as;
+    }
 };
 
 /// A failed copy says so; a copy that worked closes the editor (the

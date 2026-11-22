@@ -9,7 +9,8 @@
 //! toolbar_layout and popover_layout, hit (pointer and focus queries),
 //! overlays (footprints), draw_chrome, selection, draw_toolbar,
 //! draw_popover, material (blurred backdrop, shadow, hairline), picker,
-//! loupe, tooltip and notice.
+//! loupe, tooltip, notice and strip (the capture modes before a
+//! selection).
 
 const buttons = @import("editor_ui/buttons.zig");
 const pop_fade = @import("editor_ui/pop_fade.zig");
@@ -82,4 +83,5 @@ pub const drawCopyNotice = notice.drawCopyNotice;
 // keep the submodules' tests reachable from the test root
 comptime {
     _ = buttons;
+    _ = @import("editor_ui/strip.zig");
 }

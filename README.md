@@ -144,8 +144,35 @@ tool holds is left unbound and `shotlet gnome-integration shortcut` says
 so); change one in Settings › Shortcuts or with
 `shotlet gnome-integration shortcut window '<Super>w'` (`none` turns it
 off). Elsewhere, bind the commands in your desktop's keyboard settings.
-The editor's More menu and the tray menu start a window, scrolling or
-timed capture too.
+The tray menu starts a window, scrolling or timed capture too.
+
+**The mode strip.** While you pick an area, a small bar at the bottom
+centre of the monitor with the pointer switches modes without starting
+over, like macOS's Cmd+Shift+5 bar or GNOME's screenshot UI; it fades out
+as soon as you start dragging (the toolbar takes over) and never covers
+the selection. Its keys work while it shows (none is a tool's key):
+
+| Key | Mode | |
+| --- | --- | --- |
+| `G` | Area | drag a region, or click a window (below) |
+| `W` | Window | the window picker (`shotlet window`) |
+| `D` | Screen | the monitor under the pointer, as `after_fullscreen` says (in place with `editor`) |
+| `J` | Scrolling capture | `shotlet scroll` |
+| `O` | Text (OCR) | drag over text: it is read and copied (`shotlet text`) |
+| `Q` | Record | the recording picker, on the same frozen frame |
+| `H` | Self-timer | `shotlet timer` |
+
+**Click a window while selecting an area**, as on macOS: the window under
+the pointer lights up (an accent outline, the rest dimmed), a click
+without dragging selects exactly that window (an area like any other:
+annotate, copy or save it), and a drag still draws a free area. Where the
+windows are is taken with the capture, never live:
+
+| Desktop | Window click |
+| --- | --- |
+| GNOME with the Shotlet extension | yes: the extension notes the windows in the frame it captures (`CaptureWindows`) |
+| KDE Plasma (KWin) | yes: a one-off KWin script right after the capture (no extra permission) |
+| GNOME without the extension, wlroots (sway, labwc, Hyprland...), portals | no: nothing tells an app where windows are; the strip and area selection work as always |
 
 - **Screen, all screens, window** skip the region selection and do what
   `after_fullscreen` says (Settings › General › Capture modes): `thumbnail`
@@ -310,6 +337,12 @@ the pointer in the middle of the region, turns the wheel there (at most
 10 notches a step, 25 steps a second) and puts the pointer back at the
 end; the device is dropped when the session ends, when Shotlet's
 connection goes away, after 30 s without a step or after 5 minutes.
+`CaptureWindows(id)` gives the shotlet started on capture `id` (same
+caller check) where the windows were in that frame: their frames only
+(no titles, no contents), once, and only within a minute; it is what the
+editor's click-a-window uses. It came with the extension's version 4:
+after updating Shotlet, `shotlet gnome-integration install` and logging
+out and back in load it (until then the click is simply not offered).
 
 When the extension is missing, older, or cannot capture, Shotlet uses the
 screen-sharing portal as before. `shotlet gnome-integration status` and
@@ -451,6 +484,8 @@ the editor for the full list.
 | Key | Action |
 | --- | --- |
 | Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
+| Click a window | select that window (before a selection; GNOME with the extension, KDE) |
+| `G` `W` `D` `J` `O` `Q` `H` | before a selection: area, window, screen, scrolling, text, record, timer (the mode strip) |
 | `Enter` / `Ctrl+C` | copy to the clipboard and close |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
 | `Esc` / right click | cancel the current action; `Esc` again closes (with unsaved annotations it asks first: `Esc` once more discards them) |
@@ -588,7 +623,11 @@ menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
 and the portal when the extension cannot capture). The capture modes'
 scenarios (`tools/e2e/modes.sh`) also run with the extension:
 `modes-screen` (two monitors: the one under the pointer, all screens,
-the previous area, each `after_fullscreen`), `modes-timer` (the countdown
+the previous area, each `after_fullscreen`), `modes-strip`
+(`tools/e2e/strip.sh`: the mode strip and its keys, a GTK window lit
+under the pointer and selected by a click at exactly its frame, a drag
+over it still a free area, Record handing the capture to its picker,
+light and dark), `modes-timer` (the countdown
 on screen but not in the capture), `modes-window` (a 640x480 GTK window
 captured at exactly its size with see-through corners, then with its
 shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the

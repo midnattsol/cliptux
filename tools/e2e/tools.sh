@@ -110,7 +110,8 @@ for p in 320,610 350,630 390,650 430,680 480,700 530,720 580,740 620,750; do
 done
 drv move 0 1100 760 && drv sleep 300
 shot 0 loupe
-check "the magnifier leaves no trail" no_find_exact 0 1c1c1e 12 1 260 520 780 880
+# (the mode strip's dark icons sit at the bottom centre, from x 650, y 814)
+check "the magnifier leaves no trail" eval 'no_find_exact 0 1c1c1e 12 1 260 520 780 805 && no_find_exact 0 1c1c1e 12 1 260 805 640 880'
 keys esc
 wait_exit 5 || stop_shotlet
 

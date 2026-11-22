@@ -13,6 +13,8 @@ const popover = @import("popover_layout.zig");
 const picker = @import("picker.zig");
 const hit = @import("hit.zig");
 const barkit = @import("../barkit.zig");
+const strip = @import("strip.zig");
+const capmode = @import("../editor/capmode.zig");
 const ff = @import("common.zig").ff;
 
 const Editor = editor_mod.Editor;
@@ -86,7 +88,12 @@ pub fn layoutToolbar(self: *Editor) !void {
         .none, .picking, .size_slider => false,
         else => true,
     };
-    if (sel_b == null or dragging or tui.hideBar(self)) return hideChrome(self);
+    if (sel_b == null or dragging or tui.hideBar(self)) {
+        hideChrome(self);
+        try strip.layout(self);
+        refreshHover(self, now);
+        return settleFocus(self);
+    }
     const w: i32 = @intCast(self.pn().width);
     const btn = self.sc(theme.button);
     const gap = self.sc(theme.bar_gap);
@@ -113,19 +120,21 @@ pub fn layoutToolbar(self: *Editor) !void {
     slideActiveFill(self, fresh, ax, ay, now);
 
     try layoutPanel(self);
+    try strip.layout(self);
     if (self.popover != .none) try popover.layoutPopover(self) else self.pop_rect = Rect.empty;
     if (self.picker.open) picker.layoutPicker(self);
     refreshHover(self, now);
     settleFocus(self);
 }
 
-/// No selection, a drag or a tool that hides the bar: no chrome at all.
+/// No selection, a drag or a tool that hides the bar: no chrome but
+/// the mode strip (whose button may keep the focus).
 fn hideChrome(self: *Editor) void {
     self.toolbar_rect = Rect.empty;
     self.panel_rect = Rect.empty;
     self.popover = .none;
     self.picker.open = false;
-    self.focus = null;
+    if (!capmode.wanted(self)) self.focus = null;
 }
 
 /// Where a `tb_w` x `tb_h` toolbar goes for the selection frame `s`:

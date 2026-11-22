@@ -53,7 +53,7 @@ fn segRows(self: *const Editor, out: *SegRows) usize {
     return n;
 }
 
-pub const menu_items = [_]ButtonKind{ .{ .ext = .copy_text }, .{ .ext = .redact_sensitive }, .{ .ext = .pin }, .beautify, .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel };
+pub const menu_items = [_]ButtonKind{ .{ .ext = .copy_text }, .{ .ext = .redact_sensitive }, .{ .ext = .pin }, .beautify, .save_as, .help, .cancel };
 
 pub fn layoutPopover(self: *Editor) !void {
     const tb = self.toolbar_rect;

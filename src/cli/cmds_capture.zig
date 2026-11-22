@@ -55,7 +55,10 @@ pub const list = [_]Command{
         .summary = "Select an area and annotate it (also: shotlet shot)",
         .usage = &.{ "", "shot" },
         .description = "Captures the screen and opens the editor to select an area, annotate it " ++
-            "and copy (Enter, Ctrl+C) or save it (Ctrl+S). Plain `shotlet` does the same.",
+            "and copy (Enter, Ctrl+C) or save it (Ctrl+S). Plain `shotlet` does the same. " ++
+            "Until you drag, a strip at the bottom picks another mode: G area, W window, " ++
+            "D screen, J scrolling, O text, Q record, H timer; and where the desktop says where " ++
+            "its windows are (GNOME with the integration, KDE), a click on a window selects it.",
         .options = &shot_options,
         .examples = &.{
             .{ .cmd = "", .what = "Capture an area and annotate it" },
