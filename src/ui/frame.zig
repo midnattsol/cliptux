@@ -4,7 +4,9 @@
 //! history panel and the pins are. GNOME draws no decorations for us, so
 //! this is the window's whole frame. The window geometry and the input
 //! region are the content alone: the compositor snaps, tiles and
-//! hit-tests the window proper, never its shadow.
+//! hit-tests the window proper, never its shadow. Maximized, fullscreen
+//! or tiled, the compositor owns the edges: the content fills the surface
+//! exactly, square and without a shadow, until the window floats again.
 //!
 //! Stable API:
 //!   pad                       shadow room around the content (logical px)
@@ -12,6 +14,7 @@
 //!   Frame.begin(gpa, win)     the content's canvas for the next frame
 //!   Frame.present(win, edge)  frame the content and present it
 //!   Frame.toContent(win, x)   a surface coordinate (buffer px) in content px
+//!   bare(win)                 drawn edge to edge (maximized, tiled...)
 //!   Frame.deinit(gpa)
 //! Open the window with .transparent = true at outer(w, h).
 
@@ -35,6 +38,15 @@ pub fn outer(w: u32, h: u32) [2]u32 {
     return .{ w + 2 * pad, h + 2 * pad };
 }
 
+/// The compositor fixes the window's size and edges (maximized,
+/// fullscreen, tiled): no rounded corners, no shadow, no room for it.
+pub fn bare(win: *const Window) bool {
+    return win.maximized or win.tiled;
+}
+
+/// What the window geometry was last set for.
+const Geom = struct { w: u32 = 0, h: u32 = 0, bare: bool = false };
+
 pub const Frame = struct {
     content: []u32 = &.{},
     cw: u32 = 0,
@@ -43,8 +55,7 @@ pub const Frame = struct {
     shade: []u32 = &.{},
     shade_w: u32 = 0,
     shade_h: u32 = 0,
-    /// the logical size the window geometry was set for
-    geom: [2]u32 = .{ 0, 0 },
+    geom: Geom = .{},
 
     pub fn deinit(self: *Frame, gpa: std.mem.Allocator) void {
         gpa.free(self.content);
@@ -57,6 +68,7 @@ pub const Frame = struct {
     }
 
     fn padPx(win: *const Window) u32 {
+        if (bare(win)) return 0;
         return @intFromFloat(@round(pad * scale(win)));
     }
 
@@ -85,14 +97,17 @@ pub const Frame = struct {
     /// Only the content is the window: for snapping, tiling and input.
     fn syncGeometry(self: *Frame, win: *Window) !void {
         const s = win.surfaceList()[0];
-        if (s.logical_w == self.geom[0] and s.logical_h == self.geom[1]) return;
-        self.geom = .{ s.logical_w, s.logical_h };
-        const r: window.Rect = .{ .x = pad, .y = pad, .w = @intCast(s.logical_w -| 2 * pad), .h = @intCast(s.logical_h -| 2 * pad) };
+        const g: Geom = .{ .w = s.logical_w, .h = s.logical_h, .bare = bare(win) };
+        if (std.meta.eql(g, self.geom)) return;
+        self.geom = g;
+        const p: u32 = if (g.bare) 0 else pad;
+        const r: window.Rect = .{ .x = @intCast(p), .y = @intCast(p), .w = @intCast(g.w -| 2 * p), .h = @intCast(g.h -| 2 * p) };
         try win.setWindowGeometry(0, r);
         try win.setInputRegion(0, &.{r});
     }
 
     fn ensureShade(self: *Frame, gpa: std.mem.Allocator, win: *const Window) !void {
+        if (bare(win)) return;
         if (self.shade_w == win.width and self.shade_h == win.height) return;
         gpa.free(self.shade);
         self.shade = &.{};
@@ -107,6 +122,7 @@ pub const Frame = struct {
 
     /// Edge the content with `edge`, round it onto the shadow and present.
     pub fn present(self: *Frame, win: *Window, edge: u32) !void {
+        if (bare(win)) return self.presentBare(win);
         const k = scale(win);
         var cv = Canvas.init(self.content, self.cw, self.ch);
         const rad = radius * k;
@@ -116,6 +132,13 @@ pub const Frame = struct {
         const p: i32 = @intCast(padPx(win));
         effects.blitRounded(px, win.width, win.height, self.content, self.cw, self.ch, p, p, @intFromFloat(@round(rad)));
         fui.premultiply(px, win.width, win.height, .{ .x = 0, .y = 0, .w = @intCast(win.width), .h = @intCast(win.height) });
+        try win.present();
+    }
+
+    /// Edge to edge: the opaque content is the whole surface.
+    fn presentBare(self: *Frame, win: *Window) !void {
+        const px = try win.backBuffer();
+        @memcpy(px, self.content[0..px.len]);
         try win.present();
     }
 };
