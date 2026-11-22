@@ -35,9 +35,6 @@ pub const Result = struct {
     png_data: ?[]u8 = null,
 };
 
-/// over everything outside the selection (theme.Theme.dim)
-pub const dim_color: u32 = 0x52000000;
-
 pub const DragMode = union(enum) {
     none,
     /// anchor corner, image pixels

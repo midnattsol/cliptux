@@ -83,6 +83,9 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
     const f = self.uf();
     const th = self.theme;
     if (self.selBuf()) |s| {
+        // two tones: the light line shows on dark captures, the dark one
+        // around it on light ones
+        canvas.rectOutline(s.x - 2, s.y - 2, s.w + 4, s.h + 4, 1, th.sel_edge_outer);
         canvas.rectOutline(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 1, th.sel_edge);
         if (self.tool == .select and self.drag == .none and self.selected == null and self.tools.mode == .none) {
             for (handlePoints(s), 0..) |p, i| {

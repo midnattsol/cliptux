@@ -78,6 +78,11 @@ pub const aa_text: f64 = 4.5;
 /// the red fill of destructive buttons (white text on it reads: 5.4:1),
 /// and pressed-looking on hover
 pub const destructive_fill: u32 = 0xFFD70015;
+/// the capture outside the selection is darkened by this (40%), or by
+/// `capture_dim_dark` (55%) when the capture itself is dark
+/// (editor/dim.zig)
+pub const capture_dim: u32 = 0x66000000;
+pub const capture_dim_dark: u32 = 0x8C000000;
 pub const destructive_fill_hover: u32 = 0xFFB80012;
 
 pub const Shadow = struct {
@@ -120,9 +125,10 @@ pub const Theme = struct {
     popover_shadow: Shadow,
 
     // --- the capture overlay ---
-    /// over everything outside the selection
-    dim: u32 = 0x52000000,
-    sel_edge: u32 = 0xE6FFFFFF,
+    /// the selection's two-tone edge: a light line inside a dark one, so
+    /// it shows on any capture
+    sel_edge: u32 = 0xF2FFFFFF,
+    sel_edge_outer: u32 = 0x8C000000,
     handle: u32 = 0xFFFFFFFF,
     handle_shadow: u32 = 0x66000000,
     /// the size label and other pills drawn on the screenshot: nearly
