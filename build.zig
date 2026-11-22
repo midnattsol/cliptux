@@ -16,6 +16,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     addGnomeExtension(b, exe.root_module);
+    const platform = platformOptions(b, false);
+    exe.root_module.addImport("platform_options", platform);
     const options = b.addOptions();
     options.addOption([]const u8, "version", @import("build.zig.zon").version);
     exe.root_module.addOptions("build_options", options);
@@ -39,10 +41,12 @@ pub fn build(b: *std.Build) void {
     });
     addGnomeExtension(b, tests.root_module);
     tests.root_module.addOptions("build_options", options);
+    tests.root_module.addImport("platform_options", platform);
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
     addSizeChecks(b, test_step);
+    addPortableCheck(b, options, test_step);
 
     // end-to-end suite: shotlet driven by a virtual keyboard and pointer in
     // a private headless GNOME session (tools/e2e.sh skips without one)
@@ -53,12 +57,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
-                .root_source_file = b.path("src/testkit.zig"),
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }) }},
+            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
         }),
     });
     const droptarget = b.addExecutable(.{
@@ -68,12 +67,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
-                .root_source_file = b.path("src/testkit.zig"),
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }) }},
+            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
         }),
     });
     // the container suite's input driver (wlroots and KWin)
@@ -84,12 +78,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = b.createModule(.{
-                .root_source_file = b.path("src/testkit.zig"),
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }) }},
+            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
         }),
     });
     // compiled with the tests so they cannot rot unnoticed
@@ -122,6 +111,66 @@ pub fn build(b: *std.Build) void {
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
+}
+
+/// The platform layer's build option: `stub` selects the compile-only
+/// backend (src/platform/stub) instead of the target OS's.
+fn platformOptions(b: *std.Build, stub: bool) *std.Build.Module {
+    const o = b.addOptions();
+    o.addOption(bool, "stub", stub);
+    return o.createModule();
+}
+
+/// The module the e2e drivers import as "shotlet" (src/testkit.zig).
+fn testkit(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module) *std.Build.Module {
+    const m = b.createModule(.{
+        .root_source_file = b.path("src/testkit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    m.addImport("platform_options", platform);
+    return m;
+}
+
+/// `zig build check-portable`: the whole program and its tests, built
+/// against the stub backend for Windows and macOS (semantic analysis
+/// only, nothing is emitted), proving everything outside
+/// src/platform/linux is free of Linux. `check-layers` (with `test`)
+/// fails when a file outside the backend imports it.
+fn addPortableCheck(b: *std.Build, options: *std.Build.Step.Options, test_step: *std.Build.Step) void {
+    const step = b.step("check-portable", "Compile the portable core for Windows and macOS against the stub backend");
+    const targets = [_]std.Target.Query{
+        .{ .cpu_arch = .x86_64, .os_tag = .windows },
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+    };
+    for (targets) |q| {
+        const target = b.resolveTargetQuery(q);
+        inline for (.{ "exe", "test" }) |kind| {
+            const m = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = .Debug,
+                .link_libc = true,
+            });
+            addGnomeExtension(b, m);
+            m.addOptions("build_options", options);
+            m.addImport("platform_options", platformOptions(b, true));
+            const c = if (comptime std.mem.eql(u8, kind, "exe"))
+                b.addExecutable(.{ .name = "shotlet-portable", .root_module = m })
+            else
+                b.addTest(.{ .name = "shotlet-portable-test", .root_module = m });
+            // nothing depends on the binary: analysis only (-fno-emit-bin)
+            step.dependOn(&c.step);
+        }
+    }
+
+    const layers = b.addSystemCommand(&.{ "sh", "tools/check-layers.sh" });
+    layers.setName("check-layers.sh");
+    layers.setCwd(b.path("."));
+    layers.has_side_effects = true;
+    b.step("check-layers", "Fail when a file outside src/platform/linux imports it").dependOn(&layers.step);
+    test_step.dependOn(&layers.step);
 }
 
 /// `zig build man`: shotlet(1), which `shotlet man-page` writes from the

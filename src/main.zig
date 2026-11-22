@@ -91,6 +91,7 @@ test "default bus address escapes the runtime dir" {
 }
 
 test {
+    _ = @import("platform/api.zig");
     _ = @import("cli/tests.zig");
     _ = @import("app/dispatch.zig");
     _ = @import("platform/linux/dbus.zig");
