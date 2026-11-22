@@ -6,10 +6,14 @@
 pub const sys = @import("sys.zig");
 pub const libs = @import("libs.zig");
 pub const fonts = @import("fonts.zig");
+/// Tesseract (portable code over api.libs; another backend may pick
+/// another engine)
+pub const ocr = @import("../../ocr/tesseract.zig");
 
 // Reach every module's tests.
 comptime {
     _ = sys;
     _ = libs;
     _ = fonts;
+    _ = ocr;
 }

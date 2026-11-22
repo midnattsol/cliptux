@@ -1,10 +1,12 @@
 //! Optional text recognition with Tesseract, loaded at run time
-//! (libtesseract.so.5 or .so.4) through its C API, so Shotlet keeps zero
+//! (api.libs: libtesseract.so.5 or .so.4 on Linux) through its C API, so Shotlet keeps zero
 //! build dependencies: without the library the history simply has no
 //! search field. Pixels are handed over as packed RGB, so Leptonica's own
 //! API is not needed (libtesseract pulls it in itself).
 
 const std = @import("std");
+const SpinLock = @import("spinlock.zig").SpinLock;
+const libs = @import("../platform/api.zig").libs;
 
 const Handle = *opaque {};
 
@@ -20,23 +22,10 @@ const Api = struct {
     TessBaseAPIEnd: *const fn (Handle) callconv(.c) void,
 };
 
-var lib: ?std.DynLib = null;
+var lib: ?libs.Lib = null;
 var api: ?Api = null;
 var tried = false;
 var mutex: SpinLock = .{};
-
-/// A small lock for short critical sections between threads.
-pub const SpinLock = struct {
-    m: std.atomic.Mutex = .unlocked,
-
-    pub fn lock(self: *SpinLock) void {
-        while (!self.m.tryLock()) std.atomic.spinLoopHint();
-    }
-
-    pub fn unlock(self: *SpinLock) void {
-        self.m.unlock();
-    }
-};
 
 /// Tesseract is installed (loads it on first call).
 pub fn available() bool {
@@ -45,10 +34,7 @@ pub fn available() bool {
     if (tried) return api != null;
     tried = true;
     if (std.c.getenv("SHOTLET_NO_OCR") != null) return false;
-    for ([_][]const u8{ "libtesseract.so.5", "libtesseract.so.4" }) |name| {
-        lib = std.DynLib.open(name) catch continue;
-        break;
-    }
+    lib = libs.open("tesseract", &.{ "5", "4" });
     var l = &(lib orelse return false);
     var a: Api = undefined;
     const info = @typeInfo(Api).@"struct";
@@ -142,73 +128,4 @@ fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, w
     const out = (if (what == .tsv) a.TessBaseAPIGetTsvText(h, 0) else a.TessBaseAPIGetUTF8Text(h)) orelse return null;
     defer a.TessDeleteText(out);
     return alloc.dupe(u8, std.mem.trim(u8, std.mem.span(out), " \t\r\n")) catch null;
-}
-
-/// Search for every word of `query` in `hay`, ignoring case and the
-/// accents of Latin letters: "cancion" finds "Canción", "ESPAÑA" finds
-/// "españa" (recognised text often gets accents wrong anyway).
-pub fn matches(hay: []const u8, query: []const u8) bool {
-    var hbuf: [8192]u8 = undefined;
-    var qbuf: [256]u8 = undefined;
-    const h = fold(&hbuf, hay);
-    var words = std.mem.tokenizeAny(u8, fold(&qbuf, query), " \t");
-    while (words.next()) |w| {
-        if (std.mem.indexOf(u8, h, w) == null) return false;
-    }
-    return true;
-}
-
-/// Lowercase ASCII with Latin-1 and Latin Extended-A letters reduced to
-/// their base letter; other text is copied as is. Cut at `buf`'s size.
-fn fold(buf: []u8, s: []const u8) []const u8 {
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < s.len and n < buf.len) {
-        const len = std.unicode.utf8ByteSequenceLength(s[i]) catch 1;
-        if (len > 1 and i + len <= s.len) {
-            if (std.unicode.utf8Decode(s[i..][0..len])) |cp| {
-                if (baseLetter(cp)) |b| {
-                    buf[n] = b;
-                    n += 1;
-                    i += len;
-                    continue;
-                }
-            } else |_| {}
-            if (n + len > buf.len) break;
-            @memcpy(buf[n..][0..len], s[i..][0..len]);
-            n += len;
-            i += len;
-            continue;
-        }
-        buf[n] = std.ascii.toLower(s[i]);
-        n += 1;
-        i += 1;
-    }
-    return buf[0..n];
-}
-
-/// The unaccented lowercase letter of an accented Latin one.
-fn baseLetter(cp: u21) ?u8 {
-    // U+00C0..U+00FF, by code point (0 where there is no plain letter)
-    const latin1 = "aaaaaaaceeeeiiii" ++ "dnooooo\x00ouuuuyts" ++ "aaaaaaaceeeeiiii" ++ "dnooooo\x00ouuuuyty";
-    if (cp >= 0xC0 and cp <= 0xFF) {
-        const b = latin1[cp - 0xC0];
-        return if (b == 0) null else b;
-    }
-    // U+0100..U+017F come in upper/lower pairs, mostly
-    const ext_a = "aaaaaaccccccccdddd" ++ "eeeeeeeeeegggggggghhhh" ++ "iiiiiiiiiijjjjkkk" ++ "llllllllllnnnnnnnnn" ++ "oooooooorrrrrrssssssss" ++ "ttttttuuuuuuuuuuuuwwyyyzzzzzzs";
-    if (cp >= 0x100 and cp <= 0x17F) return ext_a[cp - 0x100];
-    return null;
-}
-
-test "search matches every word, ignoring case and accents" {
-    try std.testing.expect(matches("Hello World\nfoo", "world HELLO"));
-    try std.testing.expect(!matches("Hello World", "world bar"));
-    try std.testing.expect(matches("anything", ""));
-    try std.testing.expect(matches("Canción del año en España", "cancion ESPAÑA ano"));
-    try std.testing.expect(matches("CANCIÓN", "canción"));
-    try std.testing.expect(matches("Łódź, Žluťoučký", "lodz zlutoucky"));
-    try std.testing.expect(!matches("Canción", "cantion"));
-    // other scripts are compared as they are
-    try std.testing.expect(matches("日本語のテキスト", "テキスト"));
 }

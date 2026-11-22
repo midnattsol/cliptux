@@ -3,14 +3,15 @@
 
 const std = @import("std");
 const history = @import("../history.zig");
-const ocr = @import("../../platform/linux/tesseract.zig");
+const ocr = @import("../../platform/api.zig").ocr;
+const SpinLock = @import("../../ocr/spinlock.zig").SpinLock;
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const Panel = @import("panel.zig").Panel;
 
 /// Background OCR of entries that were never read.
 pub const Ocr = struct {
-    mutex: ocr.SpinLock = .{},
+    mutex: SpinLock = .{},
     /// ids whose text was just written to their meta
     done: std.ArrayList(history.Id) = .empty,
     finished: bool = false,

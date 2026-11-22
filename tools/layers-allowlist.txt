@@ -6,7 +6,6 @@ src/app/config.zig
 src/app/dispatch.zig
 src/app/editfile.zig
 src/app/history_ui/events.zig
-src/app/history_ui/ocr_scan.zig
 src/app/history_ui/panel.zig
 src/app/history_ui.zig
 src/app/keep.zig
@@ -29,7 +28,6 @@ src/app/toastwin.zig
 src/encode/ffmpeg_proc.zig
 src/encode/proc.zig
 src/gfx/effects/blur.zig
-src/gfx/fontdb.zig
 src/gfx/png/testing.zig
 src/gfx/ttf/mmap.zig
 src/main.zig
@@ -73,4 +71,3 @@ src/ui/settings/permissions.zig
 src/ui/settings/widgets.zig
 src/ui/theme.zig
 src/ui/tools/mod.zig
-src/ui/tools/ocr_job.zig

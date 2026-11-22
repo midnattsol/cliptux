@@ -10,7 +10,7 @@ const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const shot = @import("../shot.zig");
 const dbus = @import("../../platform/linux/dbus.zig");
-const ocr = @import("../../platform/linux/tesseract.zig");
+const ocr_search = @import("../../ocr/search.zig");
 const portal = @import("../../platform/linux/portal.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
@@ -131,7 +131,7 @@ pub const Panel = struct {
         for (self.items.items, 0..) |it, i| {
             if (self.search.items.len > 0) {
                 const t = it.entry.meta.ocr orelse continue;
-                if (!ocr.matches(t, self.search.items)) continue;
+                if (!ocr_search.matches(t, self.search.items)) continue;
             }
             self.shown.append(self.gpa, i) catch {};
         }

@@ -136,7 +136,8 @@ test {
     _ = @import("app/editfile.zig");
     _ = @import("app/toastwin.zig");
     _ = @import("app/history_ui.zig");
-    _ = @import("platform/linux/tesseract.zig");
+    _ = @import("ocr/search.zig");
+    _ = @import("ocr/spinlock.zig");
     _ = @import("ocr/page.zig");
     _ = @import("ocr/reflow.zig");
     _ = @import("redact/detect.zig");

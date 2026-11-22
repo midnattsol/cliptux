@@ -31,6 +31,10 @@ pub const sys = backend.sys;
 /// Font discovery: the UI faces and a face for a codepoint (api/fonts.zig).
 pub const fonts = backend.fonts;
 
+/// Text recognition: available, recognize, recognizeTsv (Linux:
+/// Tesseract, src/ocr/tesseract.zig).
+pub const ocr = backend.ocr;
+
 /// Optional shared libraries opened at run time (image codecs, libav*).
 pub const libs = backend.libs;
 

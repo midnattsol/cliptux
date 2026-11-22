@@ -7,3 +7,4 @@
 pub const sys = @import("sys.zig");
 pub const libs = @import("libs.zig");
 pub const fonts = @import("fonts.zig");
+pub const ocr = @import("ocr.zig");
