@@ -61,7 +61,7 @@ pub const Toast = struct {
 };
 
 fn now() i64 {
-    return @import("../../platform/linux/sys.zig").monoMs();
+    return @import("../../platform/api.zig").sys.monoMs();
 }
 
 const icon_box = 22;

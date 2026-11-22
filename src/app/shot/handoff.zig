@@ -9,7 +9,7 @@ const std = @import("std");
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/linux/window.zig");
 const editor_mod = @import("../../ui/editor.zig");
 

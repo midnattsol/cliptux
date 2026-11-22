@@ -6,7 +6,7 @@
 //!     stop | pause | resume | discard | status    ->  "ok ..." or "err"
 
 const std = @import("std");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 pub const Command = enum { stop, pause, resume_, discard, status };
 

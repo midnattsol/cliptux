@@ -3,7 +3,7 @@
 //! atomically (a private temp file renamed over it).
 
 const std = @import("std");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const parse = @import("parse.zig");
 const location = @import("location.zig");
 const Config = @import("model.zig").Config;

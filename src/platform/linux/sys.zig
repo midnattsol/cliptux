@@ -43,6 +43,7 @@ pub const lockExclusive = io.lockExclusive;
 pub const FileId = io.FileId;
 pub const fileId = io.fileId;
 pub const fdSize = io.fdSize;
+pub const isTerminal = io.isTerminal;
 
 // files by path
 pub const openRead = fs.openRead;

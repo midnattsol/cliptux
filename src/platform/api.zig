@@ -28,6 +28,9 @@ comptime {
 /// Clocks, files, directories, pipes and local sockets.
 pub const sys = backend.sys;
 
+/// Optional shared libraries opened at run time (image codecs, libav*).
+pub const libs = backend.libs;
+
 test {
     _ = backend;
     _ = contract;

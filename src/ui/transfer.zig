@@ -2,7 +2,7 @@
 //! offer's pipe, the types a dragged capture offers, file URI lists.
 
 const std = @import("std");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 /// Read `fd` until EOF, `max_bytes` or the deadline, whichever comes
 /// first; a cut never splits a UTF-8 sequence. Caller owns the bytes.

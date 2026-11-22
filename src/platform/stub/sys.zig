@@ -183,3 +183,9 @@ pub fn accept(fd: fd_t) Error!?fd_t {
     _ = fd;
     return error.WouldBlock;
 }
+
+/// Whether `fd` is a terminal (1: is standard output one?).
+pub fn isTerminal(fd: fd_t) bool {
+    _ = fd;
+    return false;
+}

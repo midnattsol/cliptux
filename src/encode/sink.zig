@@ -11,7 +11,7 @@ const ffmpeg = @import("ffmpeg_proc.zig");
 const proc = @import("proc.zig");
 const quantize = @import("quantize.zig");
 const yuv = @import("yuv.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 pub const Format = enum { mp4, gif };
 pub const Quality = av_mp4.Quality;

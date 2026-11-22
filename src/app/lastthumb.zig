@@ -7,7 +7,7 @@ const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
 const keep = @import("keep.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const keepvid = @import("../record/keepvid.zig");
 const Env = env_mod.Env;
 

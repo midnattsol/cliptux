@@ -12,7 +12,7 @@
 const std = @import("std");
 const quantize = @import("quantize.zig");
 const lzw = @import("lzw.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 pub const Options = struct {
     dither: quantize.Dither = .ordered,

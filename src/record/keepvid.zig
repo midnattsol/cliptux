@@ -14,7 +14,7 @@ const keep = @import("../app/keep.zig");
 const config = @import("../app/config.zig");
 const env_mod = @import("../app/env.zig");
 const png = @import("../gfx/png.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const strip_mod = @import("strip.zig");
 const sink = @import("../encode/sink.zig");
 

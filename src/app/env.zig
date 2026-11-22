@@ -87,7 +87,7 @@ pub fn picturesDir(alloc: std.mem.Allocator, buf: []u8, home: []const u8) ![]u8 
     var cfg_home_buf: [1024]u8 = undefined;
     const cfg_home = try configHome(&cfg_home_buf, home);
     const dirs_path = try std.fmt.bufPrint(&path_buf, "{s}/user-dirs.dirs", .{cfg_home});
-    if (@import("../platform/linux/sys.zig").readFileAlloc(alloc, dirs_path, 64 * 1024)) |data| {
+    if (@import("../platform/api.zig").sys.readFileAlloc(alloc, dirs_path, 64 * 1024)) |data| {
         defer alloc.free(data);
         if (parseUserDir(data, "XDG_PICTURES_DIR", home, buf)) |p| return p;
     } else |_| {}

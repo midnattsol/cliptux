@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const linux = std.os.linux;
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 
 /// Map the whole file at `path` read-only (12 bytes .. 256 MiB).
 pub fn mapFile(path: []const u8) ![]const u8 {

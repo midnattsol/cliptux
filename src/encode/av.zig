@@ -10,6 +10,7 @@
 //! use they are checked against the defaults the allocators put there.
 
 const std = @import("std");
+const dynlib = @import("../platform/api.zig").libs;
 
 pub const Ctx = anyopaque;
 
@@ -69,7 +70,7 @@ pub var codec: Codec = undefined;
 pub var format: Format = undefined;
 pub var util: Util = undefined;
 
-var libs: [3]?std.DynLib = .{ null, null, null };
+var libs: [3]?dynlib.Lib = .{ null, null, null };
 var state: enum { unknown, ok, missing } = .unknown;
 var why_missing: []const u8 = "";
 
@@ -86,13 +87,8 @@ pub fn missing() []const u8 {
 
 const majors = [_][]const u8{ "61", "60", "59" };
 
-fn openAny(base: []const u8, versions: []const []const u8) ?std.DynLib {
-    var buf: [64]u8 = undefined;
-    for (versions) |v| {
-        const name = std.fmt.bufPrint(&buf, "{s}.so.{s}", .{ base, v }) catch continue;
-        if (std.DynLib.open(name)) |l| return l else |_| {}
-    }
-    return null;
+fn openAny(base: []const u8, versions: []const []const u8) ?dynlib.Lib {
+    return dynlib.open(base, versions);
 }
 
 fn load() bool {
@@ -100,9 +96,9 @@ fn load() bool {
         why_missing = "turned off (SHOTLET_NO_LIBAV)";
         return false;
     }
-    libs[2] = openAny("libavutil", &.{ "59", "58", "57" }) orelse return fail("libavutil not found");
-    libs[0] = openAny("libavcodec", &majors) orelse return fail("libavcodec not found");
-    libs[1] = openAny("libavformat", &majors) orelse return fail("libavformat not found");
+    libs[2] = openAny("avutil", &.{ "59", "58", "57" }) orelse return fail("libavutil not found");
+    libs[0] = openAny("avcodec", &majors) orelse return fail("libavcodec not found");
+    libs[1] = openAny("avformat", &majors) orelse return fail("libavformat not found");
     if (!bind(Codec, &codec, &libs[0].?) or !bind(Format, &format, &libs[1].?) or !bind(Util, &util, &libs[2].?))
         return fail("FFmpeg libraries lack expected functions");
     const vc = codec.avcodec_version() >> 16;
@@ -123,7 +119,7 @@ fn fail(msg: []const u8) bool {
     return false;
 }
 
-fn bind(comptime T: type, out: *T, l: *std.DynLib) bool {
+fn bind(comptime T: type, out: *T, l: *dynlib.Lib) bool {
     const info = @typeInfo(T).@"struct";
     inline for (info.field_names, info.field_types) |name, ty| {
         @field(out, name) = l.lookup(ty, name) orelse return false;

@@ -28,7 +28,7 @@
 
 const std = @import("std");
 const dbus = @import("../platform/linux/dbus.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 // --- metrics (logical px) ---
 

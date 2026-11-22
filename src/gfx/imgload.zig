@@ -7,7 +7,7 @@ const std = @import("std");
 const png = @import("png.zig");
 const jpeg = @import("jpeg.zig");
 const libs = @import("codec_libs.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 pub const max_file = 256 * 1024 * 1024;
 

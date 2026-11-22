@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const png = @import("png.zig");
+const libs = @import("../platform/api.zig").libs;
 
 const WebP = struct {
     WebPDecodeBGRA: *const fn ([*]const u8, usize, *c_int, *c_int) callconv(.c) ?[*]u8,
@@ -22,19 +23,16 @@ const TurboJpeg = struct {
 /// TJPF_BGRA: B, G, R, A bytes, which is 0xAARRGGBB on little-endian
 const tjpf_bgra = 8;
 
-fn Lib(comptime Api: type, comptime names: []const []const u8) type {
+fn Lib(comptime Api: type, comptime base: []const u8, comptime versions: []const []const u8) type {
     return struct {
         var api: ?Api = null;
         var tried = false;
-        var lib: ?std.DynLib = null;
+        var lib: ?libs.Lib = null;
 
         fn get() ?Api {
             if (tried) return api;
             tried = true;
-            for (names) |n| {
-                lib = std.DynLib.open(n) catch continue;
-                break;
-            }
+            lib = libs.open(base, versions);
             var l = &(lib orelse return null);
             var a: Api = undefined;
             const info = @typeInfo(Api).@"struct";
@@ -47,8 +45,8 @@ fn Lib(comptime Api: type, comptime names: []const []const u8) type {
     };
 }
 
-const webp_lib = Lib(WebP, &.{ "libwebp.so.7", "libwebp.so.6", "libwebp.so" });
-const tj_lib = Lib(TurboJpeg, &.{ "libturbojpeg.so.0", "libturbojpeg.so" });
+const webp_lib = Lib(WebP, "webp", &.{ "7", "6", "" });
+const tj_lib = Lib(TurboJpeg, "turbojpeg", &.{ "0", "" });
 
 pub fn isWebp(data: []const u8) bool {
     return data.len >= 12 and std.mem.eql(u8, data[0..4], "RIFF") and std.mem.eql(u8, data[8..12], "WEBP");
@@ -79,13 +77,13 @@ pub fn decodeJpegLib(alloc: std.mem.Allocator, data: []const u8) !png.Image {
     var h: c_int = 0;
     var sub: c_int = 0;
     var cs: c_int = 0;
-    if (a.tjDecompressHeader3(h_, data.ptr, data.len, &w, &h, &sub, &cs) != 0) return error.Corrupt;
+    if (a.tjDecompressHeader3(h_, data.ptr, std.math.cast(c_ulong, data.len) orelse return error.TooBig, &w, &h, &sub, &cs) != 0) return error.Corrupt;
     try checkSize(w, h);
     const n: usize = @as(usize, @intCast(w)) * @as(usize, @intCast(h));
     const out = try alloc.alloc(u32, n);
     errdefer alloc.free(out);
     const bytes: [*]u8 = @ptrCast(out.ptr);
-    if (a.tjDecompress2(h_, data.ptr, data.len, bytes, w, w * 4, h, tjpf_bgra, 0) != 0) return error.Corrupt;
+    if (a.tjDecompress2(h_, data.ptr, @intCast(data.len), bytes, w, w * 4, h, tjpf_bgra, 0) != 0) return error.Corrupt;
     for (out) |*p| p.* |= 0xFF000000;
     return .{ .width = @intCast(w), .height = @intCast(h), .pixels = out };
 }

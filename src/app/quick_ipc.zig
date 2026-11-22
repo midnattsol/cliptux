@@ -4,7 +4,7 @@
 const std = @import("std");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const Env = env_mod.Env;
 
 pub fn socketPath(buf: []u8, env: Env) ![]u8 {

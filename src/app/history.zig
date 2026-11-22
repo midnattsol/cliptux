@@ -15,7 +15,7 @@
 //! older ones are dropped while the total exceeds `max_bytes`.
 
 const std = @import("std");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const env_mod = @import("env.zig");
 
 pub const Id = struct {

@@ -2,7 +2,7 @@
 //! it (plus system fonts as extra seeds, when installed).
 
 const std = @import("std");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const Font = @import("font.zig").Font;
 const sfnt_truetype = @import("sfnt.zig").sfnt_truetype;
 

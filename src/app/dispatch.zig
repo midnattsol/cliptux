@@ -91,6 +91,6 @@ fn need(p: Parsed, n: usize) ![]const [:0]const u8 {
     var w: std.Io.Writer = .fixed(&buf);
     errors.writeChain(&w, p.chain) catch {};
     w.print(": missing arguments (usage: shotlet {s})\n", .{p.chain.items[0].usage[0]}) catch {};
-    @import("../platform/linux/sys.zig").writeAll(2, w.buffered()) catch {};
+    @import("../platform/api.zig").sys.writeAll(2, w.buffered()) catch {};
     std.process.exit(errors.exit_code);
 }

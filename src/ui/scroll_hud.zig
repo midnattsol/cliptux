@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const wl = @import("../platform/linux/wayland.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");

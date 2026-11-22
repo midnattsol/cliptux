@@ -8,7 +8,7 @@ const help = @import("help.zig");
 const errors = @import("errors.zig");
 const commands = @import("commands.zig");
 const text = @import("text.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 
 pub const Parsed = parse.Parsed;
 
@@ -20,7 +20,7 @@ pub const Result = union(enum) {
 
 /// `args` with the program name; `no_color`: NO_COLOR is set.
 pub fn handle(arena: std.mem.Allocator, args: []const [:0]const u8, no_color: bool) !Result {
-    const style: text.Style = .{ .bold = !no_color and std.c.isatty(1) == 1 };
+    const style: text.Style = .{ .bold = !no_color and sys.isTerminal(1) };
     var buf: std.Io.Writer.Allocating = .init(arena);
     const w = &buf.writer;
     const outcome = try parse.parse(arena, if (args.len > 0) args[1..] else args);

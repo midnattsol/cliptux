@@ -7,7 +7,7 @@ const config = @import("../config.zig");
 const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
 const portal = @import("../../platform/linux/portal.zig");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const Env = env_mod.Env;
 
 /// Where screenshots go: the configured save_dir (with ~ expanded), else the

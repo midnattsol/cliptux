@@ -2,7 +2,7 @@
 //! extra input on fd 3, found on PATH, waited for with a deadline.
 
 const std = @import("std");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const linux = std.os.linux;
 
 pub const Envp = [*:null]const ?[*:0]const u8;

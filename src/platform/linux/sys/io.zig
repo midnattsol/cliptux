@@ -128,3 +128,9 @@ pub fn fdSize(fd: fd_t) !u64 {
     _ = try check(linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .SIZE = true }, &stx));
     return stx.size;
 }
+
+/// Whether `fd` is a terminal (1: is standard output one?).
+pub fn isTerminal(fd: fd_t) bool {
+    var t: linux.termios = undefined;
+    return linux.errno(linux.tcgetattr(fd, &t)) == .SUCCESS;
+}

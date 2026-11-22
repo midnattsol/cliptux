@@ -4,7 +4,7 @@
 const std = @import("std");
 const history = @import("../history.zig");
 const ocr = @import("../../platform/linux/tesseract.zig");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const Panel = @import("panel.zig").Panel;
 

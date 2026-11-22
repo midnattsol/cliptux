@@ -4,7 +4,7 @@
 pub const dbus = @import("platform/linux/dbus.zig");
 pub const pw = @import("platform/linux/pw.zig");
 pub const pwstream = @import("platform/linux/pwstream.zig");
-pub const sys = @import("platform/linux/sys.zig");
+pub const sys = @import("platform/api.zig").sys;
 pub const png = @import("gfx/png.zig");
 pub const window = @import("platform/linux/window.zig");
 pub const wayland = @import("platform/linux/wayland.zig");

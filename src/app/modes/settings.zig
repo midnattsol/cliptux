@@ -13,7 +13,7 @@
 const std = @import("std");
 const config = @import("../config.zig");
 const env = @import("../env.zig");
-const sys = @import("../../platform/linux/sys.zig");
+const sys = @import("../../platform/api.zig").sys;
 const mode = @import("mode.zig");
 
 pub const After = enum {

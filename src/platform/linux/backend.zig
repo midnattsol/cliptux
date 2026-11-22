@@ -4,3 +4,4 @@
 //! desktops happen in here.
 
 pub const sys = @import("sys.zig");
+pub const libs = @import("libs.zig");

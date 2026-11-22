@@ -7,7 +7,7 @@ const std = @import("std");
 const proc = @import("../encode/proc.zig");
 const gif = @import("../encode/gif.zig");
 const gifdec = @import("../encode/gifdec.zig");
-const sys = @import("../platform/linux/sys.zig");
+const sys = @import("../platform/api.zig").sys;
 const shot = @import("../app/shot.zig");
 
 pub const Range = struct { start_ms: i64, end_ms: i64 };
