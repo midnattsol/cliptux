@@ -250,6 +250,12 @@ pub const Window = struct {
     pub fn setInputRegion(w: *Window, idx: u8, rects: ?[]const Rect) Error!void {
         _ = .{ w, idx, rects };
     }
+    /// Clicks outside the input region reach what lies below (a pin can
+    /// be locked to let them through); false hides that choice.
+    pub fn passesClicks(w: *const Window) bool {
+        _ = w;
+        return false;
+    }
     /// The window's visible part (its shadow excluded), logical.
     pub fn setWindowGeometry(w: *Window, idx: u8, r: Rect) Error!void {
         _ = .{ w, idx, r };

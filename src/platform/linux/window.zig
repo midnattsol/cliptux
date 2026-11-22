@@ -269,6 +269,7 @@ pub const Window = struct {
     pub const toggleMaximize = roles.toggleMaximize;
     pub const minimize = roles.minimize;
     pub const setInputRegion = roles.setInputRegion;
+    pub const passesClicks = roles.passesClicks;
     pub const setWindowGeometry = roles.setWindowGeometry;
     pub const setTitle = roles.setTitle;
     pub const parentHandle = foreign.parentHandle;

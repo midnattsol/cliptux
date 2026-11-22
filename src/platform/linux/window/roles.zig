@@ -35,6 +35,13 @@ pub fn minimize(w: *Window) !void {
     try w.conn.flush();
 }
 
+/// Clicks outside a surface's input region reach the window below on
+/// every compositor: wl_surface.set_input_region is core Wayland.
+pub fn passesClicks(w: *const Window) bool {
+    _ = w;
+    return true;
+}
+
 /// Where surface idx takes pointer input, in its logical coordinates;
 /// null: everywhere. Elsewhere clicks reach the window below. Applied
 /// with the next present.
