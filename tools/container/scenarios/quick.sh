@@ -90,6 +90,36 @@ scenario_pin() {
     grep -q "^text c" "$OUT/drop.log" && echo "  (after a click on the pin the app has the keyboard)" >&2
     keys esc
     check "Esc closes the pin" any_log 5 "pin: closed"
+    pin_menu_layer
+}
+
+# Pins --at a place (the layer surface's margins), the menu (right-click),
+# its opacity key and Close All Pins. The test picture is 300x200, red
+# inside 60..240 x 40..160; the menu opens with its top-left at the
+# pointer, its last row (Close All Pins) 237..267 px down.
+pin_menu_layer() {
+    drv mkpng "$OUT/small.png" 300 200 ff2020
+    run_shotlet pin-a pin "$OUT/small.png" --at 400,300
+    wait_log 5 "pin: showing"
+    run_shotlet pin-b pin "$OUT/small.png" --at 1000,300
+    wait_log 5 "pin: showing"
+    sleep 1
+    shot 0 pins-at
+    drv find 0 ff2020 40 20 0 0 700 "$MH"
+    # (180x120 centred on 400,300: find's centre rounds down)
+    check "a pin --at X,Y opens centred there" eq "$VAL" "399 299 180 120"
+    drv move 0 350 260; sleep 0.3
+    click 0 330 250 right
+    check "right-click on a pin opens its menu" wait_log 3 "pin: menu open" "$OUT/pin-a.log"
+    sleep 0.5
+    shot 0 pin-menu
+    check "  ... beside the pointer" find_ 0 f2f2f7 3 200 330 250 700 600
+    # the open menu has the keyboard
+    keys 3
+    check "  ... and 3 sets the pin to 50%" wait_log 3 "pin: opacity 50%" "$OUT/pin-a.log"
+    click 0 458 502
+    check "Close All Pins closes that pin" wait_log 3 "pin: closed" "$OUT/pin-a.log"
+    check "  ... and the other" wait_log 3 "pin: closed" "$OUT/pin-b.log"
 }
 
 scenario_history() {
