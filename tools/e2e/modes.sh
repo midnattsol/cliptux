@@ -13,6 +13,10 @@
 #                 stitched to the right height, the marker once
 #   modes-keys    `shotlet gnome-integration shortcut MODE KEY`
 
+# the scrolling capture's Stop: the default accent darkened for its white
+# label (theme.accentFill(0a84ff))
+stop_fill=0974df
+
 mode_cfg() { # mode_cfg AFTER [KEY=VALUE...]: Shotlet's settings
     mkdir -p "$HOME/.config/shotlet"
     { printf 'thumbnail=never\nafter_fullscreen=%s\n' "$1"; shift; printf '%s\n' "$@"; } >"$HOME/.config/shotlet/config"
@@ -203,7 +207,7 @@ modes-scroll)
     check "  ... the page scrolls by itself" eval 'for i in $(seq 1 50); do grep -q "^scrolled [1-9]" "$OUT/page.log" && break; sleep 0.2; done; grep -q "^scrolled [1-9]" "$OUT/page.log"'
     sleep 1
     shot 0 scrolling
-    check "  ... beside the control showing it grow" drv find 0 0a84ff 24 100
+    check "  ... beside the control showing it grow" drv find 0 "$stop_fill" 24 100
     check "it stops at the end of the page" shell_wait 60 "scrolling capture: reached the end" 1
     check "  ... and opens the tall image in the editor" shell_wait 10 "startup: capture=" 1
     check "  ... the virtual pointer gone with the session" shell_wait 5 "scrolling capture ended" 1
@@ -243,7 +247,7 @@ modes-scroll-manual)
     sleep 1
     for i in $(seq 1 10); do drv move 0 600 500; drv wheel 2; sleep 0.6; done
     check "  ... the page moved by hand" grep -q "^scrolled [1-9]" "$OUT/page.log"
-    drv find 0 0a84ff 24 100 && read -r bx by _ <<<"$VAL"
+    drv find 0 "$stop_fill" 24 100 && read -r bx by _ <<<"$VAL"
     check "Stop on the control ends it" eval 'click 0 "$bx" "$by" && shell_wait 15 "startup: capture=" 1'
     sleep 1
     keys enter

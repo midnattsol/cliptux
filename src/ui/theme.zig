@@ -129,7 +129,7 @@ pub const Theme = struct {
     // --- the capture overlay ---
     /// the selection's two-tone edge: a light line inside a dark one, so
     /// it shows on any capture
-    sel_edge: u32 = 0xF2FFFFFF,
+    sel_edge: u32 = 0xE6FFFFFF,
     sel_edge_outer: u32 = 0x8C000000,
     handle: u32 = 0xFFFFFFFF,
     handle_shadow: u32 = 0x66000000,
