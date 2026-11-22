@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.svg" width="128" alt=""></p>
+
 # Shotlet
 
 Fast screenshot tool for **Linux on Wayland** with a Flameshot-style

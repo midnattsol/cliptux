@@ -262,50 +262,50 @@ const sni_introspect_xml =
     \\</node>
 ;
 
-/// Draw the shotlet tray icon: scissors snipping a dashed capture corner.
-/// Returns ARGB bytes in big-endian order (SNI spec) at the given size.
+/// Draw the tray icon: assets/icon-symbolic.svg, the panel's outline and
+/// its corner past the cut, in a panel-friendly light gray. Returns ARGB
+/// bytes in big-endian order (SNI spec) at the given size.
 pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
     const n: usize = @intCast(size);
+    const outer = try iconMask(alloc, size, .outer);
+    defer alloc.free(outer);
+    const hole = try iconMask(alloc, size, .hole);
+    defer alloc.free(hole);
+    const corner = try iconMask(alloc, size, .corner);
+    defer alloc.free(corner);
     const px = try alloc.alloc(u32, n * n);
     defer alloc.free(px);
+    const fg: u32 = 0x00E9ECEF;
+    for (px, 0..) |*p, i| {
+        // the outline: the panel less its inside, which keeps the corner
+        const inside = @as(u32, hole[i] >> 24) * (255 - (corner[i] >> 24)) / 255;
+        const a = (outer[i] >> 24) * (255 - inside) / 255;
+        p.* = (a << 24) | fg;
+    }
+    return networkArgb(alloc, px);
+}
+
+const IconPart = enum { outer, hole, corner };
+
+/// One part of the symbolic icon as a white coverage mask, on its 16-unit grid.
+fn iconMask(alloc: std.mem.Allocator, size: i32, part: IconPart) ![]u32 {
+    const n: usize = @intCast(size);
+    const px = try alloc.alloc(u32, n * n);
     @memset(px, 0);
     var c = render.Canvas.init(px, @intCast(size), @intCast(size));
-
-    const s: f64 = @floatFromInt(size);
-    const fg: u32 = 0xFFE9ECEF; // panel-friendly light gray
-    const accent: u32 = 0xFF4DABF7;
-    const lw = @max(1.6, s * 0.085); // blade width
-    const P = struct { x: i32, y: i32 };
-
-    // scissors: two blades crossing at a pivot, ring handles at the bottom
-    const pivot_x = s * 0.50;
-    const pivot_y = s * 0.58;
-    const tip_l_x = s * 0.26;
-    const tip_y = s * 0.06;
-    const tip_r_x = s * 0.74;
-    const handle_l_x = s * 0.26;
-    const handle_y = s * 0.80;
-    const handle_r_x = s * 0.74;
-    const handle_r = s * 0.13;
-
-    // blades (tip to pivot, extended a bit past the pivot toward handles)
-    const blade_l = [_]P{
-        .{ .x = @intFromFloat(tip_l_x), .y = @intFromFloat(tip_y) },
-        .{ .x = @intFromFloat(pivot_x + (handle_r_x - pivot_x) * 0.45), .y = @intFromFloat(pivot_y + (handle_y - pivot_y) * 0.45) },
-    };
-    const blade_r = [_]P{
-        .{ .x = @intFromFloat(tip_r_x), .y = @intFromFloat(tip_y) },
-        .{ .x = @intFromFloat(pivot_x + (handle_l_x - pivot_x) * 0.45), .y = @intFromFloat(pivot_y + (handle_y - pivot_y) * 0.45) },
-    };
-    c.strokePolylineAA(blade_l[0..], lw, fg);
-    c.strokePolylineAA(blade_r[0..], lw, fg);
-    // handles in accent blue
-    c.ringAA(handle_l_x, handle_y + handle_r * 0.4, handle_r, lw, accent);
-    c.ringAA(handle_r_x, handle_y + handle_r * 0.4, handle_r, lw, accent);
-    // pivot
-    c.fillCircleAA(pivot_x, pivot_y, lw * 0.7, fg);
-
-    return networkArgb(alloc, px);
+    const u = @as(f64, @floatFromInt(size)) / 16.0;
+    const at = struct {
+        fn f(v: f64, k: f64) i32 {
+            return @intFromFloat(@round(v * k));
+        }
+    }.f;
+    switch (part) {
+        .outer => c.fillRoundRectAA(at(0.5, u), at(2.5, u), at(15, u), at(11, u), 3.5 * u, 0xFFFFFFFF),
+        .hole => c.fillRoundRectAA(at(2, u), at(4, u), at(12, u), at(8, u), 2 * u, 0xFFFFFFFF),
+        // past the cut from the right edge (14, 6.2) to the bottom (6.4, 12)
+        .corner => c.fillTriangleAA(14.6 * u, 5.7 * u, 14.6 * u, 12.6 * u, 5.6 * u, 12.6 * u, 0xFFFFFFFF),
+    }
+    return px;
 }
 
 /// 0xAARRGGBB pixels as network-order ARGB bytes.

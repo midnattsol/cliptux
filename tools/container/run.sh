@@ -114,7 +114,7 @@ for r in "${runs[@]}"; do
         -v "$(realpath "$BIN")":/opt/shotlet/pkg/shotlet:ro \
         -v "$ROOT/install.sh":/opt/shotlet/pkg/install.sh:ro \
         -v "$ROOT/io.github.midnattsol.Shotlet.desktop":/opt/shotlet/pkg/io.github.midnattsol.Shotlet.desktop:ro \
-        -v "$ROOT/io.github.midnattsol.Shotlet.svg":/opt/shotlet/pkg/io.github.midnattsol.Shotlet.svg:ro \
+        -v "$ROOT/assets":/opt/shotlet/pkg/assets:ro \
         -v "$OUT/$comp/$scen":/out \
         "$IMAGE" timeout 300 /opt/shotlet/ctr/inner.sh "$comp" "$scen" \
         2>"$OUT/$comp/$scen/stderr.log" | tee "$OUT/$comp/$scen/result.txt"

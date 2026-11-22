@@ -42,7 +42,8 @@ install -Dm755 "$bin" "$prefix/bin/shotlet"
 mkdir -p "$data/applications"
 sed "s|^Exec=shotlet|Exec=$prefix/bin/shotlet|" "$here/$app_id.desktop" >"$data/applications/$app_id.desktop"
 chmod 644 "$data/applications/$app_id.desktop"
-install -Dm644 "$here/$app_id.svg" "$data/icons/hicolor/scalable/apps/$app_id.svg"
+install -Dm644 "$here/assets/icon.svg" "$data/icons/hicolor/scalable/apps/$app_id.svg"
+install -Dm644 "$here/assets/icon-symbolic.svg" "$data/icons/hicolor/symbolic/apps/$app_id-symbolic.svg"
 # files of versions before the app id
 rm -f "$data/applications/shotlet.desktop" "$data/icons/hicolor/scalable/apps/shotlet.svg"
 if [ -f "$config/autostart/shotlet.desktop" ]; then
