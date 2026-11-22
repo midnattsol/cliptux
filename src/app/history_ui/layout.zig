@@ -31,7 +31,7 @@ pub fn searchTop(self: *const Panel) i32 {
 }
 
 pub fn gridTop(self: *const Panel) i32 {
-    return self.searchTop() + if (self.searchable) @as(i32, field_h + 12) else 0;
+    return self.searchTop() + field_h + 12;
 }
 
 pub fn colW() i32 {

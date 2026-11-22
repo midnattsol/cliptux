@@ -68,6 +68,8 @@ pub const font_small: f64 = 12;
 pub const motion_fast: i64 = 120;
 pub const motion: i64 = 150;
 pub const motion_slow: i64 = 180;
+/// what is left of a disabled control's ink
+pub const disabled_alpha: f64 = 0.3;
 /// tooltips wait this long under a still pointer
 pub const tooltip_delay: i64 = 500;
 

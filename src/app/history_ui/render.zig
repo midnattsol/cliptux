@@ -50,7 +50,7 @@ pub fn render(self: *Panel) !void {
     var cv = Canvas.init(panel, pw, ph);
 
     drawHeader(self, &cv, kk);
-    if (self.searchable) drawSearch(self, &cv, kk);
+    drawSearch(self, &cv, kk);
     try drawGrid(self, panel, pw, ph, kk);
     if (self.selected) |si| {
         drawActions(self, &cv, &self.items.items[si], kk);
@@ -76,14 +76,19 @@ fn drawHeader(self: *const Panel, cv: *Canvas, kk: f64) void {
     fui.icon(cv, .close, xcx, xcy, 14 * kk, th.muted);
 }
 
+/// The search field; without Tesseract it shows dimmed, takes no typing
+/// and says why.
 fn drawSearch(self: *const Panel, cv: *Canvas, kk: f64) void {
     const th = self.theme;
     const y = s(self.searchTop(), kk);
-    cv.fillRoundRectAA(s(inset, kk), y, s(panel_w - 2 * inset, kk), s(field_h, kk), 8 * kk, th.field);
-    fui.icon(cv, .search, @as(f64, @floatFromInt(inset + 17)) * kk, @as(f64, @floatFromInt(y)) + 16 * kk, 14 * kk, th.muted);
+    const k: f64 = if (self.searchable) 1 else theme.disabled_alpha;
+    cv.fillRoundRectAA(s(inset, kk), y, s(panel_w - 2 * inset, kk), s(field_h, kk), 8 * kk, theme.fade(th.field, k));
+    fui.icon(cv, .search, @as(f64, @floatFromInt(inset + 17)) * kk, @as(f64, @floatFromInt(y)) + 16 * kk, 14 * kk, theme.fade(th.muted, k));
     const ty = y + @divTrunc(s(field_h, kk) - text.height(13 * kk), 2);
     if (self.search.items.len == 0) {
-        text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.muted, "Search text in captures");
+        const hint = if (self.searchable) "Search text in captures" else "Search needs Tesseract (not installed)";
+        // the reason stays legible: it is all the field has to say
+        text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.muted, hint);
     } else {
         text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.fg, self.search.items);
     }

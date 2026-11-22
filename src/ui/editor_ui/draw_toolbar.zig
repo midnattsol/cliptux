@@ -80,7 +80,8 @@ fn drawActiveFill(self: *const Editor, canvas: *Canvas, now: i64) void {
 fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) void {
     const th = self.theme;
     const active = buttons.buttonActive(self, b.kind);
-    const hv = hit.hoverAmount(self, bi);
+    const enabled = buttons.disabledWhy(self, b.kind) == null;
+    const hv = if (enabled) hit.hoverAmount(self, bi) else 0;
     const rad = theme.button_radius * self.uf();
     const r = b.rect;
     switch (b.kind) {
@@ -96,7 +97,8 @@ fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) voi
                 if (active) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.pressed);
                 if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
             }
-            const fg: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
+            const ink: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
+            const fg = if (enabled) ink else theme.fade(ink, theme.disabled_alpha);
             if (buttons.kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
         },
     }
