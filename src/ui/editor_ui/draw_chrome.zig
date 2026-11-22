@@ -9,6 +9,7 @@ const editor_mod = @import("../editor.zig");
 const tools = @import("../tools/mod.zig");
 const help = @import("../help.zig");
 const selection = @import("selection.zig");
+const selchrome = @import("../selchrome.zig");
 const loupe = @import("loupe.zig");
 const draw_toolbar = @import("draw_toolbar.zig");
 const draw_popover = @import("draw_popover.zig");
@@ -29,8 +30,7 @@ const handlePoints = shapes_mod.handlePoints;
 /// A label pill over the capture (the size, tooltips, the loupe's and
 /// the colour picker's readouts), see theme.Theme.pill_bg.
 pub fn drawPill(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, radius, self.theme.pill_bg);
-    shapes_mod.roundRectRing(canvas, r, radius, 1, self.theme.pill_line);
+    selchrome.pill(canvas, r, radius, self.theme);
 }
 
 pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
@@ -58,7 +58,7 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
 }
 
 pub fn handleDrawRadius(self: *const Editor) f64 {
-    return 5.0 * self.uf();
+    return selchrome.handle_radius * self.uf();
 }
 
 pub fn shapeChromeRect(self: *const Editor, i: usize) ?Rect {
@@ -128,10 +128,7 @@ fn drawTextHandle(self: *Editor, canvas: *Canvas, i: usize) void {
 
 /// A white handle with a soft shadow, like the selection's corners.
 pub fn drawHandle(self: *const Editor, canvas: *Canvas, x: f64, y: f64, r: f64) void {
-    const f = self.uf();
-    canvas.fillCircleAA(x, y + 1.0 * f, r + 1.5 * f, 0x1F000000);
-    canvas.fillCircleAA(x, y + 1.0 * f, r + 0.5 * f, 0x40000000);
-    canvas.fillCircleAA(x, y, r, self.theme.handle);
+    selchrome.handle(canvas, x, y, r, self.uf(), self.theme);
 }
 
 fn drawShapeChrome(self: *Editor, canvas: *Canvas, i: usize) void {
