@@ -60,7 +60,7 @@ const gnome_subs = [_]Command{
     },
 };
 
-const help_words = [_][]const u8{ "shot", "area", "text", "fullscreen", "screens", "previous", "window", "scroll", "timer", "record", "edit", "pin", "history", "settings", "daemon", "gnome-integration", "permissions" };
+const help_words = [_][]const u8{ "shot", "area", "text", "fullscreen", "screens", "previous", "window", "scroll", "timer", "record", "edit", "pin", "history", "settings", "daemon", "gnome-integration", "permissions", "completions" };
 
 pub const list = [_]Command{
     .{
@@ -176,6 +176,19 @@ pub const list = [_]Command{
             .{ .cmd = "permissions", .what = "Show how captures go" },
             .{ .cmd = "permissions reset", .what = "Forget the permissions" },
         },
+    },
+    .{
+        .id = .completions,
+        .name = "completions",
+        .group = .settings,
+        .summary = "Print the shell completions for bash, zsh or fish",
+        .usage = &.{"completions bash|zsh|fish"},
+        .description = "install.sh installs them. By hand: save the output as " ++
+            "~/.local/share/bash-completion/completions/shotlet, as _shotlet in a directory " ++
+            "of zsh's fpath (e.g. ~/.local/share/zsh/site-functions), or as " ++
+            "~/.config/fish/completions/shotlet.fish.",
+        .args = &.{.{ .name = "SHELL", .kind = .choice, .required = true, .choices = &.{ "bash", "zsh", "fish" }, .help = "bash, zsh or fish" }},
+        .examples = &.{.{ .cmd = "completions fish > shotlet.fish", .what = "The fish completions" }},
     },
     .{
         .id = .help,

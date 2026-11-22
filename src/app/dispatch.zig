@@ -32,7 +32,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .permissions => try @import("permissions.zig").run(gpa, env, &.{}),
         .permissions_reset => try @import("permissions.zig").run(gpa, env, if (p.flag("dry-run")) &.{ "reset", "--dry-run" } else &.{"reset"}),
         // answered by src/cli/front.zig
-        .help => unreachable,
+        .help, .completions, .man_page => unreachable,
         .quick => try @import("quick.zig").run(gpa, env, (try need(p, 2))[0], r[1]),
         .quick_video => try @import("../record/quickvid.zig").run(gpa, env, (try need(p, 2))[0], r[1]),
         .trim => try @import("../ui/recui/trimui.zig").run(gpa, env, (try need(p, 2))[0], r[1], r[2..]),

@@ -1,5 +1,5 @@
-//! The command line's front door: help, the version and refused command
-//! lines are answered here (help to stdout, errors to stderr with
+//! The command line's front door: help, the version, the completions,
+//! the man page and refused command lines are answered here (help to stdout, errors to stderr with
 //! status 2); anything else goes back to main to run.
 
 const std = @import("std");
@@ -27,6 +27,8 @@ pub fn handle(arena: std.mem.Allocator, args: []const [:0]const u8, no_color: bo
     switch (outcome) {
         .run => |p| switch (p.id()) {
             .help => try help.overview(w, style),
+            .completions => try @import("complete.zig").write(w, std.meta.stringToEnum(@import("complete.zig").Shell, p.positionals[0]).?),
+            .man_page => try @import("man.zig").write(w),
             else => return .{ .run = p },
         },
         .overview => try help.overview(w, style),

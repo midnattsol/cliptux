@@ -22,6 +22,7 @@ pub const list = [_]spec.Command{
     internal(.quick_video, "quick-video", "quick-video ROOT ID", "The floating thumbnail of a recording"),
     internal(.trim, "trim", "trim ROOT ID [--range A,B] [--export]", "The recording trimmer"),
     internal(.toast, "toast", "toast TITLE [BODY]", "A short notice on the screen"),
+    internal(.man_page, "man-page", "man-page", "Print the man page (roff)"),
     internal(.test_window, "test-window", "test-window", "A test window for 3 seconds"),
     internal(.test_grab, "test-grab", "test-grab", "Grab every monitor through the portal to a PNG"),
     internal(.test_font, "test-font", "test-font [LINES [OUT.png [FONT.ttf]]]", "Render sample text to a PNG"),

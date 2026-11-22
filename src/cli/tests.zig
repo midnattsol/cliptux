@@ -8,4 +8,5 @@ test {
     _ = @import("errors.zig");
     _ = @import("parse_test.zig");
     _ = @import("help_test.zig");
+    _ = @import("complete_test.zig");
 }

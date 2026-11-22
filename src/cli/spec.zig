@@ -27,6 +27,7 @@ pub const Id = enum {
     gnome_shortcut,
     permissions,
     permissions_reset,
+    completions,
     help,
     // internal: started by Shotlet itself, the GNOME extension or by hand
     // while developing
@@ -34,6 +35,7 @@ pub const Id = enum {
     quick_video,
     trim,
     toast,
+    man_page,
     test_window,
     test_grab,
     test_font,
