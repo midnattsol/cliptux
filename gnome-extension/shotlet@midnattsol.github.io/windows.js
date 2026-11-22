@@ -13,6 +13,11 @@
 //                       workspace (it may take the focus when clicked)
 //   shotlet:rec:X:Y     a recording's control, where Shotlet wants it
 //
+// The editor and the recording picker (fullscreen, titled "Shotlet") show
+// a frozen frame of the desktop and fade their own dim in and out: they
+// map and go away without mutter's zoom effects, which would scale that
+// frame over the live desktop (two desktops overlapping for a few frames).
+//
 // Tagged windows are left out of Alt+Tab (both switchers build their lists
 // from Meta.Display.get_tab_list, filtered here): a Wayland client cannot
 // set skip-taskbar itself. No polling: everything hangs off window
@@ -30,6 +35,8 @@ const EDGE = 8;
 // a focus change this soon after the thumbnail appears is mutter's
 // focus-on-map, not the person clicking it
 const FOCUS_ON_MAP_MS = 1000;
+// the editor's and the recording picker's title
+const FULLSCREEN_TITLE = 'Shotlet';
 
 export class ShotletWindows {
     constructor() {
@@ -38,6 +45,13 @@ export class ShotletWindows {
         this._idleId = 0;
         this._createdId = global.display.connect('window-created',
             (_display, win) => this._watch(win));
+        // going fullscreen is a size-change effect, and it takes the
+        // skip meant for the map effect: skip the next one again
+        this._quietActors = new Set();
+        this._sizeChangeId = global.window_manager.connect('size-change', (_wm, actor) => {
+            if (this._quietActors.has(actor))
+                Main.wm.skipNextEffect(actor);
+        });
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
 
@@ -56,6 +70,9 @@ export class ShotletWindows {
         this._injections = null;
         global.display.disconnect(this._createdId);
         this._createdId = 0;
+        global.window_manager.disconnect(this._sizeChangeId);
+        this._sizeChangeId = 0;
+        this._quietActors.clear();
         for (const [win, st] of this._windows) {
             for (const id of st.ids)
                 win.disconnect(id);
@@ -125,6 +142,8 @@ export class ShotletWindows {
     _apply(win) {
         const st = this._windows.get(win);
         const role = roleOf(win);
+        if (st && !role && win.get_wm_class() === APP_ID && win.get_title() === FULLSCREEN_TITLE)
+            this._quiet(win, st);
         if (!st || !role || st.role)
             return;
         st.role = role;
@@ -135,6 +154,18 @@ export class ShotletWindows {
         win.make_above();
         win.stick();
         this._place(win);
+    }
+
+    // No map or destroy effect for a fullscreen editor or picker.
+    _quiet(win, st) {
+        const actor = win.get_compositor_private();
+        if (st.quiet || !actor)
+            return;
+        st.quiet = true;
+        this._quietActors.add(actor);
+        Main.wm.skipNextEffect(actor);
+        st.ids.push(win.connect('unmanaging', () => Main.wm.skipNextEffect(actor)));
+        st.ids.push(win.connect('unmanaged', () => this._quietActors.delete(actor)));
     }
 
     _place(win) {
