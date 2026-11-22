@@ -38,6 +38,9 @@ pub const Surface = struct {
     configured: bool = false,
     alive: bool = false,
     maximized: bool = false,
+    /// xdg_toplevel fullscreen or tiled_* (xdg_wm_base v2): the
+    /// compositor fixes the size and edges, as when maximized
+    tiled: bool = false,
     /// argb8888 buffers with premultiplied alpha (OpenOptions.transparent)
     transparent: bool = false,
     /// an xdg toplevel asked to be fullscreen (vanish.zig clears it last)
@@ -93,6 +96,7 @@ pub fn syncPrimary(w: *Window) void {
     w.scale120 = s.scale120;
     w.scale = @max(1, (s.scale120 + 60) / 120);
     w.maximized = s.maximized;
+    w.tiled = s.tiled;
     w.configured = s.configured;
     w.frame_pending = s.frame_pending;
 }
@@ -244,11 +248,13 @@ fn onToplevel(w: *Window, s: *Surface, opcode: u16, r: *wl.ArgReader) !void {
             s.pending_w = @intCast(@max(0, w_));
             s.pending_h = @intCast(@max(0, h_));
             s.maximized = false;
+            s.tiled = false;
             const states = try r.array();
             var si: usize = 0;
             while (si + 4 <= states.len) : (si += 4) {
                 const st = std.mem.readInt(u32, states[si..][0..4], .little);
                 if (st == wl.xdg_toplevel.state_maximized) s.maximized = true;
+                if (wl.xdg_toplevel.fixesEdges(st)) s.tiled = true;
             }
         },
         wl.xdg_toplevel.ev_close => try w.queue.append(w.alloc, .close),
@@ -294,11 +300,14 @@ fn onXdgConfigure(w: *Window, idx: u8, r: *wl.ArgReader) !void {
 }
 
 /// The logical size an xdg configure settles on: the compositor's (plus
-/// the drawn shadow), else the current, output or default size within
+/// the drawn shadow, which a maximized or tiled window does not draw), else the current, output or default size within
 /// the compositor's bounds.
 fn configuredSize(w: *const Window, s: *const Surface) [2]u32 {
-    var want_w = if (s.pending_w > 0) s.pending_w + s.geom_extra_w else if (s.logical_w > 0) s.logical_w else if (s.out_w > 0) s.out_w else w.default_w;
-    var want_h = if (s.pending_h > 0) s.pending_h + s.geom_extra_h else if (s.logical_h > 0) s.logical_h else if (s.out_h > 0) s.out_h else w.default_h;
+    const floating = !s.maximized and !s.tiled;
+    const extra_w = if (floating) s.geom_extra_w else 0;
+    const extra_h = if (floating) s.geom_extra_h else 0;
+    var want_w = if (s.pending_w > 0) s.pending_w + extra_w else if (s.logical_w > 0) s.logical_w else if (s.out_w > 0) s.out_w else w.default_w;
+    var want_h = if (s.pending_h > 0) s.pending_h + extra_h else if (s.logical_h > 0) s.logical_h else if (s.out_h > 0) s.out_h else w.default_h;
     // respect compositor bounds for client-decided sizes
     if (s.pending_w == 0 and s.bounds_w > 0) want_w = @min(want_w, s.bounds_w);
     if (s.pending_h == 0 and s.bounds_h > 0) want_h = @min(want_h, s.bounds_h - @min(s.bounds_h / 20, 40));

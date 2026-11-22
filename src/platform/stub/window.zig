@@ -41,6 +41,10 @@ pub const Surface = struct {
     configured: bool = false,
     alive: bool = false,
     maximized: bool = false,
+    /// the compositor has it fullscreen or tiled against a screen edge:
+    /// like `maximized`, it fixes the size and edges, so a window drawing
+    /// its own frame draws it square and without a shadow (ui/frame.zig)
+    tiled: bool = false,
     transparent: bool = false,
     fullscreen: bool = false,
     /// which of its two buffers backBufferOf gave last (damage is kept
@@ -103,6 +107,7 @@ pub const Window = struct {
     scale: u32 = 1,
     scale120: u32 = 120,
     maximized: bool = false,
+    tiled: bool = false,
     configured: bool = false,
     frame_pending: bool = false,
 

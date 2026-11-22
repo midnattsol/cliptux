@@ -132,7 +132,8 @@ fn bindCore(w: *Window, name: u32, iface: []const u8, version: u32) !bool {
     } else if (eql(u8, iface, "wl_shm")) {
         g.shm = try c.bind(g.registry, name, iface, 1);
     } else if (eql(u8, iface, "xdg_wm_base")) {
-        g.wm_base = try c.bind(g.registry, name, iface, 1);
+        // v2 for the tiled_* states (a tiled window draws no shadow)
+        g.wm_base = try c.bind(g.registry, name, iface, @min(version, 2));
     } else if (eql(u8, iface, "wl_seat") and g.seat == 0) {
         // v8 adds axis_value120 (exact wheel notches); keymaps are
         // already mapped MAP_PRIVATE as v7 requires

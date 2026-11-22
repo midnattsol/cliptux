@@ -192,6 +192,7 @@ pub const Window = struct {
     scale: u32 = 1,
     scale120: u32 = 120,
     maximized: bool = false,
+    tiled: bool = false,
     configured: bool = false,
     frame_pending: bool = false,
 

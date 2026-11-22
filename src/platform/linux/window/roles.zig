@@ -54,12 +54,16 @@ pub fn setInputRegion(w: *Window, idx: u8, rects: ?[]const Rect) !void {
 }
 
 /// The part of surface idx that is the window proper (logical
-/// coordinates), without its drawn shadow. xdg toplevels only.
+/// coordinates), without its drawn shadow. xdg toplevels only. The
+/// shadow's size is remembered while the window floats, for the size it
+/// gets back once no longer maximized or tiled.
 pub fn setWindowGeometry(w: *Window, idx: u8, r: Rect) !void {
     const s = &w.surfaces[idx];
     if (!s.alive or s.xdg_surf == 0) return;
-    s.geom_extra_w = s.logical_w -| @as(u32, @intCast(@max(0, r.w)));
-    s.geom_extra_h = s.logical_h -| @as(u32, @intCast(@max(0, r.h)));
+    if (!s.maximized and !s.tiled) {
+        s.geom_extra_w = s.logical_w -| @as(u32, @intCast(@max(0, r.w)));
+        s.geom_extra_h = s.logical_h -| @as(u32, @intCast(@max(0, r.h)));
+    }
     try w.conn.request(s.xdg_surf, wl.xdg_surface.set_window_geometry, &.{ .{ .int = r.x }, .{ .int = r.y }, .{ .int = r.w }, .{ .int = r.h } });
 }
 
@@ -118,7 +122,7 @@ pub fn setLayerKeyboard(w: *Window, idx: u8, on_demand: bool) !void {
 /// lets the client decide): used by windows that size themselves.
 pub fn resizeTo(w: *Window, idx: u8, width: u32, height: u32) !void {
     const s = &w.surfaces[idx];
-    if (!s.alive or s.maximized) return;
+    if (!s.alive or s.maximized or s.tiled) return;
     if (s.logical_w == width and s.logical_h == height) return;
     s.logical_w = width;
     s.logical_h = height;

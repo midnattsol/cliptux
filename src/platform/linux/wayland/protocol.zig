@@ -175,6 +175,16 @@ pub const xdg_toplevel = struct {
     pub const ev_close = 1;
     pub const ev_configure_bounds = 2;
     pub const state_maximized: u32 = 1;
+    pub const state_fullscreen: u32 = 2;
+    /// tiled_left, _right, _top, _bottom (since xdg_wm_base v2)
+    pub const state_tiled_left: u32 = 5;
+    pub const state_tiled_bottom: u32 = 8;
+
+    /// A state in which the compositor fixes the window's size and edges
+    /// (besides maximized): fullscreen, tiled against any edge.
+    pub fn fixesEdges(st: u32) bool {
+        return st == state_fullscreen or (st >= state_tiled_left and st <= state_tiled_bottom);
+    }
 };
 
 /// wlr-layer-shell-unstable-v1 (KDE, wlroots compositors; not mutter)
