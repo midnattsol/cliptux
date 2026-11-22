@@ -12,6 +12,7 @@ const icons = @import("../icons.zig");
 const tui = @import("../tools/tui.zig");
 const buttons = @import("buttons.zig");
 const material = @import("material.zig");
+const barkit = @import("../barkit.zig");
 const hit = @import("hit.zig");
 const ff = @import("common.zig").ff;
 
@@ -46,7 +47,7 @@ pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
 
     if (!self.panel_rect.isEmpty()) drawPanel(self, canvas);
     material.drawMaterial(self, canvas, .bar, tb, theme.bar_radius * f, th.bar_shadow);
-    for (self.seps[0..self.n_seps]) |sp| canvas.fillRect(sp.x, sp.y, sp.w, sp.h, th.hairline);
+    for (self.seps[0..self.n_seps]) |sp| barkit.separator(canvas, sp.x, sp.y, sp.h, th);
     drawActiveFill(self, canvas, now);
     for (self.buttons.items, 0..) |b, bi| {
         if (b.layer != .bar and b.layer != .panel) continue;
@@ -79,39 +80,48 @@ fn drawActiveFill(self: *const Editor, canvas: *Canvas, now: i64) void {
 
 fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) void {
     const th = self.theme;
-    const active = buttons.buttonActive(self, b.kind);
     const hv = hit.hoverAmount(self, bi);
-    const rad = theme.button_radius * self.uf();
+    const f = self.uf();
     const r = b.rect;
     switch (b.kind) {
-        .copy => drawCopyButton(self, canvas, r, hv),
-        .colors => drawColorsButton(self, canvas, r, if (active) 1 else hv),
+        .copy => barkit.primary(canvas, r, f, theme.mix(th.accent, th.accent_hover, hv), th.on_accent, .{ .icon = .copy }, "Copy"),
+        .colors => drawColorsButton(self, canvas, r, if (buttons.buttonActive(self, b.kind)) 1 else hv),
         .background => {
-            if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
+            barkit.fill(canvas, r, f, th, .plain, hv);
             drawBackgroundSwatch(self, canvas, r.expand(-self.sc(8)));
         },
-        else => {
-            const on_accent = active and b.kind == .tool;
-            if (!on_accent) {
-                if (active) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.pressed);
-                if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, theme.fade(th.hover, hv));
-            }
-            const fg: u32 = if (on_accent) th.on_accent else if (active and b.layer == .panel) th.accent else th.fg;
+        else => if (primaryOf(b.kind)) |l| {
+            barkit.primary(canvas, r, f, theme.mix(th.accent, th.accent_hover, hv), th.on_accent, .{ .icon = l.icon }, l.text);
+        } else {
+            const look = lookOf(self, b.kind);
+            // the active tool's fill slides on its own (drawActiveFill)
+            if (!(look == .selected and b.kind == .tool)) barkit.fill(canvas, r, f, th, look, hv);
+            const fg = barkit.ink(th, look, false);
             if (buttons.kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
         },
     }
-    if (self.focus == bi) focusRing(self, canvas, r, rad);
+    if (self.focus == bi) focusRing(self, canvas, r, theme.button_radius * f);
 }
 
-/// The accent Copy button: icon and bold label.
-fn drawCopyButton(self: *const Editor, canvas: *Canvas, r: Rect, hv: f64) void {
-    const th = self.theme;
-    const f = self.uf();
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, theme.button_radius * f, theme.mix(th.accent, th.accent_hover, hv));
-    const is = self.sc(16);
-    icons.draw(canvas, .copy, r.x + self.sc(10), r.y + @divTrunc(r.h - is, 2), is, th.on_accent);
-    const fs = theme.font_label * f;
-    text_mod.drawStyled(canvas, r.x + self.sc(10) + is + self.sc(6), r.y + @divTrunc(r.h - text_mod.heightStyled(fs, .bold), 2), fs, th.on_accent, .bold, "Copy");
+/// A tool's prominent button (Crop), if `kind` is one.
+fn primaryOf(kind: buttons.ButtonKind) ?tui.Primary {
+    return switch (kind) {
+        .ext => |e| tui.primary(e),
+        else => null,
+    };
+}
+
+/// How a bar button shows its state: the active tool (or tool-like
+/// mode) is the accent, options that are on are toggled, an open
+/// popover's button is pressed.
+fn lookOf(self: *const Editor, kind: buttons.ButtonKind) barkit.Look {
+    if (!buttons.buttonActive(self, kind)) return .plain;
+    return switch (kind) {
+        .tool => .selected,
+        .ext => |e| if (e == .aspect) .toggled else .selected,
+        .corners, .shadow, .beautify_always, .beautify => .toggled,
+        else => .pressed,
+    };
 }
 
 /// The colour and size button: the current colour's dot and a chevron;

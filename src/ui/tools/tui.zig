@@ -13,6 +13,7 @@ const shapes = @import("../shapes.zig");
 const render = @import("../../gfx/render.zig");
 const text_mod = @import("../../gfx/text.zig");
 const color = @import("color.zig");
+const barkit = @import("../barkit.zig");
 
 const Editor = editor_mod.Editor;
 const Ext = tools.Ext;
@@ -120,8 +121,20 @@ pub fn barItems(ed: *const Editor, items: *[24]ui.Item) ?usize {
         n += 1;
     }
     items[n] = .{ .kind = .{ .ext = .crop_cancel }, .w = btn, .group = 1 };
-    items[n + 1] = .{ .kind = .{ .ext = .crop_apply }, .w = btn, .group = 1 };
+    const apply = primary(.crop_apply).?;
+    items[n + 1] = .{ .kind = .{ .ext = .crop_apply }, .w = barkit.primaryWidth(ed.uf(), apply.text), .group = 1 };
     return n + 2;
+}
+
+/// A prominent button's icon and label (barkit.primary).
+pub const Primary = struct { icon: Icon, text: []const u8 };
+
+/// The tools' prominent buttons: Crop, which does what crop mode is for.
+pub fn primary(e: Ext) ?Primary {
+    return switch (e) {
+        .crop_apply => .{ .icon = .crop, .text = "Crop" },
+        else => null,
+    };
 }
 
 /// The toolbar stays hidden (capturing text: select and done).

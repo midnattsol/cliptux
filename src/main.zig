@@ -170,6 +170,7 @@ test {
     _ = @import("ui/window.zig");
     _ = @import("ui/settings.zig");
     _ = @import("ui/frame.zig");
+    _ = @import("ui/barkit.zig");
     _ = @import("ui/settings_modes.zig");
     _ = @import("ui/settings_steps.zig");
     _ = @import("ui/theme.zig");

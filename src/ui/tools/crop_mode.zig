@@ -114,29 +114,77 @@ pub fn overlay(ed: *const Editor) ?Rect {
     return (ed.selBuf() orelse return null).expand(ed.handleRadius() + ed.sc(4));
 }
 
-/// The frame's thirds and its eight handles.
+/// The frame's thirds and its eight handles: L-shaped corners and short
+/// bars mid-edge, just outside the frame, white on a dark halo so they
+/// show on light and dark pictures alike.
 pub fn draw(ed: *Editor, canvas: *Canvas) void {
     if (ed.tools.mode != .crop) return;
     const s = ed.selBuf() orelse return;
-    var i: i32 = 1;
-    while (i < 3) : (i += 1) {
-        canvas.fillRect(s.x + @divTrunc(s.w * i, 3), s.y, 1, s.h, 0x80FFFFFF);
-        canvas.fillRect(s.x, s.y + @divTrunc(s.h * i, 3), s.w, 1, 0x80FFFFFF);
-    }
-    const f = ed.uf();
+    drawThirds(canvas, s);
     const len: i32 = @min(ed.sc(18), @divTrunc(@min(s.w, s.h), 3));
     const t = @max(2, ed.sc(3));
-    // corner brackets, then the edge handles
-    for (shapes.handlePoints(s), 0..) |p, k| {
-        if (k % 2 == 1) {
-            canvas.fillCircleAA(@floatFromInt(p.x), @floatFromInt(p.y), 4.5 * f, 0xFFFFFFFF);
-            continue;
+    const halo = @max(1, ed.sc(1));
+    // every halo first, so no halo covers a neighbouring arm
+    for ([_]bool{ true, false }) |under| {
+        for (0..8) |k| {
+            const bars = handleBars(s, @intCast(k), len, t);
+            for (bars.r[0..bars.n]) |b| {
+                const r = if (under) b.expand(halo) else b;
+                canvas.fillRect(r.x, r.y, r.w, r.h, if (under) ed.theme.handle_shadow else ed.theme.handle);
+            }
         }
-        const dx: i32 = if (p.x == s.x) 1 else -1;
-        const dy: i32 = if (p.y == s.y) 1 else -1;
-        const x0 = if (dx > 0) p.x - t else p.x - len;
-        const y0 = if (dy > 0) p.y - t else p.y - len;
-        canvas.fillRect(x0, if (dy > 0) p.y - t else p.y, len + t, t, 0xFFFFFFFF);
-        canvas.fillRect(if (dx > 0) p.x - t else p.x, y0, t, len + t, 0xFFFFFFFF);
     }
+}
+
+/// Thirds, as a light line with a dark one beside it.
+fn drawThirds(canvas: *Canvas, s: Rect) void {
+    var i: i32 = 1;
+    while (i < 3) : (i += 1) {
+        const x = s.x + @divTrunc(s.w * i, 3);
+        const y = s.y + @divTrunc(s.h * i, 3);
+        canvas.fillRect(x + 1, s.y, 1, s.h, 0x33000000);
+        canvas.fillRect(s.x, y + 1, s.w, 1, 0x33000000);
+        canvas.fillRect(x, s.y, 1, s.h, 0x99FFFFFF);
+        canvas.fillRect(s.x, y, s.w, 1, 0x99FFFFFF);
+    }
+}
+
+const Bars = struct { r: [2]Rect, n: usize };
+
+/// The bars of handle `k` (shapes.handlePoints order): two arms for a
+/// corner, one bar for an edge, `t` thick and `len` long, outside `s`.
+fn handleBars(s: Rect, k: u3, len: i32, t: i32) Bars {
+    const p = shapes.handlePoints(s)[k];
+    const left = p.x == s.x;
+    const top = p.y == s.y;
+    if (k % 2 == 0) {
+        // a corner: a horizontal and a vertical arm meeting outside it
+        const hx = if (left) p.x - t else p.x - len;
+        const vy = if (top) p.y - t else p.y - len;
+        return .{ .n = 2, .r = .{
+            .{ .x = hx, .y = if (top) p.y - t else p.y, .w = len + t, .h = t },
+            .{ .x = if (left) p.x - t else p.x, .y = vy, .w = t, .h = len + t },
+        } };
+    }
+    const bar: Rect = if (k == 1 or k == 5)
+        .{ .x = p.x - @divTrunc(len, 2), .y = if (k == 1) p.y - t else p.y, .w = len, .h = t }
+    else
+        .{ .x = if (k == 7) p.x - t else p.x, .y = p.y - @divTrunc(len, 2), .w = t, .h = len };
+    return .{ .n = 1, .r = .{ bar, bar } };
+}
+
+test "crop handles sit just outside the frame" {
+    const s: Rect = .{ .x = 100, .y = 100, .w = 200, .h = 100 };
+    // the north-west corner: arms along the top and the left edge
+    const nw = handleBars(s, 0, 18, 3);
+    try std.testing.expectEqual(@as(usize, 2), nw.n);
+    try std.testing.expect(nw.r[0].eql(.{ .x = 97, .y = 97, .w = 21, .h = 3 }));
+    try std.testing.expect(nw.r[1].eql(.{ .x = 97, .y = 97, .w = 3, .h = 21 }));
+    // the south-east corner ends where the frame does, plus the arm
+    const se = handleBars(s, 4, 18, 3);
+    try std.testing.expect(se.r[0].eql(.{ .x = 282, .y = 200, .w = 21, .h = 3 }));
+    // the east edge: one bar, centred, outside
+    const e = handleBars(s, 3, 18, 3);
+    try std.testing.expectEqual(@as(usize, 1), e.n);
+    try std.testing.expect(e.r[0].eql(.{ .x = 300, .y = 141, .w = 3, .h = 18 }));
 }

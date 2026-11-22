@@ -12,6 +12,7 @@ const buttons = @import("buttons.zig");
 const popover = @import("popover_layout.zig");
 const picker = @import("picker.zig");
 const hit = @import("hit.zig");
+const barkit = @import("../barkit.zig");
 const ff = @import("common.zig").ff;
 
 const Editor = editor_mod.Editor;
@@ -29,10 +30,6 @@ const Flow = struct {
     n_rows: i32 = 0,
     n_seps: usize = 0,
 };
-
-fn copyButtonWidth(self: *const Editor) i32 {
-    return self.sc(10) + self.sc(16) + self.sc(6) + text_mod.widthStyled(theme.font_label * self.uf(), .bold, "Copy") + self.sc(14);
-}
 
 /// Lay out `items` in rows of at most `max_w`, groups kept together and
 /// separated; fills `out` with the positions and the content size.
@@ -271,7 +268,7 @@ fn mainItems(self: *const Editor, items: *[24]Item) usize {
         items[n] = .{ .kind = k, .w = btn, .group = 3 };
         n += 1;
     }
-    items[n] = .{ .kind = .copy, .w = copyButtonWidth(self) + self.sc(2), .group = 3 };
+    items[n] = .{ .kind = .copy, .w = barkit.primaryWidth(self.uf(), "Copy") + self.sc(2), .group = 3 };
     n += 1;
     return n;
 }
