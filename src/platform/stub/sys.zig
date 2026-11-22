@@ -61,6 +61,14 @@ pub fn monoNs() i64 {
 pub fn sleepMs(ms: u64) void {
     _ = ms;
 }
+/// Sleep while `addr` holds `expect`, at most `timeout_ms` (forever when
+/// null), or until futexWake; may also return spuriously.
+pub fn futexWait(addr: *const std.atomic.Value(u32), expect: u32, timeout_ms: ?u32) void {
+    _ = .{ addr, expect, timeout_ms };
+}
+pub fn futexWake(addr: *const std.atomic.Value(u32), n: u32) void {
+    _ = .{ addr, n };
+}
 pub fn processId() u32 {
     return 0;
 }

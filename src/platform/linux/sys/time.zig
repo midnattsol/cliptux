@@ -1,4 +1,4 @@
-//! Clocks, poll deadlines and the kernel CSPRNG.
+//! Clocks, sleeps, poll deadlines, futexes and the kernel CSPRNG.
 
 const std = @import("std");
 const linux = std.os.linux;
@@ -65,4 +65,20 @@ pub fn sleepMs(ms: u64) void {
         if (linux.errno(linux.nanosleep(&ts, &rem)) != .INTR) return;
         ts = rem;
     }
+}
+
+/// Sleep while `addr` holds `expect`, at most `timeout_ms` (forever when
+/// null), or until futexWake; may also return spuriously.
+pub fn futexWait(addr: *const std.atomic.Value(u32), expect: u32, timeout_ms: ?u32) void {
+    var ts: linux.timespec = undefined;
+    const tp: ?*const linux.timespec = if (timeout_ms) |ms| blk: {
+        ts = .{ .sec = @intCast(ms / 1000), .nsec = @intCast(@as(u64, ms % 1000) * std.time.ns_per_ms) };
+        break :blk &ts;
+    } else null;
+    _ = linux.futex_4arg(&addr.raw, .{ .cmd = .WAIT, .private = true }, expect, tp);
+}
+
+/// Wake up to `n` threads in futexWait on `addr`.
+pub fn futexWake(addr: *const std.atomic.Value(u32), n: u32) void {
+    _ = linux.futex_3arg(&addr.raw, .{ .cmd = .WAKE, .private = true }, n);
 }

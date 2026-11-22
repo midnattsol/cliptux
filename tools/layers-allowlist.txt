@@ -24,7 +24,6 @@ src/record/frames.zig
 src/record/quickvid.zig
 src/record/run.zig
 src/record/session.zig
-src/record/sync.zig
 src/record/tests.zig
 src/testkit.zig
 src/ui/editor.zig

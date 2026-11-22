@@ -1,22 +1,12 @@
-//! Small thread primitives on Linux futexes (std's need an Io instance,
-//! which PipeWire's callback threads do not have): a mutex and an event
+//! Small thread primitives on the platform's futex (api.sys; std's need
+//! an Io instance, which PipeWire's callback threads do not have): a mutex and an event
 //! counter to wait on with a timeout.
 
 const std = @import("std");
-const linux = std.os.linux;
+const sys = @import("../platform/api.zig").sys;
 
-fn wait(addr: *const std.atomic.Value(u32), expect: u32, timeout_ms: ?u32) void {
-    var ts: linux.timespec = undefined;
-    const tp: ?*const linux.timespec = if (timeout_ms) |ms| blk: {
-        ts = .{ .sec = @intCast(ms / 1000), .nsec = @intCast(@as(u64, ms % 1000) * std.time.ns_per_ms) };
-        break :blk &ts;
-    } else null;
-    _ = linux.futex_4arg(&addr.raw, .{ .cmd = .WAIT, .private = true }, expect, tp);
-}
-
-fn wake(addr: *const std.atomic.Value(u32), n: u32) void {
-    _ = linux.futex_3arg(&addr.raw, .{ .cmd = .WAKE, .private = true }, n);
-}
+const wait = sys.futexWait;
+const wake = sys.futexWake;
 
 pub const Mutex = struct {
     /// 0 unlocked, 1 locked, 2 locked with waiters

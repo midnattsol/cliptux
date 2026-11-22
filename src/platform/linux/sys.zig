@@ -20,6 +20,8 @@ pub const getRandom = time.getRandom;
 pub const timeoutUntil = time.timeoutUntil;
 pub const monoNs = time.monoNs;
 pub const sleepMs = time.sleepMs;
+pub const futexWait = time.futexWait;
+pub const futexWake = time.futexWake;
 
 // open file descriptors
 pub const pollfd = io.pollfd;
