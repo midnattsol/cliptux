@@ -22,6 +22,15 @@ pub fn remember(home: []const u8, path: Path) void {
     sys.writeFile(p, @tagName(path)) catch {};
 }
 
+/// How a capture through `p` went, for `shotlet permissions`.
+pub fn text(p: Path) []const u8 {
+    return switch (p) {
+        .shell => "through the GNOME integration (no permission used)",
+        .direct => "directly from the compositor (no permission used)",
+        .portal => "through the screen-sharing portal (its permission)",
+    };
+}
+
 pub fn last(home: []const u8) ?Path {
     var dbuf: [1024]u8 = undefined;
     var pbuf: [1100]u8 = undefined;
@@ -30,5 +39,8 @@ pub fn last(home: []const u8) ?Path {
     const fd = sys.openRead(p) catch return null;
     defer sys.close(fd);
     const n = sys.read(fd, &buf) catch return null;
-    return std.meta.stringToEnum(Path, std.mem.trim(u8, buf[0..n], " \n"));
+    const tag = std.mem.trim(u8, buf[0..n], " \n");
+    // written before the seam named the integration neutrally
+    if (std.mem.eql(u8, tag, "gnome")) return .shell;
+    return std.meta.stringToEnum(Path, tag);
 }

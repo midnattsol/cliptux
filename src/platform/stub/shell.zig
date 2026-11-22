@@ -11,10 +11,15 @@ const mode = @import("../../app/modes/mode.zig");
 const Accel = @import("../../app/accel.zig").Accel;
 
 pub const State = types.State;
+pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
 
+/// How Settings names the integration and the desktop's shortcuts here.
+pub fn words() Words {
+    return .{};
+}
 /// This desktop has an integration to offer.
 pub fn applies() bool {
     return false;

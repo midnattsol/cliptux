@@ -27,6 +27,23 @@ pub const CaptureInfo = struct {
     }
 };
 
+/// How the Settings window speaks of the integration and of the desktop's
+/// own shortcuts: the backend's words, as its desktop names things.
+pub const Words = struct {
+    /// the integration's group: "GNOME integration"
+    title: []const u8 = "Desktop integration",
+    /// what gets installed: "Shell extension"
+    part: []const u8 = "Desktop integration",
+    /// the command that manages it: "shotlet gnome-integration"
+    command: []const u8 = "",
+    /// the desktop's own screenshot tool, when it holds the key the
+    /// integration would take: "GNOME\u{2019}s screenshot key"
+    system_key: []const u8 = "The desktop\u{2019}s screenshot key",
+    /// where people bind a key to a command:
+    /// "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts"
+    custom_shortcuts: []const u8 = "Your desktop\u{2019}s keyboard settings",
+};
+
 /// The answer to asking the integration to take a capture itself.
 pub const Handoff = enum { started, declined, unavailable };
 

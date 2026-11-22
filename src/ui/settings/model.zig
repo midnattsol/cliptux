@@ -42,7 +42,7 @@ pub const Hit = union(enum) {
     hist_mb_plus,
     open_history,
     clear_history,
-    gnome_enable,
+    integration_enable,
     /// the capture modes' rows (settings_modes.zig)
     mode: settings_modes.Hit,
 };
@@ -60,13 +60,6 @@ pub const Region = struct {
         return px >= self.x and py >= self.y and px < self.x + self.w and py < self.y + self.h;
     }
 };
-
-/// The shell integration (GNOME Shell's) as the Settings window shows it.
-pub const GnomeState = shell.State;
-
-pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) GnomeState {
-    return shell.state(alloc, env, bus);
-}
 
 /// What the content is drawn into: its height (buffer px, without the
 /// frame) and the display scale.
@@ -101,7 +94,9 @@ pub const State = struct {
     /// scroll the focused control into view after the next draw
     reveal_focus: bool = false,
     env: env_mod.Env = undefined,
-    gnome: GnomeState = .unsupported,
+    /// the shell integration, and how the backend names it
+    integration: shell.State = .unsupported,
+    words: shell.Words = .{},
     capture: shell.CaptureInfo = .{},
     /// Clear history takes two clicks: the first asks
     history_clear: enum { idle, asking, cleared } = .idle,

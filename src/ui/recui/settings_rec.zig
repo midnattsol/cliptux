@@ -7,6 +7,7 @@ const std = @import("std");
 const settings = @import("../settings.zig");
 const theme_mod = @import("../theme.zig");
 const rs = @import("../../record/settings.zig");
+const shell = @import("../../platform/api.zig").shell;
 
 pub const Hit = enum(u8) {
     fmt_minus,
@@ -69,8 +70,10 @@ pub fn draw(ui: *settings.Ui, gpa: std.mem.Allocator, cx: i32, y0: i32, col_w: i
     card = settings.beginCard(ui, cx, y, col_w, 4 * rh);
     try settings.switchRow(ui, &card, "Microphone", "MP4 only", s.mic, h(.mic));
     try settings.switchRow(ui, &card, "System sound", "What the speakers play; MP4 only", s.system_audio, h(.system));
-    try settings.switchRow(ui, &card, "Show clicks", "Needs the GNOME integration", s.clicks, h(.clicks));
-    try settings.switchRow(ui, &card, "Show keystrokes", "Needs the GNOME integration", s.keys, h(.keys));
+    var needs_buf: [64]u8 = undefined;
+    const needs = std.fmt.bufPrint(&needs_buf, "Needs the {s}", .{shell.words().title}) catch null;
+    try settings.switchRow(ui, &card, "Show clicks", needs, s.clicks, h(.clicks));
+    try settings.switchRow(ui, &card, "Show keystrokes", needs, s.keys, h(.keys));
     return settings.endCard(&card) + ui.sc(26);
 }
 

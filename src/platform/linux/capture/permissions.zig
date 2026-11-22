@@ -35,7 +35,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, args: []const []const u8) !void {
 fn status(gpa: std.mem.Allocator, arena: std.mem.Allocator, env: Env, bus: ?*dbus.Connection) void {
     var buf: [128]u8 = undefined;
     if (bus) |b| out("capture now:   {s}\n", .{now_mod.current(gpa, env, b).text(&buf)});
-    out("last capture:  {s}\n", .{if (capture_path.last(env.home)) |p| p.text() else "none yet"});
+    out("last capture:  {s}\n", .{if (capture_path.last(env.home)) |p| capture_path.text(p) else "none yet"});
     const token = config.load(arena, env.home).scToken() != null;
     out("restore token: {s}\n", .{if (token) "stored (the next portal capture reuses the screens chosen)" else "none"});
     if (bus) |b| storeStatus(arena, b) else out("permission store: no session bus\n", .{});

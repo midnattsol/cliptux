@@ -2,9 +2,9 @@
 //!
 //! - General › Capture modes: what a screen, all-screens or window capture
 //!   does once taken (after_fullscreen), and the self-timer's seconds;
-//! - Shortcuts › Capture shortcuts: with the GNOME extension, each mode's
-//!   key (its settings, as `shotlet gnome-integration shortcut MODE KEY`
-//!   sets them): click, then press the keys; Backspace clears, Esc keeps
+//! - Shortcuts › Capture shortcuts: where the shell integration holds the
+//!   global shortcuts (api.shell; Linux: the GNOME extension), each
+//!   mode's key: click, then press the keys; Backspace clears, Esc keeps
 //!   it. Elsewhere, the commands to bind in the desktop's settings.
 
 const std = @import("std");
@@ -29,7 +29,9 @@ const n = mode.shortcuts.len;
 pub const State = struct {
     s: msettings.Settings = .{},
     /// the shell integration holds the keys: they can be changed
-    gnome: bool = false,
+    held: bool = false,
+    /// how the backend names the integration
+    words: shell.Words = .{},
     /// where it keeps them (shell.shortcutStore)
     sd_buf: [1100]u8 = undefined,
     sd_len: usize = 0,
@@ -37,7 +39,7 @@ pub const State = struct {
     key_lens: [n]usize = @splat(0),
     recording: ?u8 = null,
 
-    fn schemadir(self: *const State) []const u8 {
+    fn store(self: *const State) []const u8 {
         return self.sd_buf[0..self.sd_len];
     }
 
@@ -47,11 +49,11 @@ pub const State = struct {
 };
 
 pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) State {
-    var st: State = .{ .s = msettings.load(alloc, env.home) };
+    var st: State = .{ .s = msettings.load(alloc, env.home), .words = shell.words() };
     const b = bus orelse return st;
     const sd = shell.shortcutStore(alloc, env, b, &st.sd_buf) orelse return st;
     st.sd_len = sd.len;
-    st.gnome = true;
+    st.held = true;
     readKeys(&st, alloc, env);
     return st;
 }
@@ -62,7 +64,7 @@ fn readKeys(st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
     const arena = arena_state.allocator();
     for (mode.shortcuts, 0..) |sc, i| {
         st.key_lens[i] = 0;
-        const accel = shell.getShortcut(arena, env, st.schemadir(), sc.name) orelse continue;
+        const accel = shell.getShortcut(arena, env, st.store(), sc.name) orelse continue;
         if (accel.len > st.keys[i].len) continue;
         @memcpy(st.keys[i][0..accel.len], accel);
         st.key_lens[i] = accel.len;
@@ -94,7 +96,7 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
     for (mode.shortcuts, 0..) |sc, i| {
         const r = S.rowBegin(ui, &card, rh);
         var cmd_buf: [48]u8 = undefined;
-        if (!st.gnome) {
+        if (!st.held) {
             S.rowTitle(ui, r, sc.label, null);
             const cmd = std.fmt.bufPrint(&cmd_buf, "shotlet {s}", .{if (std.mem.eql(u8, sc.name, "area")) "" else sc.name}) catch "";
             _ = S.keyCaps(ui, r, &.{cmd}, null);
@@ -106,8 +108,9 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
         try S.chipButton(ui, r, .{ .mode = .{ .key = @intCast(i) } }, null, label, rec);
     }
     var yy = S.endCard(&card) + ui.sc(14);
-    ui.label(x + ui.sc(4), yy, ui.sc(20), 13, ui.th.text_muted, .regular, if (st.gnome)
-        "Backspace turns a shortcut off; Super combinations: shotlet gnome-integration shortcut MODE KEY."
+    var hint_buf: [160]u8 = undefined;
+    ui.label(x + ui.sc(4), yy, ui.sc(20), 13, ui.th.text_muted, .regular, if (st.held)
+        std.fmt.bufPrint(&hint_buf, "Backspace turns a shortcut off; Super combinations: {s} shortcut MODE KEY.", .{st.words.command}) catch ""
     else
         "Bind these commands in your desktop's keyboard settings.");
     yy += ui.sc(20) + ui.sc(26);
@@ -124,8 +127,8 @@ pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) 
             const i = std.mem.indexOfScalar(u8, &mode.timer_choices, st.s.timer_s) orelse 0;
             st.s.timer_s = mode.timer_choices[(i + 1) % mode.timer_choices.len];
             msettings.setTimer(alloc, env.home, st.s.timer_s) catch |err| std.log.warn("could not save: {t}", .{err});
-            if (st.gnome) shell.setTimerSeconds(alloc, env, st.schemadir(), st.s.timer_s) catch |err|
-                std.log.warn("could not change the GNOME integration's timer-seconds: {t}", .{err});
+            if (st.held) shell.setTimerSeconds(alloc, env, st.store(), st.s.timer_s) catch |err|
+                std.log.warn("could not change the {s}'s self-timer: {t}", .{ st.words.title, err });
         },
         .key => |i| st.recording = if (st.recording == i) null else i,
     }
@@ -142,8 +145,8 @@ pub fn onKey(st: *State, k: window.Key, alloc: std.mem.Allocator, env: env_mod.E
     const accel: ?Accel = if (k.code == .backspace) null else accelFor(k) orelse return true;
     st.recording = null;
     const name = mode.shortcuts[i].name;
-    shell.setShortcut(alloc, env, st.schemadir(), name, accel) catch |err|
-        std.log.warn("could not change the GNOME integration's {s} shortcut: {t}", .{ name, err });
+    shell.setShortcut(alloc, env, st.store(), name, accel) catch |err|
+        std.log.warn("could not change the {s}'s {s} shortcut: {t}", .{ st.words.title, name, err });
     readKeys(st, alloc, env);
     return true;
 }

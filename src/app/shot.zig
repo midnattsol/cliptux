@@ -373,7 +373,7 @@ fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
     if (from.shell) |args| {
         const t_load = nowMs();
         const cap = try shell.loadHanded(gpa, env, args);
-        platform.capture.remember(env.home, .gnome);
+        platform.capture.remember(env.home, .shell);
         std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }

@@ -26,14 +26,16 @@ pub const Note = struct {
 
 /// The capture row's line: how captures go now, and how the last went.
 pub fn captureLine(st: *const model.State, buf: []u8) []const u8 {
-    const now = if (st.capture.capture) "Through the GNOME integration (no prompts)" else "Through the screen-sharing portal";
-    const last = st.last_path orelse return now;
-    const how = switch (last) {
-        .gnome => "the GNOME integration",
-        .direct => "directly",
-        .portal => "the portal",
+    var out: std.Io.Writer = .fixed(buf);
+    if (st.capture.capture) {
+        out.print("Through the {s} (no prompts)", .{st.words.title}) catch {};
+    } else out.writeAll("Through the screen-sharing portal") catch {};
+    if (st.last_path) |last| switch (last) {
+        .shell => out.print("; last capture: the {s}", .{st.words.title}) catch {},
+        .direct => out.writeAll("; last capture: directly") catch {},
+        .portal => out.writeAll("; last capture: the portal") catch {},
     };
-    return std.fmt.bufPrint(buf, "{s}; last capture: {s}", .{ now, how }) catch now;
+    return out.buffered();
 }
 
 /// The Reset permissions row.

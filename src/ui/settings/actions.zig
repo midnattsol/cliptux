@@ -34,7 +34,7 @@ pub fn activate(app: *App, hit: Hit) bool {
         },
         .open_history => keep.spawnSelf(st.env, &.{"history"}),
         .clear_history => clearHistory(app),
-        .gnome_enable => enableGnome(app),
+        .integration_enable => enableIntegration(app),
         .mode => |h| {
             settings_modes.activate(h, &st.modes, app.alloc, st.env);
             st.dirty = true;
@@ -116,11 +116,11 @@ fn clearHistory(app: *App) void {
     app.st.history_clear = .cleared;
 }
 
-fn enableGnome(app: *App) void {
+fn enableIntegration(app: *App) void {
     const st = &app.st;
     const bus = app.busPtr();
-    st.gnome = shell.install(app.alloc, st.env, bus);
-    if (st.gnome == .active) if (bus) |b| {
+    st.integration = shell.install(app.alloc, st.env, bus);
+    if (st.integration == .active) if (bus) |b| {
         st.capture = shell.captureInfo(app.alloc, b);
     };
     st.dirty = true;

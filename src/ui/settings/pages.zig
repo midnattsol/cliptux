@@ -54,7 +54,7 @@ fn general(p: Page, y0: i32) !i32 {
     y = try capture(p, y);
     y = try quickAccess(p, y);
     y = try recentCaptures(p, y);
-    if (p.st.gnome != .unsupported) y = try gnomeIntegration(p, y);
+    if (p.st.integration != .unsupported) y = try integration(p, y);
     y = try globalShortcut(p, y);
     return settings_modes.drawGeneral(p.ui, p.cx, y, p.col_w, &p.st.modes);
 }
@@ -142,19 +142,21 @@ fn recentCaptures(p: Page, y0: i32) !i32 {
     return w.endCard(&card) + ui.sc(26);
 }
 
-fn gnomeIntegration(p: Page, y0: i32) !i32 {
+fn integration(p: Page, y0: i32) !i32 {
     const ui = p.ui;
     const st = p.st;
-    const y = try p.title(y0, "GNOME integration", null);
+    const words = st.words;
+    const y = try p.title(y0, words.title, null);
     var card = p.card(y, ui.sc(64));
     const r = w.rowBegin(ui, &card, ui.sc(64));
-    w.rowTitle(ui, r, "Shell extension", switch (st.gnome) {
+    var buf: [128]u8 = undefined;
+    w.rowTitle(ui, r, words.part, switch (st.integration) {
         .active => shell.note() orelse "On: no capture prompts; thumbnails and pins stay above other windows",
         .installed => "Installed; log out and in once to finish",
-        .failed => "Could not install it; see shotlet gnome-integration",
+        .failed => std.fmt.bufPrint(&buf, "Could not install it; see {s}", .{words.command}) catch "Could not install it",
         else => "Off: the thumbnail is an ordinary window",
     });
-    if (st.gnome == .missing or st.gnome == .failed) try w.chipButton(ui, r, .gnome_enable, null, "Enable", true);
+    if (st.integration == .missing or st.integration == .failed) try w.chipButton(ui, r, .integration_enable, null, "Enable", true);
     return w.endCard(&card) + ui.sc(26);
 }
 
@@ -164,16 +166,17 @@ fn globalShortcut(p: Page, y0: i32) !i32 {
     const y = try p.title(y0, "Global shortcut", null);
     var card = p.card(y, ui.sc(64));
     const r = w.rowBegin(ui, &card, ui.sc(64));
-    var buf: [128]u8 = undefined;
+    const words = p.st.words;
+    var buf: [160]u8 = undefined;
     if (cap.capture) {
-        if (cap.shortcut()) |k| {
-            const t = std.fmt.bufPrint(&buf, "{s}", .{k}) catch "";
-            w.rowTitle(ui, r, t, if (cap.blocked)
-                "GNOME\u{2019}s screenshot key: pick another with shotlet gnome-integration shortcut"
-            else
-                "Set by the GNOME integration: shotlet gnome-integration shortcut");
-        } else w.rowTitle(ui, r, "No shortcut", "Pick one with shotlet gnome-integration shortcut KEY");
-    } else w.rowTitle(ui, r, "Bind a key to \u{201C}shotlet\u{201D}", "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts");
+        const sub = if (cap.shortcut() == null)
+            std.fmt.bufPrint(&buf, "Pick one with {s} shortcut KEY", .{words.command})
+        else if (cap.blocked)
+            std.fmt.bufPrint(&buf, "{s}: pick another with {s} shortcut", .{ words.system_key, words.command })
+        else
+            std.fmt.bufPrint(&buf, "Set by the {s}: {s} shortcut", .{ words.title, words.command });
+        w.rowTitle(ui, r, cap.shortcut() orelse "No shortcut", sub catch null);
+    } else w.rowTitle(ui, r, "Bind a key to \u{201C}shotlet\u{201D}", words.custom_shortcuts);
     return w.endCard(&card) + ui.sc(26);
 }
 

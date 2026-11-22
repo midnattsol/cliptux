@@ -18,9 +18,23 @@ const mode = @import("../../app/modes/mode.zig");
 const Accel = @import("../../app/accel.zig").Accel;
 
 pub const State = types.State;
+pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
+
+/// How Settings names the integration (GNOME's) and the desktop's
+/// shortcuts here.
+pub fn words() Words {
+    if (!gnome.isGnome()) return .{};
+    return .{
+        .title = "GNOME integration",
+        .part = "Shell extension",
+        .command = "shotlet gnome-integration",
+        .system_key = "GNOME\u{2019}s screenshot key",
+        .custom_shortcuts = "GNOME Settings \u{203A} Keyboard \u{203A} Custom Shortcuts",
+    };
+}
 
 /// This desktop has an integration to offer (GNOME).
 pub const applies = gnome.isGnome;

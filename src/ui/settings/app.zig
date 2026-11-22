@@ -205,7 +205,7 @@ pub const App = struct {
     }
 };
 
-/// The window's state from the desktop: appearance, GNOME integration,
+/// The window's state from the desktop: appearance, shell integration,
 /// capture modes, and the headless test overrides.
 fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) model.State {
     const last = platform_capture.lastPath(env.home);
@@ -216,8 +216,9 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session)
     }
     st.theme = theme_mod.of(st.prefs);
     st.env = env;
-    st.gnome = model.gnomeState(alloc, env, bus);
-    if (st.gnome == .active) st.capture = shell.captureInfo(alloc, bus.?);
+    st.integration = shell.state(alloc, env, bus);
+    st.words = shell.words();
+    if (st.integration == .active) st.capture = shell.captureInfo(alloc, bus.?);
     st.modes = settings_modes.load(alloc, env, bus);
     // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, and
     // SHOTLET_SETTINGS_VIEW=general|editor|shortcuts on that view, so
