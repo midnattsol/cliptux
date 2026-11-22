@@ -22,6 +22,7 @@ const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
 const window = @import("../platform/api.zig").window;
 const editor_mod = @import("../ui/editor.zig");
+const open_tool = @import("../ui/tools/open.zig");
 const Env = env_mod.Env;
 
 pub const baseName = save.baseName;
@@ -320,7 +321,7 @@ const Finish = struct {
     /// saved) is kept for the history and the thumbnail meanwhile.
     fn close(f: Finish, data: ?[]const u8, saved_path: []const u8) void {
         const ed = f.ed;
-        const what: ?keep_mod.What = if (data) |d| .{ .image_png = d, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace } else null;
+        const what: ?keep_mod.What = if (data) |d| .{ .image_png = d, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace, .at = open_tool.selectionCentre(ed) } else null;
         handoff.close(.{ .gpa = f.gpa, .env = f.env, .cfg = f.cfg, .win = f.win, .ed = ed }, what, f.cfg.showsThumbnail(saved_path.len > 0));
         ed.releaseCaches(); // serving may outlive the session; drop ~140MB
     }

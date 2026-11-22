@@ -73,7 +73,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         .pin => {
             const p = try self.gpa.dupeSentinel(u8, try imagePath(self, i, &pbuf), 0);
             defer self.gpa.free(p);
-            keep.spawnSelf(self.env, &.{ "pin", p.ptr });
+            keep.spawnPin(self.env, p, c.meta.at);
             self.remove(i);
         },
         .show_in_files => {

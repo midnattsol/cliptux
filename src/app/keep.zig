@@ -39,6 +39,8 @@ pub const What = struct {
     saved: []const u8 = "",
     /// replace this entry (a capture edited again) instead of adding one
     replace: ?Kept = null,
+    /// where the capture's centre was on the desktop (logical pixels)
+    at: ?[2]i32 = null,
 };
 
 /// Where entries go: the history when it is on, else the cache.
@@ -99,9 +101,11 @@ fn keepInner(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: 
         null;
     defer if (doc_text) |d| gpa.free(d);
 
-    const meta: history.Meta = .{ .time_ms = sys.realtimeMs(), .width = img.width, .height = img.height, .saved = what.saved };
+    var meta: history.Meta = .{ .time_ms = sys.realtimeMs(), .width = img.width, .height = img.height, .saved = what.saved, .at = what.at };
     if (what.replace != null) {
         const id = k.id.slice();
+        // edited again: it still came from where it was
+        if (meta.at == null) meta.at = previousAt(gpa, k.root(), id);
         try history.replaceFile(k.root(), id, "image.png", what.image_png);
         try history.replaceFile(k.root(), id, "thumb.png", thumb_png);
         if (doc_text) |d| try history.replaceFile(k.root(), id, "doc", d);
@@ -110,6 +114,12 @@ fn keepInner(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: 
         k.id = try history.create(gpa, k.root(), .{ .meta = meta, .image_png = what.image_png, .thumb_png = thumb_png, .doc = doc_text });
     }
     return k;
+}
+
+fn previousAt(gpa: std.mem.Allocator, root: []const u8, id: []const u8) ?[2]i32 {
+    var old = history.readMeta(gpa, root, id) catch return null;
+    defer old.deinit(gpa);
+    return old.at;
 }
 
 /// `crop` of `src` as a PNG.
@@ -180,6 +190,14 @@ pub fn spawnSelf(env: Env, args: []const [*:0]const u8) void {
 /// closes on exec).
 pub fn spawnKeeping(env: Env, args: []const [*:0]const u8, fd: ?sys.fd_t) void {
     proc.spawnSelf(env.envp, args, fd);
+}
+
+/// Pin the image at `path`, centred on `at` (logical pixels) when known.
+pub fn spawnPin(env: Env, path: [:0]const u8, at: ?[2]i32) void {
+    var at_buf: [32]u8 = undefined;
+    const p = at orelse return spawnSelf(env, &.{ "pin", path.ptr });
+    const arg = std.fmt.bufPrintSentinel(&at_buf, "{d},{d}", .{ p[0], p[1] }, 0) catch unreachable;
+    spawnSelf(env, &.{ "pin", path.ptr, "--at", arg.ptr });
 }
 
 /// Show the floating thumbnail for a kept capture. With `ready`, the

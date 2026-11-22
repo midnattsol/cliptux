@@ -65,18 +65,14 @@ pub fn pinExport(ed: *Editor) !void {
     const path = try std.fmt.bufPrintSentinel(&file_buf, "{s}/pin-{d}.png", .{ dir, sys.realtimeMs() }, 0);
     try sys.writeFileExclusive(path, data, 0o600);
     std.log.info("pin: pinning the export ({s})", .{path});
-    var at_buf: [32]u8 = undefined;
-    if (selectionCentre(ed)) |c| {
-        // where the capture was, rather than wherever a new window goes
-        const at = try std.fmt.bufPrintSentinel(&at_buf, "{d},{d}", .{ c[0], c[1] }, 0);
-        keep.spawnSelf(env, &.{ "pin", path.ptr, "--at", at.ptr });
-    } else keep.spawnSelf(env, &.{ "pin", path.ptr });
+    // where the capture was, rather than wherever a new window goes
+    keep.spawnPin(env, path, selectionCentre(ed));
     ed.finish(.cancel);
 }
 
 /// The selection's centre in the desktop's logical pixels, when the
 /// capture's monitor layout is known.
-fn selectionCentre(ed: *const Editor) ?[2]i32 {
+pub fn selectionCentre(ed: *const Editor) ?[2]i32 {
     const s = ed.doc.sel orelse return null;
     const cx: i64 = s.x + @divTrunc(s.w, 2);
     const cy: i64 = s.y + @divTrunc(s.h, 2);

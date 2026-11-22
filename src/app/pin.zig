@@ -61,12 +61,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8, at: ?[2]i32) !voi
 }
 
 /// "X,Y" as `--at` takes it.
-pub fn parseAt(s: []const u8) ?[2]i32 {
-    var it = std.mem.splitScalar(u8, s, ',');
-    const x = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
-    const y = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
-    return if (it.next() == null) .{ x, y } else null;
-}
+pub const parseAt = @import("history.zig").parsePoint;
 
 /// Pin `img` (`what` names it in the log) until the pin is closed;
 /// centred on `at` (logical pixels) when given.

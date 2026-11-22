@@ -188,7 +188,7 @@ pub const Panel = struct {
             .pin => {
                 const p = try self.gpa.dupeSentinel(u8, image, 0);
                 defer self.gpa.free(p);
-                keep.spawnSelf(self.env, &.{ "pin", p.ptr });
+                keep.spawnPin(self.env, p, it.entry.meta.at);
             },
             .delete => {
                 try history.remove(self.root(), id);

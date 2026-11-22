@@ -60,6 +60,9 @@ pub const Meta = struct {
     saved: []const u8 = "",
     /// recognised text; null until OCR ran
     ocr: ?[]const u8 = null,
+    /// where the capture's centre was on the desktop (logical pixels),
+    /// when known: a pin of it opens there
+    at: ?[2]i32 = null,
 
     pub fn deinit(self: *Meta, alloc: std.mem.Allocator) void {
         alloc.free(self.saved);
@@ -76,6 +79,7 @@ pub const Meta = struct {
             try escape(alloc, &out, self.saved);
             try out.append(alloc, '\n');
         }
+        if (self.at) |a| try out.print(alloc, "at={d},{d}\n", .{ a[0], a[1] });
         if (self.ocr) |o| {
             try out.appendSlice(alloc, "ocr=");
             try escape(alloc, &out, o);
@@ -104,6 +108,8 @@ pub const Meta = struct {
             } else if (std.mem.eql(u8, k, "saved")) {
                 alloc.free(m.saved);
                 m.saved = try unescape(alloc, v);
+            } else if (std.mem.eql(u8, k, "at")) {
+                m.at = parsePoint(v);
             } else if (std.mem.eql(u8, k, "ocr")) {
                 if (m.ocr) |o| alloc.free(o);
                 m.ocr = try unescape(alloc, v);
@@ -113,6 +119,15 @@ pub const Meta = struct {
         return m;
     }
 };
+
+/// "X,Y": a point on the desktop, as the meta's `at=` and `shotlet pin
+/// --at` write it.
+pub fn parsePoint(s: []const u8) ?[2]i32 {
+    var it = std.mem.splitScalar(u8, s, ',');
+    const x = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
+    const y = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
+    return if (it.next() == null) .{ x, y } else null;
+}
 
 /// Backslash escapes for \, newline and CR, so values stay on one line.
 fn escape(alloc: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
@@ -361,7 +376,7 @@ fn addTest(alloc: std.mem.Allocator, root: []const u8, time: i64, size: usize) !
 
 test "meta round-trips and escapes its values" {
     const alloc = std.testing.allocator;
-    var m: Meta = .{ .time_ms = 1763740953123, .width = 640, .height = 480, .saved = "/home/u/a\\b\nc.png", .ocr = "line 1\nline 2\r" };
+    var m: Meta = .{ .time_ms = 1763740953123, .width = 640, .height = 480, .saved = "/home/u/a\\b\nc.png", .ocr = "line 1\nline 2\r", .at = .{ -1200, 340 } };
     const data = try m.format(alloc);
     defer alloc.free(data);
     var back = try Meta.parse(alloc, data);
@@ -370,10 +385,11 @@ test "meta round-trips and escapes its values" {
     try std.testing.expectEqual(@as(u32, 640), back.width);
     try std.testing.expectEqualStrings(m.saved, back.saved);
     try std.testing.expectEqualStrings(m.ocr.?, back.ocr.?);
+    try std.testing.expectEqual(m.at, back.at);
     // no OCR yet stays null; a missing time is damage
     var plain = try Meta.parse(alloc, "shotlet-history 1\ntime=5\nsize=1x2\n");
     defer plain.deinit(alloc);
-    try std.testing.expect(plain.ocr == null and plain.saved.len == 0);
+    try std.testing.expect(plain.ocr == null and plain.saved.len == 0 and plain.at == null);
     try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "shotlet-history 1\nsize=1x2\n"));
     try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "garbage"));
     try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "shotlet-history 1\ntime=x\n"));
