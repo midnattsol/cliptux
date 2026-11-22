@@ -162,6 +162,17 @@ the selection. Its keys work while it shows (none is a tool's key):
 | `Q` | Record | the recording picker, on the same frozen frame |
 | `H` | Self-timer | `shotlet timer` |
 
+**The magnifier.** While you pick an area, a lens beside the pointer
+shows the pixels around it (the centre one framed) with its coordinates
+and colour (`#RRGGBB` and a swatch) in a label below; it moves off the
+pointer's way near the edges and never covers the mode strip, the
+toolbar or the size label. `C` copies the colour under the pointer (the
+label says "Copied"), the wheel or `-` `=` zoom it (4×, 8×, 12×, 16×;
+the zoom is kept for the next capture, `loupe_zoom=8`). Settings ›
+General › Capture › Magnifier (`loupe=always|selecting|never`) shows it
+always (the default: pointing and dragging), only while dragging a
+selection, or never. The colour picker (`I`) uses the same lens.
+
 **Click a window while selecting an area**, as on macOS: the window under
 the pointer lights up (an accent outline, the rest dimmed), a click
 without dragging selects exactly that window (an area like any other:
@@ -495,6 +506,7 @@ the editor for the full list.
 | Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
 | Click a window | select that window (before a selection; GNOME with the extension, KDE) |
 | `G` `W` `D` `J` `O` `Q` `H` | before a selection: area, window, screen, scrolling, text, record, timer (the mode strip) |
+| `C`, wheel, `-` `=` | while the magnifier shows: copy the pixel's `#RRGGBB`, zoom it |
 | `Enter` / `Ctrl+C` | copy to the clipboard and close |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
 | `Esc` / right click | cancel the current action; `Esc` again closes (with unsaved annotations it asks first: `Esc` once more discards them) |
