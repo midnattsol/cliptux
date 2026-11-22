@@ -12,9 +12,9 @@
 //!   result opens in the editor.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const capture = @import("../capture.zig");
 const config = @import("../config.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
 const save = @import("../shot/save.zig");
@@ -32,7 +32,7 @@ const scroll = @import("../scroll/capture.zig");
 pub const Ctx = struct {
     gpa: std.mem.Allocator,
     env: env_mod.Env,
-    conn: *dbus.Connection,
+    conn: *desktop.Session,
     cfg: *config.Config,
     win: *window.Window,
 };

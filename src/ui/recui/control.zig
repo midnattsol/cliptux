@@ -13,9 +13,8 @@
 //! top bar's stop button (the extension's) is not in the way.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../../app/env.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
 const fui = @import("../floatui.zig");
@@ -31,7 +30,7 @@ pub const Outcome = enum { stop, discard };
 pub const Control = struct {
     gpa: std.mem.Allocator,
     win: window.Window,
-    bus: *dbus.Connection,
+    bus: *desktop.Session,
     /// logical position on the desktop, and the monitor it is on
     pos: [2]i32,
     covers_monitor: bool = false,
@@ -41,7 +40,7 @@ pub const Control = struct {
     state: draw.State = .{},
     last_draw_ms: i64 = 0,
 
-    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, area: region.Rect) !Control {
+    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, area: region.Rect) !Control {
         text.init(gpa);
         errdefer text.deinit();
         var c: Control = .{ .gpa = gpa, .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display), .bus = bus, .pos = .{ 0, 0 }, .layer = false };

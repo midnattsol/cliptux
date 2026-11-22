@@ -3,18 +3,18 @@
 //! capture flow (app/shot.zig) with the mode.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
 const gnome = @import("../../platform/linux/gnome.zig");
 const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
 const settings = @import("settings.zig");
 const window_direct = @import("../../platform/linux/capture/window_direct.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 
 /// The GNOME extension is here to pick windows.
 fn gnomeExtension(gpa: std.mem.Allocator, env: env_mod.Env) bool {
     if (!gnome.isGnome()) return false;
-    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return false;
+    var bus = desktop.connectBrief(gpa, env) catch return false;
     defer bus.deinit();
     return gnome.extensionActive(&bus);
 }

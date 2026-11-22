@@ -1,37 +1,25 @@
 # Files outside src/platform/linux that still import it (see
 # tools/check-layers.sh). Only removals; never add one.
 src/app/dispatch.zig
-src/app/editfile.zig
-src/app/history_ui/panel.zig
 src/app/modes/cli.zig
-src/app/modes/flow.zig
 src/app/pin.zig
 src/app/quick/actions.zig
-src/app/quick/stack.zig
 src/app/quick.zig
 src/app/scroll/capture.zig
 src/app/scroll/session.zig
 src/app/shot_args.zig
-src/app/shot/dialog.zig
-src/app/shot/save.zig
 src/app/shot.zig
-src/app/toastwin.zig
 src/main.zig
 src/record/cli.zig
 src/record/engine.zig
-src/record/files.zig
 src/record/frames.zig
-src/record/quickvid.zig
 src/record/run.zig
 src/record/session.zig
 src/record/tests.zig
 src/testkit.zig
-src/ui/editor.zig
-src/ui/recui/control.zig
 src/ui/settings/actions.zig
 src/ui/settings/app.zig
 src/ui/settings/model.zig
 src/ui/settings_modes.zig
 src/ui/settings/pages.zig
 src/ui/settings/permissions.zig
-src/ui/theme.zig

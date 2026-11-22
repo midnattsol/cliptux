@@ -4,14 +4,13 @@
 //! and are reachable as methods.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const shot = @import("../shot.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 const ocr_search = @import("../../ocr/search.zig");
-const portal = @import("../../platform/linux/portal.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
@@ -37,7 +36,7 @@ pub const Panel = struct {
     env: Env,
     cfg: config.Config,
     win: window.Window,
-    bus: ?dbus.Connection = null,
+    bus: ?desktop.Session = null,
     root_buf: [1024]u8 = undefined,
     root_len: usize = 0,
     items: std.ArrayList(Item) = .empty,
@@ -145,8 +144,8 @@ pub const Panel = struct {
 
     // --- actions ---
 
-    pub fn bus_(self: *Panel) ?*dbus.Connection {
-        if (self.bus == null) self.bus = portal.connectApp(self.gpa, self.env.bus_addr) catch return null;
+    pub fn bus_(self: *Panel) ?*desktop.Session {
+        if (self.bus == null) self.bus = desktop.connect(self.gpa, self.env) catch return null;
         return &self.bus.?;
     }
 

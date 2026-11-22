@@ -8,7 +8,7 @@
 //!   it. Elsewhere, the commands to bind in the desktop's settings.
 
 const std = @import("std");
-const dbus = @import("../platform/linux/dbus.zig");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const gnome = @import("../platform/linux/gnome.zig");
 const gsettings = @import("../platform/linux/gnome/gsettings.zig");
@@ -45,7 +45,7 @@ pub const State = struct {
     }
 };
 
-pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) State {
+pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) State {
     var st: State = .{ .s = msettings.load(alloc, env.home) };
     const b = bus orelse return st;
     if (!gnome.isGnome() or !gnome.extensionActive(b)) return st;

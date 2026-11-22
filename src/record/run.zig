@@ -4,10 +4,10 @@
 //! it and showing its thumbnail.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const keep = @import("../app/keep.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const settings_mod = @import("settings.zig");
@@ -23,7 +23,7 @@ const Env = env_mod.Env;
 /// Record `a.area` (or the monitor for --full); `picked` is the area the
 /// picker returned, when it ran.
 pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?region.Rect) !void {
-    var bus = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
     var server = ctlsock.Server.listen(env.runtime_dir, env.wayland_display) catch |err| {
@@ -78,7 +78,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
 
 const Outcome = enum { stop, discard };
 
-fn loop(rec: *session.Recording, bus: *dbus.Connection, server: *ctlsock.Server, ctl: ?*control_mod.Control, seconds: ?u32) Outcome {
+fn loop(rec: *session.Recording, bus: *desktop.Session, server: *ctlsock.Server, ctl: ?*control_mod.Control, seconds: ?u32) Outcome {
     var announced = false;
     while (true) {
         if (rec.engine.failed()) |err| {
@@ -118,7 +118,7 @@ fn pollCommands(rec: *session.Recording, server: *ctlsock.Server) ?Outcome {
 }
 
 /// The GNOME top bar's stop button and the record shortcut.
-fn pollBus(rec: *session.Recording, bus: *dbus.Connection) bool {
+fn pollBus(rec: *session.Recording, bus: *desktop.Session) bool {
     var stop = false;
     var n: usize = 0;
     while (n < 16) : (n += 1) {
@@ -129,7 +129,7 @@ fn pollBus(rec: *session.Recording, bus: *dbus.Connection) bool {
     return stop;
 }
 
-fn waitAny(bus: *dbus.Connection, server: *ctlsock.Server, ctl: ?*control_mod.Control) void {
+fn waitAny(bus: *desktop.Session, server: *ctlsock.Server, ctl: ?*control_mod.Control) void {
     var fds = [_]sys.pollfd{
         .{ .fd = bus.fd, .events = sys.POLL.IN, .revents = 0 },
         .{ .fd = server.fd, .events = sys.POLL.IN, .revents = 0 },

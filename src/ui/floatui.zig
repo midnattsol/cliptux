@@ -46,7 +46,7 @@ pub const Theme = struct {
     /// From the desktop's preferences (ui/theme.zig): the Glass panel
     /// made opaque (there is no backdrop blur for a client to use).
     pub fn fromPrefs(p: @import("theme.zig").Prefs) Theme {
-        const t = p.theme();
+        const t = @import("theme.zig").of(p);
         const panel = effects.over(t.window_bg, t.panel);
         return .{
             .panel = panel,

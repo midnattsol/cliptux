@@ -15,9 +15,9 @@
 //! "shotlet:pin:X:Y"), and it fades in rather than zooming from nowhere.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
 const gnome = @import("../platform/linux/gnome.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
 const png = @import("../gfx/png.zig");
 const resample = @import("../gfx/resample.zig");
@@ -88,7 +88,7 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []con
 /// GNOME without the Shotlet extension cannot keep the pin on top: true
 /// when the pin should tell the person about "Always on Top".
 fn needsTopHint(gpa: std.mem.Allocator, env: Env) bool {
-    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return true;
+    var bus = desktop.connectBrief(gpa, env) catch return true;
     defer bus.deinit();
     return !gnome.extensionActive(&bus);
 }

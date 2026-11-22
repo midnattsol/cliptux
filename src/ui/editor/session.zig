@@ -3,6 +3,7 @@
 //! desktop's appearance while open.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const sys = @import("../../platform/api.zig").sys;
 const editor = @import("../editor.zig");
 const ui = @import("../editor_ui.zig");
@@ -86,22 +87,16 @@ fn drainQueue(ed: *Editor) !void {
     }
 }
 
-/// Follow the desktop's appearance while open (Settings portal
-/// SettingChanged), without blocking.
+/// Follow the desktop's appearance while open, without blocking.
 fn pollBus(ed: *Editor) void {
     const conn = ed.bus orelse return;
-    var n: usize = 0;
-    while (n < 16) : (n += 1) {
-        var msg = (conn.nextMessageDeadline(nowMs()) catch return) orelse return;
-        defer msg.deinit(ed.alloc);
-        if (theme_mod.applySignal(&ed.prefs, &msg)) setPrefs(ed, ed.prefs);
-    }
+    if (desktop.pump(conn, ed.alloc, &ed.prefs, null)) setPrefs(ed, ed.prefs);
 }
 
 /// Apply appearance preferences: colours and motion.
 pub fn setPrefs(ed: *Editor, prefs: theme_mod.Prefs) void {
     ed.prefs = prefs;
-    ed.theme = prefs.theme();
+    ed.theme = theme_mod.of(prefs);
     // scripted runs dump frames: keep them independent of timing
     motion.enabled = prefs.animations and getenv("SHOTLET_EDITOR_SCRIPT") == null;
     for (ed.panes[0..ed.n_panes]) |*p| {

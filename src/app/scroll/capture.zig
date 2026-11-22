@@ -29,7 +29,7 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     };
     std.log.info("scrolling capture: region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
     const shell = gnome.isGnome() and gnome.extensionActive(c.conn);
-    var hud = try hud_mod.Hud.open(c.win, theme.readPrefs(c.conn, 800).theme());
+    var hud = try hud_mod.Hud.open(c.win, theme.of(theme.readPrefs(c.conn, 800)));
     defer c.win.closeWindow();
     try showHud(c, &hud, cap, region, shell);
     var session = try Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height);

@@ -4,7 +4,6 @@
 //! shows a short line about it.
 
 const std = @import("std");
-const capture_path = @import("../../platform/linux/capture/path.zig");
 const reset = @import("../../platform/linux/capture/perms/reset.zig");
 const model = @import("model.zig");
 const w = @import("widgets.zig");

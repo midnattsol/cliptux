@@ -3,11 +3,11 @@
 //! (keeping it in the history, with the thumbnail) or discard it.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const keep = @import("../app/keep.zig");
 const shot = @import("../app/shot.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
 const ffmpeg = @import("../encode/ffmpeg_proc.zig");
 const proc = @import("../platform/api.zig").proc;
@@ -27,7 +27,7 @@ pub const Request = struct {
 pub const Recording = struct {
     gpa: std.mem.Allocator,
     env: Env,
-    bus: *dbus.Connection,
+    bus: *desktop.Session,
     set: settings_mod.Settings,
     source: source_mod.Source,
     engine: *engine_mod.Engine,
@@ -35,7 +35,7 @@ pub const Recording = struct {
 
     pub const Begin = union(enum) { ok: Recording, cancelled, failed: anyerror };
 
-    pub fn begin(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *config.Config, set: settings_mod.Settings, req: Request) Begin {
+    pub fn begin(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, cfg: *config.Config, set: settings_mod.Settings, req: Request) Begin {
         var src = switch (source_mod.open(gpa, bus, env.home, cfg, .{ .area = req.area, .clicks = set.clicks, .keys = set.keys })) {
             .ok => |s| s,
             .cancelled => return .cancelled,

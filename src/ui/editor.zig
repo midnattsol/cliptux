@@ -15,6 +15,7 @@
 //! (the mode strip's modes) and winpick (clicking a window).
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const capture = @import("../app/capture.zig");
 const window = @import("../platform/api.zig").window;
 const png = @import("../gfx/png.zig");
@@ -24,7 +25,6 @@ const doc_mod = @import("doc.zig");
 const ui = @import("editor_ui.zig");
 const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const tools = @import("tools/mod.zig");
 const types = @import("editor/types.zig");
 
@@ -148,7 +148,7 @@ pub const Editor = struct {
     prefs: theme_mod.Prefs = .{},
     theme: theme_mod.Theme = theme_mod.Theme.get(true, null),
     /// session bus, to follow appearance changes while open
-    bus: ?*dbus.Connection = null,
+    bus: ?*desktop.Session = null,
 
     /// of 256, what the dim outside the selection keeps (editor/dim.zig)
     dim_keep: u32,

@@ -1,13 +1,14 @@
 //! Saving a capture: the screenshots folder, unique names that never
-//! overwrite, and Save As through the FileChooser portal.
+//! overwrite, and Save As through the desktop's save dialog.
 
 const std = @import("std");
 const clock = @import("../clock.zig");
 const config = @import("../config.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
-const portal = @import("../../platform/linux/portal.zig");
-const sys = @import("../../platform/api.zig").sys;
+const api = @import("../../platform/api.zig");
+const sys = api.sys;
+const desktop = api.desktop;
+const window = api.window;
 const Env = env_mod.Env;
 
 /// Where screenshots go: the configured save_dir (with ~ expanded), else the
@@ -56,17 +57,11 @@ pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ex
     return error.TooManyCollisions;
 }
 
-/// Ask where to save with the FileChooser portal. Null when the person
-/// cancelled (nothing is written). Falls back to the screenshots folder
-/// when there is no FileChooser portal.
-pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
-    return saveAsWith(gpa, env, conn, cfg, data, Blocking{ .gpa = gpa, .conn = conn });
-}
-
-/// saveAs, with `waiter` waiting for the answer: its `parent_window`
-/// ("wayland:HANDLE" or "") is the window the dialog belongs to, its
-/// `wait(*portal.Request)` returns once the request is done.
-pub fn saveAsWith(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8, waiter: anytype) !?[]u8 {
+/// Ask where to save (the desktop's save dialog; over `over`, the
+/// editor, when given). Null when the person cancelled (nothing is
+/// written). Falls back to the screenshots folder when the desktop has no
+/// save dialog.
+pub fn saveAs(gpa: std.mem.Allocator, env: Env, session: *desktop.Session, cfg: *const config.Config, data: []const u8, over: ?*window.Window) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755);
@@ -75,12 +70,9 @@ pub fn saveAsWith(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg:
     var file_buf: [80]u8 = undefined;
     const current_name = try std.fmt.bufPrint(&file_buf, "{s}.png", .{base});
 
-    var req = try portal.beginSaveFile(gpa, conn, .{ .current_name = current_name, .current_folder = dir, .parent_window = waiter.parent_window });
-    defer req.deinit(gpa);
-    try waiter.wait(&req);
-    const path = switch (try portal.savedPath(gpa, &req)) {
-        .granted => |p| p,
-        .cancelled, .denied, .timeout => return null,
+    const path = switch (try desktop.askSavePath(gpa, session, .{ .current_name = current_name, .current_folder = dir }, over)) {
+        .chosen => |p| p,
+        .cancelled => return null,
         .unavailable => {
             std.log.warn("no file chooser portal; saving to {s}", .{dir});
             return try savePng(gpa, env, cfg, data);
@@ -88,17 +80,6 @@ pub fn saveAsWith(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg:
     };
     return try writeChosen(gpa, path, data);
 }
-
-/// Waits for the dialog with nothing else to do.
-const Blocking = struct {
-    gpa: std.mem.Allocator,
-    conn: *dbus.Connection,
-    parent_window: []const u8 = "",
-
-    pub fn wait(self: Blocking, req: *portal.Request) !void {
-        try req.wait(self.gpa, self.conn, portal.timeout_file_chooser_ms);
-    }
-};
 
 /// Write `data` where the chooser said (`path` is consumed); returns the
 /// path written (owned).

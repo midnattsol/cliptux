@@ -36,6 +36,10 @@ pub const window = backend.window;
 /// detached, hardware encode devices.
 pub const proc = backend.proc;
 
+/// The desktop session: appearance, file dialogs, notifications, "show
+/// in Files" (`Session`, with the neutral types of api/desktop.zig).
+pub const desktop = backend.desktop;
+
 /// Font discovery: the UI faces and a face for a codepoint (api/fonts.zig).
 pub const fonts = backend.fonts;
 

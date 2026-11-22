@@ -2,8 +2,8 @@
 //! Space / Enter. Config changes are saved at once.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
-const portal = @import("../../platform/linux/portal.zig");
 const gnome = @import("../../platform/linux/gnome.zig");
 const history = @import("../../app/history.zig");
 const keep = @import("../../app/keep.zig");
@@ -97,7 +97,7 @@ fn chooseFolder(app: *App) void {
         std.log.warn("no session bus: cannot show the folder chooser", .{});
         return;
     };
-    app.folder_req = portal.beginChooseFolder(app.alloc, conn, .{ .current_folder = app.cfg.saveDir() }) catch |err| blk: {
+    app.folder_req = desktop.chooseFolder(app.alloc, conn, app.cfg.saveDir()) catch |err| blk: {
         std.log.warn("folder chooser: {t}", .{err});
         break :blk null;
     };

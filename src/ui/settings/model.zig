@@ -2,9 +2,9 @@
 //! can hit, their on-screen regions and the window's mutable UI state.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../../app/env.zig");
 const gnome = @import("../../platform/linux/gnome.zig");
 const settings_modes = @import("../settings_modes.zig");
@@ -64,7 +64,7 @@ pub const Region = struct {
 /// The GNOME Shell integration as the Settings window shows it.
 pub const GnomeState = enum { not_gnome, active, installed, missing, failed };
 
-pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) GnomeState {
+pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) GnomeState {
     if (!gnome.isGnome()) return .not_gnome;
     const b = bus orelse return .missing;
     return switch (gnome.installState(alloc, env, b)) {

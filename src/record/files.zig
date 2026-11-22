@@ -3,10 +3,9 @@
 
 const std = @import("std");
 const env_mod = @import("../app/env.zig");
-const portal = @import("../platform/linux/portal.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
+const desktop = @import("../platform/api.zig").desktop;
 const settings_mod = @import("settings.zig");
 
 /// Larger files go on the clipboard as a file reference only.
@@ -48,17 +47,17 @@ pub fn copyFile(gpa: std.mem.Allocator, src: []const u8, dst: []const u8) !void 
     }
 }
 
-/// Ask where (FileChooser portal) and copy the recording there; the new
-/// path, or null when cancelled.
-pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, src: []const u8) !?[]u8 {
+/// Ask where (the desktop's save dialog) and copy the recording there;
+/// the new path, or null when cancelled.
+pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Session, src: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const set = settings_mod.load(gpa, env.home);
     const dir = try settings_mod.outputDir(gpa, &set, env.home, &dir_buf);
     const slash = std.mem.lastIndexOfScalar(u8, src, '/') orelse return error.BadPath;
     const name = src[slash + 1 ..];
-    const path = switch (try portal.saveFile(gpa, bus, .{ .title = "Save Recording", .current_name = name, .current_folder = dir })) {
-        .granted => |p| p,
-        .cancelled, .denied, .timeout => return null,
+    const path = switch (try desktop.askSavePath(gpa, session, .{ .title = "Save Recording", .current_name = name, .current_folder = dir }, null)) {
+        .chosen => |p| p,
+        .cancelled => return null,
         .unavailable => return error.NoFileChooser,
     };
     errdefer gpa.free(path);

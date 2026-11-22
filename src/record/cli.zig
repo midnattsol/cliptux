@@ -13,6 +13,7 @@
 //! shortcut starts and stops).
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const settings_mod = @import("settings.zig");
 const region = @import("region.zig");
@@ -25,8 +26,6 @@ const config = @import("../app/config.zig");
 const gnome = @import("../platform/linux/gnome.zig");
 const shot = @import("../app/shot.zig");
 const shellcap = @import("../platform/linux/gnome/shellcap.zig");
-const dbus = @import("../platform/linux/dbus.zig");
-const portal = @import("../platform/linux/portal.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("../ui/theme.zig");
 const Env = env_mod.Env;
@@ -125,7 +124,7 @@ pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
 /// extension (which then starts `shotlet --from-shell ... --then record`),
 /// else as for screenshots (direct or the portal).
 fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: settings_mod.Settings) !void {
-    var bus = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     if (gnome.isGnome() and shellrec.available(gpa, &bus)) {
         if (shellrec.select(gpa, &bus)) {
@@ -134,7 +133,7 @@ fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: settings_mod.Sett
         } else |err| std.log.info("record: GNOME integration: {t}", .{err});
     }
     var cfg = config.load(gpa, env.home);
-    portal.registerApp(gpa, &bus);
+    desktop.identify(gpa, &bus);
     var cap = (try shot.acquire(gpa, env, &bus, &cfg, .{})) orelse return;
     defer cap.deinit(gpa);
     try pickOn(gpa, env, a, set, &cap, false);
@@ -172,9 +171,9 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings
 
 /// The desktop's light or dark look and accent, for the picker.
 fn appearance(gpa: std.mem.Allocator, env: Env) theme.Theme {
-    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return theme.Theme.get(true, null);
+    var bus = desktop.connectBrief(gpa, env) catch return theme.Theme.get(true, null);
     defer bus.deinit();
-    return theme.readPrefs(&bus, 300).theme();
+    return theme.of(theme.readPrefs(&bus, 300));
 }
 
 /// Remember the bar's choices for next time.

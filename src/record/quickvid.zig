@@ -8,10 +8,10 @@
 //! stays until closed: a recording is not glanced at like a screenshot.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const history = @import("../app/history.zig");
 const keep = @import("../app/keep.zig");
-const portal = @import("../platform/linux/portal.zig");
 const sys = @import("../platform/api.zig").sys;
 const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
@@ -155,7 +155,7 @@ const Quick = struct {
                 self.say("Copied");
             },
             .save_as => {
-                var bus = try portal.connectApp(self.gpa, self.env.bus_addr);
+                var bus = try desktop.connect(self.gpa, self.env);
                 defer bus.deinit();
                 const saved = (try files.saveAs(self.gpa, self.env, &bus, self.info.path)) orelse return;
                 defer self.gpa.free(saved);

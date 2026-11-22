@@ -3,13 +3,12 @@
 //! input, and redrawing when something changed.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
 const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
-const portal = @import("../../platform/linux/portal.zig");
 const sys = @import("../../platform/api.zig").sys;
 const env_mod = @import("../../app/env.zig");
 const gnome = @import("../../platform/linux/gnome.zig");
@@ -39,9 +38,9 @@ pub const App = struct {
     cfg: config.Config,
     st: model.State,
     win: *Window,
-    bus: *?dbus.Connection,
+    bus: *?desktop.Session,
     regions: std.ArrayList(Region) = .empty,
-    folder_req: ?portal.Request = null,
+    folder_req: ?desktop.Dialog = null,
     frame: frame_mod.Frame = .{},
 
     /// The content's height and scale, for scrolling.
@@ -49,7 +48,7 @@ pub const App = struct {
         return .{ .h = @intCast(self.frame.ch), .f = @as(f64, @floatFromInt(self.win.scale120)) / 120.0 };
     }
 
-    pub fn busPtr(self: *App) ?*dbus.Connection {
+    pub fn busPtr(self: *App) ?*desktop.Session {
         return if (self.bus.*) |*b| b else null;
     }
 
@@ -59,30 +58,24 @@ pub const App = struct {
     }
 
     /// Appearance changes and the folder chooser's answer.
-    fn pollBus(self: *App, b: *dbus.Connection) void {
-        var n: usize = 0;
-        while (n < 16) : (n += 1) {
-            var msg = (b.nextMessageDeadline(sys.monoMs()) catch break) orelse break;
-            if (theme_mod.applySignal(&self.st.prefs, &msg)) {
-                self.st.theme = self.st.prefs.theme();
-                self.st.dirty = true;
-            }
-            const kept = if (self.folder_req) |*r| r.handle(self.alloc, &msg) catch false else false;
-            if (!kept) msg.deinit(self.alloc);
+    fn pollBus(self: *App, b: *desktop.Session) void {
+        if (desktop.pump(b, self.alloc, &self.st.prefs, if (self.folder_req) |*r| r else null)) {
+            self.st.theme = theme_mod.of(self.st.prefs);
+            self.st.dirty = true;
         }
         if (self.folder_req) |*r| if (r.done()) {
-            if (r.outcome.? == .granted) self.takeChosenFolder(r);
+            switch (desktop.dialogChoice(self.alloc, r)) {
+                .chosen => |p| self.takeChosenFolder(p),
+                .cancelled, .unavailable => {},
+            }
             r.deinit(self.alloc);
             self.folder_req = null;
             self.st.dirty = true;
         };
     }
 
-    fn takeChosenFolder(self: *App, r: *portal.Request) void {
-        const p = portal.chosenPath(self.alloc, r) catch |err| {
-            std.log.warn("folder chooser: {t}", .{err});
-            return;
-        };
+    /// Save into the folder the chooser gave (`p` is consumed).
+    fn takeChosenFolder(self: *App, p: []u8) void {
         defer self.alloc.free(p);
         if (p.len <= self.cfg.save_dir.len) {
             @memcpy(self.cfg.save_dir[0..p.len], p);
@@ -213,14 +206,14 @@ pub const App = struct {
 
 /// The window's state from the desktop: appearance, GNOME integration,
 /// capture modes, and the headless test overrides.
-fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connection) model.State {
+fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) model.State {
     const last = capture_path.last(env.home);
     var st: model.State = .{ .direct = last == .direct, .last_path = last };
     if (bus) |b| {
         st.prefs = theme_mod.readPrefs(b, 1500);
         theme_mod.watch(b) catch {};
     }
-    st.theme = st.prefs.theme();
+    st.theme = theme_mod.of(st.prefs);
     st.env = env;
     st.gnome = model.gnomeState(alloc, env, bus);
     if (st.gnome == .active) st.capture = gnome.captureInfo(alloc, bus.?);
@@ -246,7 +239,7 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     defer icons.deinit();
 
     // the session bus: appearance (and its changes) and the folder chooser
-    var bus: ?dbus.Connection = portal.connectApp(alloc, env.bus_addr) catch null;
+    var bus: ?desktop.Session = desktop.connect(alloc, env) catch null;
     defer if (bus) |*b| b.deinit();
     const st = initState(alloc, env, if (bus) |*b| b else null);
 

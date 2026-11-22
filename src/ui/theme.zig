@@ -10,25 +10,19 @@
 //!                         logical pixels (multiply by the surface scale)
 //!   Theme.get(dark, accent)   build one; accent null = system blue
 //!   Prefs                 what the system asks for: dark, accent,
-//!                         animations (false = reduce motion)
-//!   Prefs.theme()         the Theme for those preferences
-//!   readPrefs(conn)       ask org.freedesktop.portal.Settings once
-//!                         (color-scheme, accent-color, enable-animations);
-//!                         never fails: missing values keep the defaults
-//!   watch(conn)           subscribe to SettingChanged
-//!   applySignal(&prefs, msg)  fold a SettingChanged into prefs; true when
-//!                         something the theme uses changed
+//!                         animations (false = reduce motion); the
+//!                         desktop seam's Appearance (api.desktop)
+//!   of(prefs)             the Theme for those preferences
+//!   readPrefs(session)    ask the desktop once (Linux: the Settings
+//!                         portal); never fails: missing values keep
+//!                         the defaults
+//!   watch(session)        follow changes (api.desktop.pump folds them)
 //!   withAlpha(c, a), mix(a, b, t)  colour helpers
 //!   contrast(a, b), legible(c, bg, min)  WCAG contrast; `c` darkened or
 //!                         lightened until it reads on `bg`
-//!
-//! Colour-scheme values: 1 prefer dark, 2 prefer light, 0 no preference.
-//! No preference is light, as GNOME and every other app on the desktop
-//! read it.
 
 const std = @import("std");
-const dbus = @import("../platform/linux/dbus.zig");
-const sys = @import("../platform/api.zig").sys;
+const desktop = @import("../platform/api.zig").desktop;
 
 // --- metrics (logical px) ---
 
@@ -236,16 +230,22 @@ const light_base: Theme = .{
 };
 
 /// What the desktop asks for.
-pub const Prefs = struct {
-    dark: bool = false,
-    accent: ?u32 = null,
-    /// org.gnome.desktop.interface enable-animations; false = reduce motion
-    animations: bool = true,
+pub const Prefs = desktop.Appearance;
 
-    pub fn theme(self: Prefs) Theme {
-        return Theme.get(self.dark, self.accent);
-    }
-};
+/// The Theme for the desktop's preferences.
+pub fn of(p: Prefs) Theme {
+    return Theme.get(p.dark, p.accent);
+}
+
+/// Ask the desktop for its appearance, waiting at most `timeout_ms`.
+pub fn readPrefs(session: *desktop.Session, timeout_ms: i64) Prefs {
+    return desktop.readAppearance(session, timeout_ms);
+}
+
+/// Follow appearance changes (desktop.pump folds them into a Prefs).
+pub fn watch(session: *desktop.Session) !void {
+    return desktop.watchAppearance(session);
+}
 
 /// `c` with its alpha replaced by `a`.
 pub fn withAlpha(c: u32, a: u8) u32 {
@@ -307,106 +307,6 @@ pub fn accentFill(accent: u32) u32 {
     return legible(accent, 0xFFFFFFFF, aa_text);
 }
 
-// --- org.freedesktop.portal.Settings ---
-
-const portal_dest = "org.freedesktop.portal.Desktop";
-const portal_path = "/org/freedesktop/portal/desktop";
-const settings_iface = "org.freedesktop.portal.Settings";
-
-const Key = enum { color_scheme, accent, animations };
-const keys = [_]struct { ns: []const u8, key: []const u8 }{
-    .{ .ns = "org.freedesktop.appearance", .key = "color-scheme" },
-    .{ .ns = "org.freedesktop.appearance", .key = "accent-color" },
-    .{ .ns = "org.gnome.desktop.interface", .key = "enable-animations" },
-};
-
-/// Read the appearance settings from the Settings portal, waiting at most
-/// `timeout_ms` for all of them. Values the portal does not know (or no
-/// portal at all) keep their defaults.
-pub fn readPrefs(conn: *dbus.Connection, timeout_ms: i64) Prefs {
-    var prefs: Prefs = .{};
-    var serials: [keys.len]?u32 = @splat(null);
-    for (keys, 0..) |k, i| {
-        var m = dbus.Marshal.init(conn.alloc);
-        defer m.deinit();
-        m.putString(k.ns) catch return prefs;
-        m.putString(k.key) catch return prefs;
-        serials[i] = conn.callMethod(portal_dest, portal_path, settings_iface, "ReadOne", "ss", m.buf.items) catch return prefs;
-    }
-    const deadline = sys.monoMs() + timeout_ms;
-    var left: usize = keys.len;
-    while (left > 0) {
-        var msg = (conn.readMessageDeadline(deadline) catch return prefs) orelse return prefs;
-        const which = for (serials, 0..) |s, i| {
-            if (s != null and msg.reply_serial != null and msg.reply_serial.? == s.?) break i;
-        } else null;
-        const i = which orelse {
-            // not ours: leave it for whoever waits for it
-            conn.pending.append(conn.alloc, msg) catch msg.deinit(conn.alloc);
-            continue;
-        };
-        defer msg.deinit(conn.alloc);
-        serials[i] = null;
-        left -= 1;
-        if (msg.type != .method_return) continue;
-        var r = msg.reader();
-        applyValue(&prefs, @fromBackingInt(@intCast(i)), &r) catch {};
-    }
-    return prefs;
-}
-
-/// Subscribe to the portal's SettingChanged signal.
-pub fn watch(conn: *dbus.Connection) !void {
-    try conn.addMatchOnce("type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'");
-}
-
-/// Fold a SettingChanged signal into `prefs`. True when it changed a value
-/// the theme uses.
-pub fn applySignal(prefs: *Prefs, msg: *const dbus.Message) bool {
-    if (!msg.isSignal(settings_iface, "SettingChanged")) return false;
-    var r = msg.reader();
-    const ns = r.readString() catch return false;
-    const key = r.readString() catch return false;
-    for (keys, 0..) |k, i| {
-        if (!std.mem.eql(u8, k.ns, ns) or !std.mem.eql(u8, k.key, key)) continue;
-        const before = prefs.*;
-        applyValue(prefs, @fromBackingInt(@intCast(i)), &r) catch return false;
-        return !std.meta.eql(before, prefs.*);
-    }
-    return false;
-}
-
-/// Read one setting's variant (unwrapping the nesting older portals add).
-fn applyValue(prefs: *Prefs, which: Key, r: *dbus.Reader) !void {
-    var sig = try r.readSignature();
-    var depth: usize = 0;
-    while (std.mem.eql(u8, sig, "v") and depth < 4) : (depth += 1) sig = try r.readSignature();
-    switch (which) {
-        .color_scheme => {
-            if (!std.mem.eql(u8, sig, "u")) return error.BadType;
-            prefs.dark = (try r.readU32()) == 1;
-        },
-        .accent => {
-            if (!std.mem.eql(u8, sig, "(ddd)")) return error.BadType;
-            r.pad(8);
-            var c: [3]f64 = undefined;
-            for (&c) |*v| v.* = @bitCast(try r.readU64());
-            // out of range means "no accent set"
-            for (c) |v| if (!(v >= 0 and v <= 1)) {
-                prefs.accent = null;
-                return;
-            };
-            var rgb: u32 = 0xFF000000;
-            for (c, 0..) |v, i| rgb |= @as(u32, @intFromFloat(@round(v * 255))) << @intCast(16 - 8 * i);
-            prefs.accent = rgb;
-        },
-        .animations => {
-            if (!std.mem.eql(u8, sig, "b")) return error.BadType;
-            prefs.animations = (try r.readU32()) != 0;
-        },
-    }
-}
-
 test "theme variants differ where they should" {
     const d = Theme.get(true, null);
     const l = Theme.get(false, 0xFF3584E4);
@@ -437,28 +337,4 @@ test "fills and text reach AA contrast, any accent" {
 /// `top` composited over the opaque `bottom`.
 fn over(top: u32, bottom: u32) u32 {
     return mix(bottom, top | 0xFF000000, @as(f64, @floatFromInt(top >> 24)) / 255);
-}
-
-test "portal values fold into prefs" {
-    const alloc = std.testing.allocator;
-    // color-scheme as ReadOne returns it: v(u)
-    var m = dbus.Marshal.init(alloc);
-    defer m.deinit();
-    try m.putSignature("u");
-    try m.putU32(2);
-    var r: dbus.Reader = .{ .data = m.buf.items, .pos = 0 };
-    var p: Prefs = .{};
-    try applyValue(&p, .color_scheme, &r);
-    try std.testing.expect(!p.dark);
-
-    // accent-color, double-wrapped like Read: v(v((ddd)))
-    var m2 = dbus.Marshal.init(alloc);
-    defer m2.deinit();
-    try m2.putSignature("v");
-    try m2.putSignature("(ddd)");
-    try m2.pad(8);
-    for ([_]f64{ 1.0, 0.5, 0.0 }) |v| try m2.putU64(@bitCast(v));
-    r = .{ .data = m2.buf.items, .pos = 0 };
-    try applyValue(&p, .accent, &r);
-    try std.testing.expectEqual(@as(u32, 0xFFFF8000), p.accent.?);
 }

@@ -4,11 +4,11 @@
 //! (files in shot/save.zig).
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const capture = @import("capture.zig");
 const direct = @import("../platform/linux/capture/direct.zig");
 const capture_path = @import("../platform/linux/capture/path.zig");
 const config = @import("config.zig");
-const dbus = @import("../platform/linux/dbus.zig");
 const env_mod = @import("env.zig");
 const portal = @import("../platform/linux/portal.zig");
 const png = @import("../gfx/png.zig");
@@ -24,7 +24,6 @@ const shell_bus = @import("../platform/linux/gnome/shell_bus.zig");
 const last_area = @import("modes/last_area.zig");
 const save = @import("shot/save.zig");
 const handoff = @import("shot/handoff.zig");
-const dialog = @import("shot/dialog.zig");
 const next = @import("shot/next.zig");
 const winrects = @import("../platform/linux/capture/winrects.zig");
 const screencast = @import("../platform/linux/capture/screencast.zig").screencast;
@@ -69,14 +68,14 @@ pub const From = struct {
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
     var t: Startup = .{ .t0 = nowMs() };
-    var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var conn = try desktop.connectBrief(gpa, env);
     defer conn.deinit();
     t.dbus = nowMs();
     if (!from.any() and handedToShell(gpa, env, &conn, from.req, t.t0)) return;
 
     // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
     const pw_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupPw, .{}) catch null;
-    portal.registerApp(gpa, &conn);
+    desktop.identify(gpa, &conn);
     t.scope = nowMs();
 
     var cfg = config.load(gpa, env.home);
@@ -119,7 +118,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 /// With the GNOME Shell extension, the shell takes the screenshot (no
 /// prompt) and starts another shotlet on it. True when it took over (or
 /// declined): this process has nothing left to do.
-fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, req: modes.Request, t0: i64) bool {
+fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
     if (!gnome.isGnome() or !gnome.extensionActive(conn)) return false;
     @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
     switch (shell_bus.requestMode(gpa, conn, req)) {
@@ -188,7 +187,7 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
+pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
     configureEditor(&ed, conn, cfg, smoke_ms);
@@ -228,7 +227,7 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
 
 /// The editor's settings from the config and the desktop's light/dark
 /// preference, accent and reduced motion.
-fn configureEditor(ed: *editor_mod.Editor, conn: *dbus.Connection, cfg: *const config.Config, smoke_ms: i64) void {
+fn configureEditor(ed: *editor_mod.Editor, conn: *desktop.Session, cfg: *const config.Config, smoke_ms: i64) void {
     const theme = @import("../ui/theme.zig");
     ed.setPrefs(theme.readPrefs(conn, 1500));
     theme.watch(conn) catch {};
@@ -266,7 +265,7 @@ fn restoreReopened(gpa: std.mem.Allocator, ed: *editor_mod.Editor, r: Reopen) !v
 const Finish = struct {
     gpa: std.mem.Allocator,
     env: Env,
-    conn: *dbus.Connection,
+    conn: *desktop.Session,
     cfg: *config.Config,
     win: *window.Window,
     ed: *editor_mod.Editor,
@@ -320,7 +319,7 @@ const Finish = struct {
 
     fn writeFile(f: Finish, quick: bool, data: []const u8) !?[]u8 {
         if (quick) return try savePng(f.gpa, f.env, f.cfg, data);
-        return dialog.saveAs(f.gpa, f.env, f.conn, f.cfg, f.win, data);
+        return save.saveAs(f.gpa, f.env, f.conn, f.cfg, data, f.win);
     }
 
     /// The editor fades out and closes; `data` (what was copied or
@@ -351,7 +350,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     };
     defer cap.deinit(gpa);
 
-    var conn = try portal.connectApp(gpa, env.bus_addr);
+    var conn = try desktop.connect(gpa, env);
     defer conn.deinit();
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
@@ -370,7 +369,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
-pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, from: From) !?capture.Capture {
+pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, from: From) !?capture.Capture {
     if (from.any()) return try fromGiven(gpa, env, from);
     // the desktop's own capture interface: no consent dialog
     if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
@@ -413,7 +412,7 @@ fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
 
 /// The compositor's own capture interface; null (logged) when there is
 /// none or it failed, for the portal to take over.
-fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.Capture {
+fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session) ?capture.Capture {
     const res = direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn) catch |err| {
         std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
         return null;
@@ -432,7 +431,7 @@ fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.
 }
 
 /// The Screenshot portal, the last resort; null when cancelled.
-fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?capture.Capture {
+fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session) !?capture.Capture {
     std.log.info("capture path: portal (Screenshot)", .{});
     capture_path.remember(env.home, .portal);
     const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {

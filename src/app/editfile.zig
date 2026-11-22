@@ -2,11 +2,11 @@
 //! selected, then copied or saved like a capture.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
 const config = @import("config.zig");
 const capture = @import("capture.zig");
 const shot = @import("shot.zig");
-const portal = @import("../platform/linux/portal.zig");
 const imgload = @import("../gfx/imgload.zig");
 const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
@@ -24,7 +24,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     defer cap.deinit(gpa);
     launch.select_all = true;
 
-    var conn = try portal.connectApp(gpa, env.bus_addr);
+    var conn = try desktop.connect(gpa, env);
     defer conn.deinit();
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");

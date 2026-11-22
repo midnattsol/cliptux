@@ -3,6 +3,7 @@
 //! drag a card's capture out into other apps.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
 const keep = @import("../keep.zig");
@@ -77,7 +78,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         .show_in_files => {
             if (c.meta.saved.len == 0) return;
             const b = self.bus_() orelse return error.NoBus;
-            try @import("../../platform/linux/desktop/filemanager.zig").showItem(self.gpa, b, c.meta.saved);
+            try desktop.revealFile(self.gpa, b, c.meta.saved);
             std.log.info("quick access: showing {s} in the file manager", .{c.meta.saved});
         },
         .close => {
@@ -97,7 +98,7 @@ fn save(self: *Quick, i: usize, ask: bool) !void {
         try shot.savePng(self.gpa, self.env, &self.cfg, data)
     else blk: {
         const b = self.bus_() orelse return error.NoBus;
-        break :blk try shot.saveAs(self.gpa, self.env, b, &self.cfg, data);
+        break :blk try shot.saveAs(self.gpa, self.env, b, &self.cfg, data, null);
     };
     const path = saved orelse return; // chooser cancelled
     defer self.gpa.free(path);

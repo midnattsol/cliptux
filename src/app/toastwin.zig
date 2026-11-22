@@ -6,9 +6,9 @@
 //! without the keyboard focus. A click closes it.
 
 const std = @import("std");
+const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
 const sys = @import("../platform/api.zig").sys;
-const portal = @import("../platform/linux/portal.zig");
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
 const window = @import("../platform/api.zig").window;
@@ -23,7 +23,7 @@ const pad = 20;
 const show_ms = 2600;
 
 fn prefsOf(gpa: std.mem.Allocator, env: Env) theme.Prefs {
-    var conn = portal.connectApp(gpa, env.bus_addr) catch return .{ .dark = true };
+    var conn = desktop.connect(gpa, env) catch return .{ .dark = true };
     defer conn.deinit();
     return theme.readPrefs(&conn, 300);
 }

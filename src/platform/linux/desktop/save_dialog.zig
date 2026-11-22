@@ -1,39 +1,50 @@
-//! Save As over the still-open editor, like a macOS sheet: the
-//! FileChooser portal's dialog is parented to the editor (xdg-foreign),
-//! which keeps answering the compositor meanwhile. Cancelling leaves the
-//! editor exactly as it was.
+//! Save dialogs through the FileChooser portal. Over a window (Save As
+//! from the editor, like a macOS sheet) the dialog is parented to it
+//! (xdg-foreign), and the window keeps answering the compositor
+//! meanwhile; cancelling leaves it exactly as it was.
 
 const std = @import("std");
-const config = @import("../config.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
-const env_mod = @import("../env.zig");
-const portal = @import("../../platform/linux/portal.zig");
-const sys = @import("../../platform/api.zig").sys;
-const window = @import("../../platform/api.zig").window;
-const save = @import("save.zig");
+const dbus = @import("../dbus.zig");
+const portal = @import("../portal.zig");
+const sys = @import("../sys.zig");
+const window = @import("../window.zig");
+const types = @import("../../api/desktop.zig");
 
-const Env = env_mod.Env;
-
-/// Ask where to save over `win`'s editor; see save.saveAs.
-pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, win: *window.Window, data: []const u8) !?[]u8 {
+/// Ask where to save; with `over`, the dialog belongs to that window.
+pub fn askSavePath(gpa: std.mem.Allocator, conn: *dbus.Connection, opts: types.SaveOptions, over: ?*window.Window) !types.Choice {
     var buf: [256]u8 = undefined;
-    const parent = win.parentHandle(&buf) catch |err| blk: {
+    const parent: []const u8 = if (over) |win| win.parentHandle(&buf) catch |err| blk: {
         std.log.info("save as: no parent for the dialog ({t})", .{err});
         break :blk "";
+    } else "";
+    defer if (over) |win| win.unexport();
+    var req = try portal.beginSaveFile(gpa, conn, .{
+        .title = opts.title,
+        .current_name = opts.current_name,
+        .current_folder = opts.current_folder,
+        .parent_window = parent,
+    });
+    defer req.deinit(gpa);
+    if (over) |win| {
+        try (OverWindow{ .gpa = gpa, .conn = conn, .win = win }).wait(&req);
+    } else {
+        try req.wait(gpa, conn, portal.timeout_file_chooser_ms);
+    }
+    return switch (try portal.savedPath(gpa, &req)) {
+        .granted => |p| .{ .chosen = p },
+        .cancelled, .denied, .timeout => .cancelled,
+        .unavailable => .unavailable,
     };
-    defer win.unexport();
-    return save.saveAsWith(gpa, env, conn, cfg, data, OverEditor{ .gpa = gpa, .conn = conn, .win = win, .parent_window = parent });
 }
 
-const OverEditor = struct {
+const OverWindow = struct {
     gpa: std.mem.Allocator,
     conn: *dbus.Connection,
     win: *window.Window,
-    parent_window: []const u8,
 
-    /// Bus messages for the request and Wayland events for the editor
+    /// Bus messages for the request and Wayland events for the window
     /// until the dialog is answered (or the portal never takes it).
-    pub fn wait(self: OverEditor, req: *portal.Request) !void {
+    pub fn wait(self: OverWindow, req: *portal.Request) !void {
         const start = sys.monoMs();
         while (!req.done()) {
             try self.takeMessages(req);
@@ -48,7 +59,7 @@ const OverEditor = struct {
         }
     }
 
-    fn takeMessages(self: OverEditor, req: *portal.Request) !void {
+    fn takeMessages(self: OverWindow, req: *portal.Request) !void {
         while (try self.conn.nextMessageDeadline(sys.monoMs())) |m| {
             var msg = m;
             const kept = req.handle(self.gpa, &msg) catch false;
@@ -72,7 +83,7 @@ fn expired(conn: *dbus.Connection, req: *portal.Request, start: i64) bool {
     return req.done();
 }
 
-/// What reaches the editor while the dialog is up is not for it; a
+/// What reaches the window while the dialog is up is not for it; a
 /// resize is kept for when it is back.
 fn dropInput(win: *window.Window) void {
     var i: usize = 0;

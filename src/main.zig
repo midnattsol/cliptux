@@ -1,4 +1,5 @@
 const std = @import("std");
+const capture = @import("platform/api.zig").capture;
 const front = @import("cli/front.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;

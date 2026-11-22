@@ -4,13 +4,12 @@
 //! live in sibling files and are reachable as methods.
 
 const std = @import("std");
+const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const quick_ipc = @import("../quick_ipc.zig");
-const dbus = @import("../../platform/linux/dbus.zig");
-const portal = @import("../../platform/linux/portal.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
@@ -64,7 +63,7 @@ pub const Quick = struct {
     env: Env,
     cfg: config.Config,
     win: Window,
-    bus: ?dbus.Connection = null,
+    bus: ?desktop.Session = null,
     cards: std.ArrayList(Card) = .empty,
     listen_fd: sys.fd_t = -1,
     sock_path_buf: [512]u8 = undefined,
@@ -105,8 +104,8 @@ pub const Quick = struct {
         return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
     }
 
-    pub fn bus_(self: *Quick) ?*dbus.Connection {
-        if (self.bus == null) self.bus = portal.connectApp(self.gpa, self.env.bus_addr) catch return null;
+    pub fn bus_(self: *Quick) ?*desktop.Session {
+        if (self.bus == null) self.bus = desktop.connect(self.gpa, self.env) catch return null;
         return &self.bus.?;
     }
 
