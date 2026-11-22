@@ -48,7 +48,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     try open(&p);
     p.startOcr();
     const end = if (smoke_ms > 0) sys.monoMs() + smoke_ms else 0;
-    events: while (true) {
+    while (true) {
         if (end != 0 and sys.monoMs() > end) break;
         try p.render();
         const ev = (try p.win.nextEventTimeout(250)) orelse {
@@ -56,15 +56,44 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
             p.expireNotice();
             continue;
         };
-        if (!try p.onEvent(ev)) break;
-        // the rest of the batch: a close in it (the second of two quick
-        // Escs) closes the panel too
-        while (try p.win.nextEventTimeout(0)) |e2| if (!try p.onEvent(e2)) break :events;
+        if (!try handleBatch(&p, ev)) break;
         clipimg.takeDrop(gpa, env, &p.win);
         p.pollOcr();
     }
     p.win.closeWindow();
     if (p.win.hasClipboard()) try p.win.serveClipboard();
+}
+
+/// `first` and the rest of its batch; false when one of them closes the
+/// panel (the second of two quick Escs often arrives with the first).
+fn handleBatch(p: anytype, first: window.InputEvent) !bool {
+    if (!try p.onEvent(first)) return false;
+    while (try p.win.nextEventTimeout(0)) |ev| if (!try p.onEvent(ev)) return false;
+    return true;
+}
+
+test "a close later in a batch closes the panel" {
+    const Fake = struct {
+        win: struct {
+            queue: []const window.InputEvent,
+            fn nextEventTimeout(w: *@This(), _: i32) !?window.InputEvent {
+                if (w.queue.len == 0) return null;
+                defer w.queue = w.queue[1..];
+                return w.queue[0];
+            }
+        },
+        escs: u32 = 0,
+        fn onEvent(f: *@This(), ev: window.InputEvent) !bool {
+            if (ev == .key and ev.key.code == window.KEY_ESC) f.escs += 1;
+            // the first Esc drops the pick, the second closes
+            return f.escs < 2;
+        }
+    };
+    const esc: window.InputEvent = .{ .key = .{ .code = window.KEY_ESC, .pressed = true, .ctrl = false, .shift = false } };
+    var f: Fake = .{ .win = .{ .queue = &.{esc} } };
+    try std.testing.expect(!try handleBatch(&f, esc));
+    var g: Fake = .{ .win = .{ .queue = &.{} } };
+    try std.testing.expect(try handleBatch(&g, esc));
 }
 
 /// Open the panel's transparent window, sized to it plus its shadow.
