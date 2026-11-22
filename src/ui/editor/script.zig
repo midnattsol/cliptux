@@ -10,7 +10,6 @@ const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
 const script_input = @import("../script_input.zig");
-const keys = @import("keys.zig");
 const session = @import("session.zig");
 const events = @import("events.zig");
 const caches = @import("caches.zig");
@@ -54,9 +53,9 @@ fn runCommand(ed: *Editor, cmd: []const u8) !void {
     const op = std.meta.stringToEnum(Op, word) orelse return error.BadScript;
     switch (op) {
         .move => try moveTo(ed, try parsePoint(arg)),
-        .down, .up => try button(ed, window.BTN_LEFT, op == .down, try parsePoint(arg)),
-        .click => try click(ed, window.BTN_LEFT, try parsePoint(arg)),
-        .rclick => try click(ed, window.BTN_RIGHT, try parsePoint(arg)),
+        .down, .up => try button(ed, .left, op == .down, try parsePoint(arg)),
+        .click => try click(ed, .left, try parsePoint(arg)),
+        .rclick => try click(ed, .right, try parsePoint(arg)),
         .drag => try dragPath(ed, arg),
         .scribble => try scribble(ed, arg),
         .scroll => try scroll(ed, arg),
@@ -83,7 +82,7 @@ fn motion(ed: *Editor, x: f64, y: f64) !void {
     try events.handle(ed, .{ .pointer_motion = .{ .surface = ed.script.surface, .x = x, .y = y } });
 }
 
-fn buttonXY(ed: *Editor, btn: u32, pressed: bool, x: f64, y: f64) !void {
+fn buttonXY(ed: *Editor, btn: window.Button, pressed: bool, x: f64, y: f64) !void {
     try events.handle(ed, .{ .pointer_button = .{ .surface = ed.script.surface, .button = btn, .pressed = pressed, .x = x, .y = y } });
 }
 
@@ -91,11 +90,11 @@ fn moveTo(ed: *Editor, p: Point) !void {
     try motion(ed, @floatFromInt(p.x), @floatFromInt(p.y));
 }
 
-fn button(ed: *Editor, btn: u32, pressed: bool, p: Point) !void {
+fn button(ed: *Editor, btn: window.Button, pressed: bool, p: Point) !void {
     try buttonXY(ed, btn, pressed, @floatFromInt(p.x), @floatFromInt(p.y));
 }
 
-fn click(ed: *Editor, btn: u32, p: Point) !void {
+fn click(ed: *Editor, btn: window.Button, p: Point) !void {
     try moveTo(ed, p);
     try button(ed, btn, true, p);
     try button(ed, btn, false, p);
@@ -107,7 +106,7 @@ fn dragPath(ed: *Editor, arg: []const u8) !void {
     const a = try parsePoint(pts.next() orelse return error.BadScript);
     const b = try parsePoint(pts.next() orelse return error.BadScript);
     try moveTo(ed, a);
-    try button(ed, window.BTN_LEFT, true, a);
+    try button(ed, .left, true, a);
     for (1..13) |i| {
         const t = @as(f64, @floatFromInt(i)) / 12.0;
         const x = @as(f64, @floatFromInt(a.x)) + @as(f64, @floatFromInt(b.x - a.x)) * t;
@@ -115,7 +114,7 @@ fn dragPath(ed: *Editor, arg: []const u8) !void {
         try motion(ed, x, y);
     }
     try moveTo(ed, b);
-    try button(ed, window.BTN_LEFT, false, b);
+    try button(ed, .left, false, b);
 }
 
 /// scribble cx,cy,r,n: a long freehand stroke, rendering a frame per
@@ -130,11 +129,11 @@ fn scribble(ed: *Editor, arg: []const u8) !void {
         const x = @as(f64, @floatFromInt(v[0])) + @cos(a) * rr;
         const y = @as(f64, @floatFromInt(v[1])) + @sin(a) * rr;
         try motion(ed, x, y);
-        if (i == 0) try buttonXY(ed, window.BTN_LEFT, true, x, y);
+        if (i == 0) try buttonXY(ed, .left, true, x, y);
         try render.renderFrame(ed);
     }
     const t1 = session.nowMs();
-    try buttonXY(ed, window.BTN_LEFT, false, 0, 0);
+    try buttonXY(ed, .left, false, 0, 0);
     std.log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, session.nowMs() - t1 });
 }
 
@@ -152,10 +151,10 @@ fn typeText(ed: *Editor, arg: []const u8) !void {
     var i: usize = 0;
     while (i < arg.len) {
         const n = std.unicode.utf8ByteSequenceLength(arg[i]) catch 1;
-        var k: window.Key = .{ .code = 0, .pressed = true, .ctrl = false, .shift = false };
+        var k: window.Key = .{ .code = .none, .pressed = true, .ctrl = false, .shift = false };
         const piece = arg[i..@min(arg.len, i + n)];
         if (std.mem.eql(u8, piece, "|")) {
-            k.code = window.KEY_ENTER;
+            k.code = .enter;
         } else {
             @memcpy(k.text_buf[0..piece.len], piece);
             k.text_len = @intCast(piece.len);
@@ -168,8 +167,8 @@ fn typeText(ed: *Editor, arg: []const u8) !void {
 /// hold shift|alt|space ... release shift|alt|space
 fn holdKey(ed: *Editor, arg: []const u8, down: bool) !void {
     const eql = std.mem.eql;
-    const code: u32 = if (eql(u8, arg, "shift")) keys.KEY_LEFTSHIFT else if (eql(u8, arg, "alt")) keys.KEY_LEFTALT else if (eql(u8, arg, "space")) window.KEY_SPACE else return error.BadKey;
-    try events.handle(ed, .{ .key = .{ .code = code, .pressed = down, .ctrl = false, .shift = down and code == keys.KEY_LEFTSHIFT, .alt = down and code == keys.KEY_LEFTALT } });
+    const code: window.KeyCode = if (eql(u8, arg, "shift")) .shift_left else if (eql(u8, arg, "alt")) .alt_left else if (eql(u8, arg, "space")) .space else return error.BadKey;
+    try events.handle(ed, .{ .key = .{ .code = code, .pressed = down, .ctrl = false, .shift = down and code == .shift_left, .alt = down and code == .alt_left } });
 }
 
 // --- direct actions ---
@@ -196,7 +195,7 @@ fn pressButton(ed: *Editor, name: []const u8) !void {
     for (0..2) |attempt| {
         for (ed.buttons.items) |b| {
             if (std.mem.eql(u8, ui.buttonName(b.kind), name)) {
-                return click(ed, window.BTN_LEFT, .{ .x = b.rect.x + @divTrunc(b.rect.w, 2), .y = b.rect.y + @divTrunc(b.rect.h, 2) });
+                return click(ed, .left, .{ .x = b.rect.x + @divTrunc(b.rect.w, 2), .y = b.rect.y + @divTrunc(b.rect.h, 2) });
             }
         }
         if (attempt == 1) break;
@@ -242,16 +241,16 @@ fn dragTextWidth(ed: *Editor, arg: []const u8) !void {
     const h = hit.textWidthHandle(ed, i);
     ed.pane_i = ed.mouse_pane;
     if (std.mem.eql(u8, arg, "auto")) {
-        try click(ed, window.BTN_LEFT, h);
-        try click(ed, window.BTN_LEFT, h);
+        try click(ed, .left, h);
+        try click(ed, .left, h);
         return;
     }
     const dx = try std.fmt.parseInt(i32, arg, 10);
     try moveTo(ed, h);
-    try button(ed, window.BTN_LEFT, true, h);
+    try button(ed, .left, true, h);
     for (1..9) |k| {
         const x = @as(f64, @floatFromInt(h.x)) + @as(f64, @floatFromInt(dx)) * @as(f64, @floatFromInt(k)) / 8.0;
         try motion(ed, x, @floatFromInt(h.y));
     }
-    try button(ed, window.BTN_LEFT, false, .{ .x = h.x + dx, .y = h.y });
+    try button(ed, .left, false, .{ .x = h.x + dx, .y = h.y });
 }

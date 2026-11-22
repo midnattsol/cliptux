@@ -35,29 +35,21 @@ pub const Mode = enum {
     record,
     timer,
 
-    /// evdev key code of its letter
-    pub fn key(self: Mode) u32 {
+    /// the key of its letter (where a US layout has it)
+    pub fn key(self: Mode) window.KeyCode {
         return switch (self) {
-            .area => 34, // G
-            .window => 17, // W
-            .screen => 32, // D
-            .scroll => 36, // J
-            .text => 24, // O
-            .record => 16, // Q
-            .timer => 35, // H
+            .area => .g,
+            .window => .w,
+            .screen => .d,
+            .scroll => .j,
+            .text => .o,
+            .record => .q,
+            .timer => .h,
         };
     }
 
     pub fn keyName(self: Mode) []const u8 {
-        return switch (self) {
-            .area => "G",
-            .window => "W",
-            .screen => "D",
-            .scroll => "J",
-            .text => "O",
-            .record => "Q",
-            .timer => "H",
-        };
+        return self.key().label();
     }
 
     pub fn label(self: Mode) []const u8 {
@@ -216,7 +208,6 @@ test "every mode has its own letter, none a tool's by default" {
     for (order, 0..) |m, i| {
         for (order[i + 1 ..]) |o| try std.testing.expect(m.key() != o.key());
         for (binds.default_binds) |b| try std.testing.expect(b.ctrl or b.shift or b.code != m.key());
-        try std.testing.expectEqualStrings(m.keyName(), binds.keyCodeName(m.key()));
     }
     try std.testing.expectEqualStrings("mode_window", Mode.window.scriptName());
 }

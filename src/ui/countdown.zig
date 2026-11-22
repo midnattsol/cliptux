@@ -66,7 +66,7 @@ pub fn run(win: *window.Window, seconds: u8) !bool {
         switch (ev) {
             .close => return false,
             .pointer_button => |b| if (b.pressed) return false,
-            .key => |k| if (k.pressed and k.code == window.KEY_ESC) return false,
+            .key => |k| if (k.pressed and k.code == .escape) return false,
             .resize => shown = 0,
             else => {},
         }

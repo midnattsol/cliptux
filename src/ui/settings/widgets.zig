@@ -299,12 +299,12 @@ pub fn shortcutRow(ui: *Ui, card: *Card, title: []const u8, win: *Window, bind: 
     rowTitle(ui, r, title, null);
     if (recording) {
         _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent_fill);
-    } else if (bind.code == 0) {
+    } else if (bind.code == .none) {
         const s = "Not set";
         ui.label(r.x + r.w - ui.sc(16) - ui.width(13, .regular, s), r.y, r.h, 13, th.text_muted, .regular, s);
     } else {
         var kbuf: [32]u8 = undefined;
-        const key = win.keyName(bind.code, &kbuf, config.keyCodeName(bind.code));
+        const key = win.keyName(bind.code, &kbuf);
         var caps: [3][]const u8 = undefined;
         _ = keyCaps(ui, r, bindCaps(bind, key, &caps), null);
     }

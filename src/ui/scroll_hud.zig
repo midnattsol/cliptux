@@ -247,7 +247,7 @@ pub const Hud = struct {
                 if (over != self.hover) self.dirty = true;
                 self.hover = over;
             },
-            .pointer_button => |b| if (b.pressed and b.button == window.BTN_LEFT) return self.buttonAt(b.x, b.y),
+            .pointer_button => |b| if (b.pressed and b.button == .left) return self.buttonAt(b.x, b.y),
             else => {},
         }
         return null;
@@ -259,19 +259,17 @@ pub const Hud = struct {
     }
 };
 
-const key_c = 46;
-
 /// Enter finishes, Esc cancels; when paused, C or Space continues.
 pub fn keyAction(phase: Phase, key: window.Key) ?Action {
     if (key.ctrl or key.alt) return null;
     switch (key.code) {
-        window.KEY_ESC => return .cancel,
-        window.KEY_ENTER, window.KEY_KPENTER => return .finish,
+        .escape => return .cancel,
+        .enter, .kp_enter => return .finish,
         else => {},
     }
     if (phase != .paused) return null;
-    const c = if (key.keysym != 0) key.keysym == 'c' or key.keysym == 'C' else key.code == key_c;
-    return if (c or key.code == window.KEY_SPACE) .@"continue" else null;
+    const c = if (key.char != 0) key.char == 'c' or key.char == 'C' else key.code == .c;
+    return if (c or key.code == .space) .@"continue" else null;
 }
 
 fn copy(buf: []u8, s: []const u8) []const u8 {
@@ -300,18 +298,18 @@ pub fn grouped(buf: []u8, v: u32) []const u8 {
 
 test "keys: Enter finishes, Esc cancels, C or Space continues only when paused" {
     const key = struct {
-        fn of(code: u32, sym: u32) window.Key {
-            return .{ .code = code, .pressed = true, .ctrl = false, .shift = false, .keysym = sym };
+        fn of(code: window.KeyCode, char: u21) window.Key {
+            return .{ .code = code, .pressed = true, .ctrl = false, .shift = false, .char = char };
         }
     }.of;
-    try std.testing.expectEqual(@as(?Action, .finish), keyAction(.running, key(window.KEY_ENTER, 0)));
-    try std.testing.expectEqual(@as(?Action, .cancel), keyAction(.paused, key(window.KEY_ESC, 0)));
-    try std.testing.expectEqual(@as(?Action, .@"continue"), keyAction(.paused, key(window.KEY_SPACE, ' ')));
-    try std.testing.expectEqual(@as(?Action, .@"continue"), keyAction(.paused, key(key_c, 'c')));
+    try std.testing.expectEqual(@as(?Action, .finish), keyAction(.running, key(.enter, 0)));
+    try std.testing.expectEqual(@as(?Action, .cancel), keyAction(.paused, key(.escape, 0)));
+    try std.testing.expectEqual(@as(?Action, .@"continue"), keyAction(.paused, key(.space, ' ')));
+    try std.testing.expectEqual(@as(?Action, .@"continue"), keyAction(.paused, key(.c, 'c')));
     // C where the layout puts it, not the physical key
-    try std.testing.expectEqual(@as(?Action, null), keyAction(.paused, key(key_c, 'j')));
-    try std.testing.expectEqual(@as(?Action, null), keyAction(.running, key(window.KEY_SPACE, ' ')));
-    var ctrl_c = key(key_c, 'c');
+    try std.testing.expectEqual(@as(?Action, null), keyAction(.paused, key(.c, 'j')));
+    try std.testing.expectEqual(@as(?Action, null), keyAction(.running, key(.space, ' ')));
+    var ctrl_c = key(.c, 'c');
     ctrl_c.ctrl = true;
     try std.testing.expectEqual(@as(?Action, null), keyAction(.paused, ctrl_c));
 }

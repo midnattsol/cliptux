@@ -22,7 +22,6 @@ pub const Action = binds.Action;
 pub const n_actions = binds.n_actions;
 pub const Bind = binds.Bind;
 pub const default_binds = binds.default_binds;
-pub const keyCodeName = binds.keyCodeName;
 pub const bindName = binds.bindName;
 
 pub const Config = model.Config;
@@ -41,6 +40,7 @@ comptime {
     _ = parse;
     _ = write;
     _ = location;
+    _ = @import("config/legacy_keys.zig");
 }
 
 // --- load ---
@@ -117,7 +117,7 @@ test "config save/load roundtrip" {
     cfg.copy_on_save = true;
     cfg.default_thickness = 9;
     cfg.default_color = 5;
-    cfg.binds[@backingInt(Action.pen)] = .{ .code = 33, .ctrl = true };
+    cfg.binds[@backingInt(Action.pen)] = .{ .code = .f, .ctrl = true };
     cfg.setScToken("tok-123");
     cfg.thumbnail = .after_copy_and_save;
     cfg.quick_access_seconds = 12;
@@ -131,7 +131,7 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(true, loaded.copy_on_save);
     try std.testing.expectEqual(@as(i32, 9), loaded.default_thickness);
     try std.testing.expectEqual(@as(u3, 5), loaded.default_color);
-    try std.testing.expect(loaded.binds[@backingInt(Action.pen)].matches(33, true, false));
+    try std.testing.expect(loaded.binds[@backingInt(Action.pen)].matches(.f, true, false));
     try std.testing.expectEqualStrings("tok-123", loaded.scToken().?);
     try std.testing.expectEqual(Thumbnail.after_copy_and_save, loaded.thumbnail);
     try std.testing.expectEqual(@as(u16, 12), loaded.quick_access_seconds);

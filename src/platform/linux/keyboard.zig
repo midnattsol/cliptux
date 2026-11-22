@@ -11,18 +11,21 @@
 //! polls with a monotonic clock (tests feed it a fake one).
 //!
 //! This file re-exports keyboard/: xkb (library binding), translator
-//! (`Keyboard`), keysyms, us_layout (fallback) and repeat.
+//! (`Keyboard`), keysyms, us_layout (fallback), repeat and evdev (codes
+//! to the seam's neutral keys).
 
 const xkb = @import("keyboard/xkb.zig");
 const translator = @import("keyboard/translator.zig");
 const keysyms = @import("keyboard/keysyms.zig");
 const us_layout = @import("keyboard/us_layout.zig");
 const repeat = @import("keyboard/repeat.zig");
+pub const evdev = @import("keyboard/evdev.zig");
 
 pub const RuleNames = xkb.RuleNames;
 pub const available = xkb.available;
 pub const XK = keysyms.XK;
 pub const keysymLabel = keysyms.keysymLabel;
+pub const keysymChar = keysyms.keysymChar;
 pub const Translated = translator.Translated;
 pub const Keyboard = translator.Keyboard;
 pub const Repeat = repeat.Repeat;
@@ -35,4 +38,5 @@ comptime {
     _ = keysyms;
     _ = us_layout;
     _ = repeat;
+    _ = evdev;
 }

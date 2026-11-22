@@ -6,6 +6,7 @@ const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const cursor = @import("cursor.zig");
+const evdev = @import("../keyboard/evdev.zig");
 
 const Window = window.Window;
 const InputEvent = window.InputEvent;
@@ -129,7 +130,7 @@ fn onButton(w: *Window, r: *wl.ArgReader) !void {
     const state = try r.uint();
     w.input_serial = serial;
     try w.queue.append(w.alloc, .{ .pointer_button = .{
-        .button = button,
+        .button = evdev.toButton(button),
         .pressed = state == 1,
         .x = w.pointer.x,
         .y = w.pointer.y,

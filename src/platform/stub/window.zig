@@ -6,24 +6,8 @@ const types = @import("../api/window.zig");
 
 pub const InputEvent = types.InputEvent;
 pub const Key = types.Key;
-pub const BTN_LEFT = types.BTN_LEFT;
-pub const BTN_RIGHT = types.BTN_RIGHT;
-pub const BTN_MIDDLE = types.BTN_MIDDLE;
-pub const KEY_ESC = types.KEY_ESC;
-pub const KEY_ENTER = types.KEY_ENTER;
-pub const KEY_BACKSPACE = types.KEY_BACKSPACE;
-pub const KEY_TAB = types.KEY_TAB;
-pub const KEY_SPACE = types.KEY_SPACE;
-pub const KEY_DELETE = types.KEY_DELETE;
-pub const KEY_LEFTCTRL = types.KEY_LEFTCTRL;
-pub const KEY_RIGHTCTRL = types.KEY_RIGHTCTRL;
-pub const KEY_LEFTSHIFT = types.KEY_LEFTSHIFT;
-pub const KEY_RIGHTSHIFT = types.KEY_RIGHTSHIFT;
-pub const KEY_UP = types.KEY_UP;
-pub const KEY_LEFT = types.KEY_LEFT;
-pub const KEY_RIGHT = types.KEY_RIGHT;
-pub const KEY_DOWN = types.KEY_DOWN;
-pub const KEY_KPENTER = types.KEY_KPENTER;
+pub const KeyCode = types.KeyCode;
+pub const Button = types.Button;
 pub const max_surfaces = types.max_surfaces;
 pub const max_outputs = types.max_outputs;
 pub const Rect = types.Rect;
@@ -176,9 +160,9 @@ pub const Window = struct {
     }
     /// The name of key `code` in the layout (for shortcuts in Settings);
     /// `fallback` when it has none.
-    pub fn keyName(w: *Window, code: u32, buf: []u8, fallback: []const u8) []const u8 {
-        _ = .{ w, code, buf };
-        return fallback;
+    pub fn keyName(w: *Window, code: KeyCode, buf: []u8) []const u8 {
+        _ = .{ w, buf };
+        return code.label();
     }
     /// The descriptor to poll for the window's events.
     pub fn pollFd(w: *const Window) i32 {

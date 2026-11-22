@@ -5,56 +5,34 @@ const std = @import("std");
 const window = @import("../platform/api.zig").window;
 const Point = @import("shapes.zig").Point;
 
-const KEY_TAB = 15;
-const KEY_S = 31;
-const KEY_RIGHTBRACE = 27;
-const KEY_SLASH = 53;
-const KEY_F1 = 59;
-const KEY_HOME = 102;
-const KEY_UP = 103;
-const KEY_LEFT = 105;
-const KEY_RIGHT = 106;
-const KEY_END = 107;
-const KEY_DOWN = 108;
+const KeyCode = window.KeyCode;
 
 /// US-layout key -> character, only to turn script key names into codes.
-fn usKeyChar(code: u32, shift: bool) ?u8 {
-    const lower = "1234567890";
-    const upper = "!@#$%^&*()";
-    if (code >= 2 and code <= 11) {
-        const i = code - 2;
-        return if (shift) upper[i] else lower[i];
-    }
-    const row1 = "qwertyuiop";
-    if (code >= 16 and code <= 25) {
-        const c = row1[code - 16];
-        return if (shift) c - 32 else c;
-    }
-    const row2 = "asdfghjkl";
-    if (code >= 30 and code <= 38) {
-        const c = row2[code - 30];
-        return if (shift) c - 32 else c;
-    }
-    const row3 = "zxcvbnm";
-    if (code >= 44 and code <= 50) {
-        const c = row3[code - 44];
-        return if (shift) c - 32 else c;
-    }
-    return switch (code) {
-        57 => ' ',
-        12 => if (shift) @as(u8, '_') else '-',
-        13 => if (shift) @as(u8, '+') else '=',
-        26 => if (shift) @as(u8, '{') else '[',
-        27 => if (shift) @as(u8, '}') else ']',
-        39 => if (shift) @as(u8, ':') else ';',
-        40 => if (shift) @as(u8, '"') else '\'',
-        41 => if (shift) @as(u8, '~') else '`',
-        43 => if (shift) @as(u8, '|') else '\\',
-        51 => if (shift) @as(u8, '<') else ',',
-        52 => if (shift) @as(u8, '>') else '.',
-        53 => if (shift) @as(u8, '?') else '/',
-        else => null,
+fn usKeyChar(code: KeyCode, shift: bool) ?u8 {
+    if (code.letterChar()) |c| return if (shift) c else std.ascii.toLower(c);
+    if (code.digitChar()) |d| return if (shift) ")!@#$%^&*("[d - '0'] else d;
+    const lower_upper: [2]u8 = switch (code) {
+        .space => .{ ' ', ' ' },
+        .minus => "-_".*,
+        .equal => "=+".*,
+        .bracket_left => "[{".*,
+        .bracket_right => "]}".*,
+        .semicolon => ";:".*,
+        .quote => "'\"".*,
+        .backquote => "`~".*,
+        .backslash => "\\|".*,
+        .comma => ",<".*,
+        .period => ".>".*,
+        .slash => "/?".*,
+        else => return null,
     };
+    return lower_upper[@intFromBool(shift)];
+}
+
+/// The key typing `c` unshifted on a US layout.
+fn usKeyOf(c: u8) ?KeyCode {
+    for (std.meta.tags(KeyCode)) |code| if (usKeyChar(code, false) == c) return code;
+    return null;
 }
 
 pub fn parseInts(comptime n: usize, s: []const u8) ![n]i32 {
@@ -71,33 +49,25 @@ pub fn parsePoint(s: []const u8) !Point {
 
 /// "ctrl+shift+s", "alt+left", "esc", "?" ... for scripted input.
 pub fn parseKey(spec: []const u8) !window.Key {
-    var k: window.Key = .{ .code = 0, .pressed = true, .ctrl = false, .shift = false };
+    var k: window.Key = .{ .code = .none, .pressed = true, .ctrl = false, .shift = false };
     var it = std.mem.splitScalar(u8, spec, '+');
     var name: []const u8 = "";
     while (it.next()) |part| {
         if (std.mem.eql(u8, part, "ctrl")) k.ctrl = true else if (std.mem.eql(u8, part, "shift")) k.shift = true else if (std.mem.eql(u8, part, "alt")) k.alt = true else name = part;
     }
-    const named = [_]struct { []const u8, u32 }{
-        .{ "esc", window.KEY_ESC },             .{ "enter", window.KEY_ENTER },   .{ "tab", KEY_TAB },
-        .{ "backspace", window.KEY_BACKSPACE }, .{ "delete", window.KEY_DELETE }, .{ "space", window.KEY_SPACE },
-        .{ "left", KEY_LEFT },                  .{ "right", KEY_RIGHT },          .{ "up", KEY_UP },
-        .{ "down", KEY_DOWN },                  .{ "home", KEY_HOME },            .{ "end", KEY_END },
-        .{ "f1", KEY_F1 },                      .{ "]", KEY_RIGHTBRACE },         .{ "?", KEY_SLASH },
+    const named = [_]struct { []const u8, KeyCode }{
+        .{ "esc", .escape },          .{ "enter", .enter },     .{ "tab", .tab },
+        .{ "backspace", .backspace }, .{ "delete", .delete },   .{ "space", .space },
+        .{ "left", .left },           .{ "right", .right },     .{ "up", .up },
+        .{ "down", .down },           .{ "home", .home },       .{ "end", .end },
+        .{ "f1", .f1 },               .{ "]", .bracket_right }, .{ "?", .slash },
     };
     for (named) |n| {
         if (std.mem.eql(u8, name, n[0])) k.code = n[1];
     }
     if (std.mem.eql(u8, name, "?")) k.shift = true;
-    if (k.code == 0 and name.len == 1) {
-        var code: u32 = 1;
-        while (code < 60) : (code += 1) {
-            if (usKeyChar(code, false) == name[0]) {
-                k.code = code;
-                break;
-            }
-        }
-    }
-    if (k.code == 0) return error.BadKey;
+    if (k.code == .none and name.len == 1) k.code = usKeyOf(name[0]) orelse .none;
+    if (k.code == .none) return error.BadKey;
     if (!k.ctrl) if (usKeyChar(k.code, k.shift)) |c| {
         k.text_buf[0] = c;
         k.text_len = 1;
@@ -108,8 +78,11 @@ pub fn parseKey(spec: []const u8) !window.Key {
 test "scripted keys parse" {
     const k = try parseKey("ctrl+shift+s");
     try std.testing.expect(k.ctrl and k.shift);
-    try std.testing.expectEqual(@as(u32, KEY_S), k.code);
+    try std.testing.expectEqual(KeyCode.s, k.code);
     const q = try parseKey("?");
     try std.testing.expectEqualStrings("?", q.text());
-    try std.testing.expectEqual(@as(u32, KEY_LEFT), (try parseKey("alt+left")).code);
+    try std.testing.expectEqual(KeyCode.left, (try parseKey("alt+left")).code);
+    try std.testing.expectEqual(KeyCode.digit_1, (try parseKey("1")).code);
+    try std.testing.expectEqualStrings("!", (try parseKey("shift+1")).text());
+    try std.testing.expectEqualStrings("\\", (try parseKey("\\")).text());
 }

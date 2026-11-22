@@ -84,12 +84,12 @@ test "a close later in a batch closes the panel" {
         },
         escs: u32 = 0,
         fn onEvent(f: *@This(), ev: window.InputEvent) !bool {
-            if (ev == .key and ev.key.code == window.KEY_ESC) f.escs += 1;
+            if (ev == .key and ev.key.code == .escape) f.escs += 1;
             // the first Esc drops the pick, the second closes
             return f.escs < 2;
         }
     };
-    const esc: window.InputEvent = .{ .key = .{ .code = window.KEY_ESC, .pressed = true, .ctrl = false, .shift = false } };
+    const esc: window.InputEvent = .{ .key = .{ .code = .escape, .pressed = true, .ctrl = false, .shift = false } };
     var f: Fake = .{ .win = .{ .queue = &.{esc} } };
     try std.testing.expect(!try handleBatch(&f, esc));
     var g: Fake = .{ .win = .{ .queue = &.{} } };

@@ -38,7 +38,8 @@
 //!
 //! ## Keyboard and IME
 //!
-//! `.key` events carry the evdev code, the layout's keysym and text (see
+//! `.key` events carry the neutral key (keyboard/evdev.zig translates the
+//! evdev code), the character of the layout's keysym and the text (see
 //! Key). Held keys repeat per wl_keyboard.repeat_info as presses with
 //! `repeat = true`; nextEvent/nextEventTimeout wake up for them.
 //!
@@ -46,11 +47,11 @@
 //! enables input-method composition while text is being edited (pass the
 //! caret rectangle in buffer pixels of the focused surface) and
 //! `setTextInput(false, null)` disables it. Then:
-//! - committed text arrives as `.key` with code == 0, pressed == true,
-//!   keysym == 0 and text() == the committed UTF-8 (long commits are split
+//! - committed text arrives as `.key` with code == .none, pressed == true,
+//!   char == 0 and text() == the committed UTF-8 (long commits are split
 //!   into several events at character boundaries);
 //! - preedit (composition in progress) changes arrive as `.key` with
-//!   code == 0, pressed == false and preedit == true; read the current
+//!   code == .none, pressed == false and preedit == true; read the current
 //!   string with `win.preedit()` (empty when composition ended) and draw it
 //!   at the caret. Without the protocol nothing changes.
 //!
@@ -114,24 +115,8 @@ comptime {
 const types = @import("../api/window.zig");
 pub const InputEvent = types.InputEvent;
 pub const Key = types.Key;
-pub const BTN_LEFT = types.BTN_LEFT;
-pub const BTN_RIGHT = types.BTN_RIGHT;
-pub const BTN_MIDDLE = types.BTN_MIDDLE;
-pub const KEY_ESC = types.KEY_ESC;
-pub const KEY_ENTER = types.KEY_ENTER;
-pub const KEY_BACKSPACE = types.KEY_BACKSPACE;
-pub const KEY_TAB = types.KEY_TAB;
-pub const KEY_SPACE = types.KEY_SPACE;
-pub const KEY_DELETE = types.KEY_DELETE;
-pub const KEY_LEFTCTRL = types.KEY_LEFTCTRL;
-pub const KEY_RIGHTCTRL = types.KEY_RIGHTCTRL;
-pub const KEY_LEFTSHIFT = types.KEY_LEFTSHIFT;
-pub const KEY_RIGHTSHIFT = types.KEY_RIGHTSHIFT;
-pub const KEY_UP = types.KEY_UP;
-pub const KEY_LEFT = types.KEY_LEFT;
-pub const KEY_RIGHT = types.KEY_RIGHT;
-pub const KEY_DOWN = types.KEY_DOWN;
-pub const KEY_KPENTER = types.KEY_KPENTER;
+pub const KeyCode = types.KeyCode;
+pub const Button = types.Button;
 pub const max_surfaces = types.max_surfaces;
 pub const max_outputs = types.max_outputs;
 pub const Rect = types.Rect;
@@ -244,9 +229,10 @@ pub const Window = struct {
     }
 
     /// The name of key `code` in the layout (for shortcuts in Settings);
-    /// `fallback` when it has none.
-    pub fn keyName(w: *Window, code: u32, buf: []u8, fallback: []const u8) []const u8 {
-        return w.kb.keyName(code, buf, fallback);
+    /// its US label (KeyCode.label) when the layout has none.
+    pub fn keyName(w: *Window, code: KeyCode, buf: []u8) []const u8 {
+        const evcode = keyboard.evdev.fromCode(code) orelse return code.label();
+        return w.kb.keyName(evcode, buf, code.label());
     }
 
     /// The descriptor to poll for the window's events.

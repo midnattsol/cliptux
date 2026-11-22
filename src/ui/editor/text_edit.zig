@@ -8,7 +8,6 @@ const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
 const textbox = @import("../textbox.zig");
 const caretAt = @import("../caret.zig").caretAt;
-const keys = @import("keys.zig");
 const caches = @import("caches.zig");
 const props = @import("props.zig");
 const hit = @import("hit.zig");
@@ -87,18 +86,18 @@ pub fn onTextKey(ed: *Editor, k: window.Key) !void {
     t.goal_x = null;
     t.upstream = false;
     switch (k.code) {
-        window.KEY_ESC => try endText(ed),
-        window.KEY_ENTER, keys.KEY_KPENTER => {
+        .escape => try endText(ed),
+        .enter, .kp_enter => {
             if (k.ctrl) try endText(ed) else try t.te.insert(ed.alloc, buf, "\n");
         },
-        window.KEY_BACKSPACE => if (k.ctrl) t.te.backspaceWord(buf) else t.te.backspace(buf),
-        window.KEY_DELETE => t.te.delete(buf),
-        keys.KEY_LEFT => t.te.move(buf.items, if (k.ctrl) .word_left else .left, k.shift),
-        keys.KEY_RIGHT => t.te.move(buf.items, if (k.ctrl) .word_right else .right, k.shift),
-        keys.KEY_UP, keys.KEY_DOWN, keys.KEY_HOME, keys.KEY_END => try moveByLine(ed, k, goal, upstream),
-        keys.KEY_A => if (k.ctrl) t.te.selectAll(buf.items) else try typeText(ed, k),
-        keys.KEY_C, keys.KEY_X => if (k.ctrl) try copyTextSelection(ed, k.code == keys.KEY_X) else try typeText(ed, k),
-        keys.KEY_MINUS, keys.KEY_EQUAL => if (k.ctrl) try props.setThickness(ed, ed.thickness + @as(i32, if (k.code == keys.KEY_EQUAL) 1 else -1)) else try typeText(ed, k),
+        .backspace => if (k.ctrl) t.te.backspaceWord(buf) else t.te.backspace(buf),
+        .delete => t.te.delete(buf),
+        .left => t.te.move(buf.items, if (k.ctrl) .word_left else .left, k.shift),
+        .right => t.te.move(buf.items, if (k.ctrl) .word_right else .right, k.shift),
+        .up, .down, .home, .end => try moveByLine(ed, k, goal, upstream),
+        .a => if (k.ctrl) t.te.selectAll(buf.items) else try typeText(ed, k),
+        .c, .x => if (k.ctrl) try copyTextSelection(ed, k.code == .x) else try typeText(ed, k),
+        .minus, .equal => if (k.ctrl) try props.setThickness(ed, ed.thickness + @as(i32, if (k.code == .equal) 1 else -1)) else try typeText(ed, k),
         else => try typeText(ed, k),
     }
 }
@@ -110,20 +109,20 @@ fn moveByLine(ed: *Editor, k: window.Key, goal: ?i32, upstream: bool) !void {
     const t = &ed.text.?;
     const s = &ed.doc.shapes.items[t.idx];
     const buf = &s.str;
-    if (k.ctrl and (k.code == keys.KEY_HOME or k.code == keys.KEY_END)) {
-        t.te.move(buf.items, if (k.code == keys.KEY_HOME) .doc_start else .doc_end, k.shift);
+    if (k.ctrl and (k.code == .home or k.code == .end)) {
+        t.te.move(buf.items, if (k.code == .home) .doc_start else .doc_end, k.shift);
         return;
     }
     var lay = try textbox.Layout.init(ed.alloc, buf.items, s.fontPx(), s.box_w);
     defer lay.deinit(ed.alloc);
     const cur: textbox.Hit = .{ .off = t.te.caret, .upstream = upstream };
     const h = switch (k.code) {
-        keys.KEY_HOME => lay.home(cur),
-        keys.KEY_END => lay.end(cur),
+        .home => lay.home(cur),
+        .end => lay.end(cur),
         else => blk: {
             const gx = goal orelse lay.caretX(buf.items, cur);
             t.goal_x = gx;
-            break :blk lay.vertical(buf.items, cur, gx, k.code == keys.KEY_DOWN);
+            break :blk lay.vertical(buf.items, cur, gx, k.code == .down);
         },
     };
     t.te.moveTo(h.off, k.shift);

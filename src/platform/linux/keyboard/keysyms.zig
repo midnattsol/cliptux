@@ -72,3 +72,30 @@ fn upperLatin(cp: u21) u21 {
     if (cp >= 0xe0 and cp <= 0xfe and cp != 0xf7) return cp - 32;
     return cp;
 }
+
+/// The character keysym `sym` stands for: Latin-1 and Unicode keysyms,
+/// and the legacy ones xkb knows a character for; 0 for function, keypad,
+/// modifier and dead keys, which name no character of the layout.
+pub fn keysymChar(sym: u32) u21 {
+    if ((sym >= 0x20 and sym <= 0x7e) or (sym >= 0xa0 and sym <= 0xff)) return @intCast(sym);
+    if (sym >= 0x0100_0100 and sym <= 0x0110_ffff) return @intCast(sym - 0x0100_0000);
+    if (sym == 0 or sym >= 0xfd00 or !xkb.loaded()) return 0;
+    var u: [8]u8 = undefined;
+    const n = xkb.api.keysym_to_utf8(sym, &u, u.len);
+    if (n <= 1) return 0;
+    const cp = std.unicode.utf8Decode(u[0..@intCast(n - 1)]) catch return 0;
+    return if (cp < 0x20 or cp == 0x7f) 0 else cp;
+}
+
+test "keysyms that are characters" {
+    try std.testing.expectEqual(@as(u21, 'q'), keysymChar('q'));
+    try std.testing.expectEqual(@as(u21, 'Q'), keysymChar('Q'));
+    try std.testing.expectEqual(@as(u21, ' '), keysymChar(' '));
+    try std.testing.expectEqual(@as(u21, 0xf1), keysymChar(0xf1)); // ntilde
+    try std.testing.expectEqual(@as(u21, 0x20ac), keysymChar(0x0100_20ac)); // EuroSign
+    try std.testing.expectEqual(@as(u21, 0), keysymChar(XK.Return));
+    try std.testing.expectEqual(@as(u21, 0), keysymChar(XK.F1));
+    try std.testing.expectEqual(@as(u21, 0), keysymChar(0xffb1)); // KP_1
+    try std.testing.expectEqual(@as(u21, 0), keysymChar(0xfe51)); // dead_acute
+    try std.testing.expectEqual(@as(u21, 0), keysymChar(0));
+}

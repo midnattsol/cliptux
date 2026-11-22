@@ -63,7 +63,7 @@ pub fn onEvent(self: *Panel, ev: window.InputEvent) !bool {
         .pointer_motion => |m| onMotion(self, m.x, m.y),
         .pointer_button => |b| {
             onMotion(self, b.x, b.y);
-            if (b.button != window.BTN_LEFT or !b.pressed) return true;
+            if (b.button != .left or !b.pressed) return true;
             return onPress(self, b.y);
         },
         .pointer_axis => |a| {
@@ -125,10 +125,10 @@ fn onKey(self: *Panel, key: window.Key) bool {
         // any key backs out of clearing; Esc does nothing else
         self.confirm_clear = false;
         std.log.info("history: clearing cancelled", .{});
-        if (key.code == window.KEY_ESC) return true;
+        if (key.code == .escape) return true;
     }
     switch (key.code) {
-        window.KEY_ESC => {
+        .escape => {
             if (self.search.items.len > 0) {
                 self.search.clearRetainingCapacity();
                 self.filter();
@@ -136,18 +136,18 @@ fn onKey(self: *Panel, key: window.Key) bool {
                 self.selected = null;
             } else return false;
         },
-        window.KEY_DELETE => self.act(.delete),
-        window.KEY_ENTER, window.KEY_KPENTER => self.act(.copy),
-        window.KEY_BACKSPACE => if (self.search.items.len > 0) {
+        .delete => self.act(.delete),
+        .enter, .kp_enter => self.act(.copy),
+        .backspace => if (self.search.items.len > 0) {
             var n = self.search.items.len - 1;
             while (n > 0 and (self.search.items[n] & 0xC0) == 0x80) n -= 1;
             self.search.shrinkRetainingCapacity(n);
             self.filter();
         },
-        window.KEY_LEFT, window.KEY_RIGHT, window.KEY_UP, window.KEY_DOWN, window.KEY_TAB => moveSelection(self, key.code, key.shift),
-        else => if (key.ctrl and key.code == 46) {
+        .left, .right, .up, .down, .tab => moveSelection(self, key.code, key.shift),
+        else => if (key.ctrl and key.code == .c) {
             self.act(.copy);
-        } else if (key.ctrl and key.code == 31) {
+        } else if (key.ctrl and key.code == .s) {
             self.act(.save);
         } else if (self.searchable and key.text().len > 0 and !key.ctrl) {
             self.search.appendSlice(self.gpa, key.text()) catch {};
@@ -157,18 +157,18 @@ fn onKey(self: *Panel, key: window.Key) bool {
     return true;
 }
 
-fn moveSelection(self: *Panel, code: u32, shift: bool) void {
+fn moveSelection(self: *Panel, code: window.KeyCode, shift: bool) void {
     if (self.shown.items.len == 0) return;
     const n = self.shown.items.len;
     var pos: usize = if (self.selected) |s| std.mem.indexOfScalar(usize, self.shown.items, s) orelse 0 else n - 1;
     const step: usize = switch (code) {
-        window.KEY_UP => n - @min(n, 2),
-        window.KEY_DOWN => 2,
-        window.KEY_LEFT => n - 1,
-        window.KEY_TAB => if (shift) n - 1 else 1,
+        .up => n - @min(n, 2),
+        .down => 2,
+        .left => n - 1,
+        .tab => if (shift) n - 1 else 1,
         else => 1,
     };
-    if (self.selected == null) pos = if (code == window.KEY_LEFT or (code == window.KEY_TAB and shift)) 0 else n - 1;
+    if (self.selected == null) pos = if (code == .left or (code == .tab and shift)) 0 else n - 1;
     pos = (pos + step) % n;
     self.selected = self.shown.items[pos];
     // keep it in view

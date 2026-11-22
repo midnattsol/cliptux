@@ -99,11 +99,11 @@ pub fn afterSelDrag(ed: *Editor) void {
 /// Keys a mode takes before the editor (Enter applies a crop).
 pub fn onKey(ed: *Editor, k: window.Key) !bool {
     // capturing text: Enter reads the selection instead of copying it
-    if (ed.tools.text_capture and (k.code == window.KEY_ENTER or k.code == 96) and ed.doc.sel != null) {
+    if (ed.tools.text_capture and k.code.isEnter() and ed.doc.sel != null) {
         try ocr_job.start(ed, .copy_text);
         return true;
     }
-    if (ed.tools.mode == .crop and (k.code == window.KEY_ENTER or k.code == 96) and ed.focus == null) {
+    if (ed.tools.mode == .crop and k.code.isEnter() and ed.focus == null) {
         try crop_mode.apply(ed);
         return true;
     }

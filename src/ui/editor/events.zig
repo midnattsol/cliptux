@@ -5,7 +5,6 @@ const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const ui = @import("../editor_ui.zig");
 const tall_view = @import("../tall_view.zig");
-const keys = @import("keys.zig");
 const caches = @import("caches.zig");
 const pointer = @import("pointer.zig");
 const drag = @import("drag.zig");
@@ -45,17 +44,17 @@ fn pointerAt(ed: *Editor, surface: u8, x: f64, y: f64) void {
     ed.mouse = .{ .x = @intFromFloat(@round(x)), .y = @intFromFloat(@round(y)) };
 }
 
-fn onButtonEvent(ed: *Editor, button: u32, pressed: bool) !void {
-    if (button == window.BTN_LEFT) {
+fn onButtonEvent(ed: *Editor, button: window.Button, pressed: bool) !void {
+    if (button == .left) {
         if (pressed) try pointer.onPress(ed) else try drag.onRelease(ed);
-    } else if (button == window.BTN_RIGHT and pressed) {
+    } else if (button == .right and pressed) {
         _ = try history.cancelOne(ed);
     }
 }
 
 fn onKeyEvent(ed: *Editor, k: window.Key) !void {
     try trackModifiers(ed, k);
-    if (k.code == 0) {
+    if (k.code == .none) {
         // input method: committed text or a preedit change, never a
         // shortcut
         if (k.pressed and ed.picker.open) {
@@ -76,9 +75,9 @@ fn pointerOn(ed: *Editor, surface: u8) void {
 /// from the centre, move the selection), so track them, releases too.
 fn trackModifiers(ed: *Editor, k: window.Key) !void {
     switch (k.code) {
-        keys.KEY_LEFTSHIFT, keys.KEY_RIGHTSHIFT => ed.mod_shift = k.pressed,
-        keys.KEY_LEFTALT, keys.KEY_RIGHTALT => ed.mod_alt = k.pressed,
-        window.KEY_SPACE => {
+        .shift_left, .shift_right => ed.mod_shift = k.pressed,
+        .alt_left, .alt_right => ed.mod_alt = k.pressed,
+        .space => {
             const dragging = ed.drag == .selecting or ed.drag == .drawing;
             if (k.pressed and dragging) ed.space.held = true;
             if (!k.pressed) ed.space.held = false;

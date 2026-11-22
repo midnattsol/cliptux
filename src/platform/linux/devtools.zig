@@ -50,7 +50,7 @@ fn testWindow(gpa: std.mem.Allocator, env: Env) !void {
                     try win.present();
                     frames += 1;
                 },
-                .key => |k| if (k.pressed and k.code == window.KEY_ESC) break :outer,
+                .key => |k| if (k.pressed and k.code == .escape) break :outer,
                 .close => break :outer,
                 else => {},
             }

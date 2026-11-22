@@ -125,7 +125,7 @@ const Quick = struct {
                     if (dx * dx + dy * dy > 36) self.startDrag() catch |err| std.log.warn("quick video: drag failed: {t}", .{err});
                 }
             },
-            .pointer_button => |b| if (b.button == window.BTN_LEFT) {
+            .pointer_button => |b| if (b.button == .left) {
                 const h = card.hit(@intFromFloat(b.x / k), @intFromFloat(b.y / k));
                 if (b.pressed) {
                     self.pressed = h;

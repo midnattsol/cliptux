@@ -104,8 +104,8 @@ pub const Picker = struct {
             .pointer_motion => |m| self.onMotion(self.toLogical(m.surface, m.x, m.y)),
             .pointer_button => |b| {
                 const p = self.toLogical(b.surface, b.x, b.y);
-                if (b.button == window.BTN_RIGHT and b.pressed) self.result = .cancelled;
-                if (b.button != window.BTN_LEFT) return;
+                if (b.button == .right and b.pressed) self.result = .cancelled;
+                if (b.button != .left) return;
                 if (b.pressed) self.onPress(p) else self.onRelease(p);
             },
             .key => |k| if (k.pressed) self.onKey(k),
@@ -189,8 +189,8 @@ pub const Picker = struct {
 
     fn onKey(self: *Picker, k: window.Key) void {
         switch (k.code) {
-            window.KEY_ESC => self.result = .cancelled,
-            window.KEY_ENTER, window.KEY_KPENTER => {
+            .escape => self.result = .cancelled,
+            .enter, .kp_enter => {
                 const s = self.sel.sel orelse self.sel.monitorAt(self.mouse) orelse return;
                 self.result = .{ .area = s };
             },

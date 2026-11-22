@@ -302,12 +302,12 @@ const Pin = struct {
         p.dirty = true;
     }
 
-    fn onKey(p: *Pin, code: u32) bool {
+    fn onKey(p: *Pin, code: window.KeyCode) bool {
         switch (code) {
-            window.KEY_ESC => return true,
-            12, 74 => p.setZoom(zoomStep(p.zoom, 1)), // - zooms out
-            13, 78 => p.setZoom(zoomStep(p.zoom, -1)), // = + zooms in
-            11 => p.setZoom(1), // 0: 100%
+            .escape => return true,
+            .minus, .kp_minus => p.setZoom(zoomStep(p.zoom, 1)), // - zooms out
+            .equal, .kp_plus => p.setZoom(zoomStep(p.zoom, -1)), // = + zooms in
+            .digit_0 => p.setZoom(1), // 0: 100%
             else => {},
         }
         return false;
@@ -361,8 +361,8 @@ const Pin = struct {
         }
     }
 
-    fn onButton(p: *Pin, button: u32, pressed: bool, x: f64, y: f64, k: f64) !bool {
-        if (button == window.BTN_LEFT and pressed) {
+    fn onButton(p: *Pin, button: window.Button, pressed: bool, x: f64, y: f64, k: f64) !bool {
+        if (button == .left and pressed) {
             if (p.hover_close) return true;
             if (p.layer) {
                 p.drag_from = .{ x, y };
@@ -370,11 +370,11 @@ const Pin = struct {
                 p.drag_rel = false;
                 _ = p.win.takeRelative();
             } else try p.win.startMoveOf(0);
-        } else if (button == window.BTN_LEFT) {
+        } else if (button == .left) {
             p.drag_from = null;
-        } else if (button == window.BTN_RIGHT and pressed) {
+        } else if (button == .right and pressed) {
             try p.win.showWindowMenu(0, @intFromFloat(x / k), @intFromFloat(y / k));
-        } else if (button == window.BTN_MIDDLE and pressed) {
+        } else if (button == .middle and pressed) {
             return true;
         }
         return false;

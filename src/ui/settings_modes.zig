@@ -138,12 +138,12 @@ pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) 
 /// was taken.
 pub fn onKey(st: *State, k: window.Key, alloc: std.mem.Allocator, env: env_mod.Env) bool {
     const i = st.recording orelse return false;
-    if (k.code == window.KEY_ESC) {
+    if (k.code == .escape) {
         st.recording = null;
         return true;
     }
     var buf: [64]u8 = undefined;
-    const accel = if (k.code == window.KEY_BACKSPACE) "" else accelFor(&buf, k) orelse return true;
+    const accel = if (k.code == .backspace) "" else accelFor(&buf, k) orelse return true;
     st.recording = null;
     const key = mode.shortcuts[i].key;
     shell.setShortcut(alloc, env, st.schemadir(), key, if (accel.len == 0) null else accel) catch |err|
@@ -166,29 +166,29 @@ pub fn accelFor(buf: []u8, k: window.Key) ?[]const u8 {
 
 fn keyName(k: window.Key) ?[]const u8 {
     const letters = "abcdefghijklmnopqrstuvwxyz";
-    const sym = k.keysym;
-    if (sym >= 'a' and sym <= 'z') return letters[sym - 'a' ..][0..1];
-    if (sym >= 'A' and sym <= 'Z') return letters[sym - 'A' ..][0..1];
-    if (sym >= '0' and sym <= '9') return "0123456789"[sym - '0' ..][0..1];
-    if (sym >= 0xffbe and sym <= 0xffc9) return ([_][]const u8{ "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" })[sym - 0xffbe];
+    const ch = k.char;
+    if (ch >= 'a' and ch <= 'z') return letters[ch - 'a' ..][0..1];
+    if (ch >= 'A' and ch <= 'Z') return letters[ch - 'A' ..][0..1];
+    if (ch >= '0' and ch <= '9') return "0123456789"[ch - '0' ..][0..1];
+    if (k.code.functionNumber()) |f| if (f <= 12) return k.code.name();
     return switch (k.code) {
-        99 => "Print",
-        102 => "Home",
-        107 => "End",
-        104 => "Page_Up",
-        109 => "Page_Down",
-        110 => "Insert",
-        57 => "space",
+        .print => "Print",
+        .home => "Home",
+        .end => "End",
+        .page_up => "Page_Up",
+        .page_down => "Page_Down",
+        .insert => "Insert",
+        .space => "space",
         else => null,
     };
 }
 
 test "key presses become GNOME accelerators" {
     var buf: [64]u8 = undefined;
-    const print: window.Key = .{ .code = 99, .pressed = true, .ctrl = true, .shift = true };
+    const print: window.Key = .{ .code = .print, .pressed = true, .ctrl = true, .shift = true };
     try std.testing.expectEqualStrings("<Ctrl><Shift>Print", accelFor(&buf, print).?);
-    const w: window.Key = .{ .code = 17, .pressed = true, .ctrl = false, .shift = false, .alt = true, .keysym = 'w' };
+    const w: window.Key = .{ .code = .w, .pressed = true, .ctrl = false, .shift = false, .alt = true, .char = 'w' };
     try std.testing.expectEqualStrings("<Alt>w", accelFor(&buf, w).?);
-    const shift_only: window.Key = .{ .code = 42, .pressed = true, .ctrl = false, .shift = true };
+    const shift_only: window.Key = .{ .code = .shift_left, .pressed = true, .ctrl = false, .shift = true };
     try std.testing.expectEqual(@as(?[]const u8, null), accelFor(&buf, shift_only));
 }

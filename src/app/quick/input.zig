@@ -55,16 +55,16 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
 
 /// Right press toggles a card's menu; a left click (press and release
 /// on the same control) activates it.
-fn onButton(self: *Quick, button: u32, pressed: bool, x: f64, y: f64) void {
+fn onButton(self: *Quick, button: window.Button, pressed: bool, x: f64, y: f64) void {
     const h = self.hitAt(x, y);
     self.hover = h;
     self.dirty = true;
-    if (button == window.BTN_RIGHT and pressed) {
+    if (button == .right and pressed) {
         if (h) |hh| if (hh.control != .hint) {
             const c = &self.cards.items[hh.card];
             c.menu = !c.menu;
         };
-    } else if (button == window.BTN_LEFT) {
+    } else if (button == .left) {
         if (pressed) {
             self.pressed = h;
             self.press_x = x;
@@ -85,23 +85,23 @@ fn onKey(self: *Quick, k: window.Key) void {
     const cur = self.current() orelse return;
     const card = &self.cards.items[cur];
     switch (k.code) {
-        window.KEY_ESC => {
+        .escape => {
             if (card.menu) card.menu = false else self.act(cur, .close);
         },
-        window.KEY_TAB, window.KEY_RIGHT, window.KEY_LEFT => cycleFocus(self, k.shift or k.code == window.KEY_LEFT),
-        window.KEY_UP, window.KEY_DOWN => {
+        .tab, .right, .left => cycleFocus(self, k.shift or k.code == .left),
+        .up, .down => {
             const n = self.cards.items.len;
-            const c: usize = if (k.code == window.KEY_UP) (cur + 1) % n else (cur + n - 1) % n;
+            const c: usize = if (k.code == .up) (cur + 1) % n else (cur + n - 1) % n;
             self.focus = .{ .card = c, .control = if (self.focus) |fo| fo.control else .primary };
         },
-        window.KEY_ENTER, window.KEY_KPENTER, window.KEY_SPACE => {
+        .enter, .kp_enter, .space => {
             if (self.focus) |fo| self.activate(fo) else self.act(cur, .copy);
         },
-        window.KEY_DELETE => self.act(cur, .close),
-        46 => if (k.ctrl) self.act(cur, .copy), // C
-        31 => if (k.ctrl) self.act(cur, if (k.shift) .save_as else .save), // S
-        18, 30 => if (!k.ctrl) self.act(cur, .annotate), // E, A
-        25 => if (!k.ctrl) self.act(cur, .pin), // P
+        .delete => self.act(cur, .close),
+        .c => if (k.ctrl) self.act(cur, .copy),
+        .s => if (k.ctrl) self.act(cur, if (k.shift) .save_as else .save),
+        .e, .a => if (!k.ctrl) self.act(cur, .annotate),
+        .p => if (!k.ctrl) self.act(cur, .pin),
         else => {},
     }
 }

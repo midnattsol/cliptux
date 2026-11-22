@@ -6,6 +6,7 @@ const sys = @import("../../platform/api.zig").sys;
 const binds = @import("../binds.zig");
 const model = @import("model.zig");
 const location = @import("location.zig");
+const legacy_keys = @import("legacy_keys.zig");
 const Config = model.Config;
 const Action = binds.Action;
 const Bind = binds.Bind;
@@ -135,21 +136,21 @@ pub fn parseBind(value: []const u8) Bind {
             rest = rest["shift+".len..];
         } else break;
     }
-    b.code = std.fmt.parseInt(u32, rest, 10) catch 0;
+    b.code = legacy_keys.key(std.fmt.parseInt(u32, rest, 10) catch 0);
     return b;
 }
 
 test "bind parse and format roundtrip" {
     const b = parseBind("ctrl+shift+44");
-    try std.testing.expect(b.ctrl and b.shift and b.code == 44);
+    try std.testing.expect(b.ctrl and b.shift and b.code == .z);
     var buf: [32]u8 = undefined;
     try std.testing.expectEqualStrings("Ctrl+Shift+Z", binds.bindName(b, &buf));
     try std.testing.expectEqualStrings("unset", binds.bindName(.{}, &buf));
     const plain = parseBind("25");
-    try std.testing.expect(!plain.ctrl and plain.code == 25);
+    try std.testing.expect(!plain.ctrl and plain.code == .p);
     // malformed input degrades to unbound, never crashes
-    try std.testing.expect(parseBind("ctrl+banana").code == 0);
-    try std.testing.expect(parseBind("").code == 0);
+    try std.testing.expect(parseBind("ctrl+banana").code == .none);
+    try std.testing.expect(parseBind("").code == .none);
 }
 
 test "the thumbnail setting, and the switch it replaced" {

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const binds = @import("../binds.zig");
+const legacy_keys = @import("legacy_keys.zig");
 const Action = binds.Action;
 const n_actions = binds.n_actions;
 const Bind = binds.Bind;
@@ -177,7 +178,7 @@ fn formatBind(b: Bind, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "{s}{s}{d}", .{
         if (b.ctrl) "ctrl+" else "",
         if (b.shift) "shift+" else "",
-        b.code,
+        legacy_keys.number(b.code) orelse 0,
     }) catch unreachable;
 }
 

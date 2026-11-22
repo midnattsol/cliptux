@@ -14,19 +14,12 @@ pub const KeyCommand = enum { none, close, next, prev, activate };
 /// focus, Space/Enter activate, Esc (or Q) closes.
 pub fn keyCommand(k: window.Key) KeyCommand {
     return switch (k.code) {
-        window.KEY_ESC => .close,
-        window.KEY_TAB => if (k.shift) .prev else .next,
-        window.KEY_DOWN, window.KEY_RIGHT => .next,
-        window.KEY_UP, window.KEY_LEFT => .prev,
-        window.KEY_SPACE, window.KEY_ENTER, window.KEY_KPENTER => .activate,
-        else => if (!k.ctrl and (k.keysym == 'q' or k.keysym == 'Q')) .close else .none,
-    };
-}
-
-pub fn isModifier(code: u32) bool {
-    return switch (code) {
-        29, 97, 42, 54, 56, 100, 125, 126 => true, // ctrl/shift/alt/super
-        else => false,
+        .escape => .close,
+        .tab => if (k.shift) .prev else .next,
+        .down, .right => .next,
+        .up, .left => .prev,
+        .space, .enter, .kp_enter => .activate,
+        else => if (!k.ctrl and (k.char == 'q' or k.char == 'Q')) .close else .none,
     };
 }
 
@@ -89,16 +82,17 @@ test "tab order wraps and skips the close button" {
 test "settings key commands" {
     const t = std.testing;
     const K = struct {
-        fn k(code: u32, shift: bool, keysym: u32) window.Key {
-            return .{ .code = code, .pressed = true, .ctrl = false, .shift = shift, .keysym = keysym };
+        fn k(code: window.KeyCode, shift: bool, char: u21) window.Key {
+            return .{ .code = code, .pressed = true, .ctrl = false, .shift = shift, .char = char };
         }
     };
-    try t.expectEqual(KeyCommand.next, keyCommand(K.k(window.KEY_TAB, false, 0)));
-    try t.expectEqual(KeyCommand.prev, keyCommand(K.k(window.KEY_TAB, true, 0)));
-    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(window.KEY_SPACE, false, ' ')));
-    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(window.KEY_ENTER, false, 0)));
-    try t.expectEqual(KeyCommand.close, keyCommand(K.k(window.KEY_ESC, false, 0)));
-    // Q closes by keysym, wherever the layout puts it (AZERTY: evdev 30)
-    try t.expectEqual(KeyCommand.close, keyCommand(K.k(30, false, 'q')));
-    try t.expectEqual(KeyCommand.none, keyCommand(K.k(16, false, 'a')));
+    try t.expectEqual(KeyCommand.next, keyCommand(K.k(.tab, false, 0)));
+    try t.expectEqual(KeyCommand.prev, keyCommand(K.k(.tab, true, 0)));
+    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(.space, false, ' ')));
+    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(.enter, false, 0)));
+    try t.expectEqual(KeyCommand.close, keyCommand(K.k(.escape, false, 0)));
+    // Q closes by the layout's character, wherever it puts it (AZERTY:
+    // the key US layouts have A on)
+    try t.expectEqual(KeyCommand.close, keyCommand(K.k(.a, false, 'q')));
+    try t.expectEqual(KeyCommand.none, keyCommand(K.k(.q, false, 'a')));
 }

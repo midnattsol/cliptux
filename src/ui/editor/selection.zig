@@ -7,7 +7,6 @@ const std = @import("std");
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
-const keys = @import("keys.zig");
 const caches = @import("caches.zig");
 const props = @import("props.zig");
 const history = @import("history.zig");
@@ -90,13 +89,13 @@ pub fn bringSelectedToFront(ed: *Editor) !void {
 pub fn arrowKey(ed: *Editor, k: window.Key) !void {
     const step: i32 = if (k.shift) 10 else 1;
     const dx: i32 = switch (k.code) {
-        keys.KEY_LEFT => -step,
-        keys.KEY_RIGHT => step,
+        .left => -step,
+        .right => step,
         else => 0,
     };
     const dy: i32 = switch (k.code) {
-        keys.KEY_UP => -step,
-        keys.KEY_DOWN => step,
+        .up => -step,
+        .down => step,
         else => 0,
     };
     if (ed.selected != null and !k.alt) {

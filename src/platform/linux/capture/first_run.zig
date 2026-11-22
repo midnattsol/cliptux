@@ -93,8 +93,8 @@ const Dialog = struct {
         while (try d.win.nextEventTimeout(0)) |ev| switch (ev) {
             .key => |k| {
                 if (!k.pressed) continue;
-                if (k.code == window.KEY_ESC) return false;
-                if (k.code == window.KEY_ENTER and d.pending == null) {
+                if (k.code == .escape) return false;
+                if (k.code == .enter and d.pending == null) {
                     d.pending = try portal.beginScreenshot(d.gpa, d.conn, false);
                     d.status = "Waiting for the system dialog...";
                 }

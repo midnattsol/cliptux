@@ -160,11 +160,11 @@ fn onDone(w: *Window) !void {
     ti.pending_preedit_len = 0;
 }
 
-/// Queue committed IME text as key-like events (code 0).
+/// Queue committed IME text as key-like events (code none).
 fn queueText(w: *Window, s: []const u8) !void {
     var rest = s;
     while (rest.len > 0) {
-        var key: Key = .{ .code = 0, .pressed = true, .ctrl = false, .shift = false };
+        var key: Key = .{ .code = .none, .pressed = true, .ctrl = false, .shift = false };
         const n = utf8Chunk(rest, key.text_buf.len);
         @memcpy(key.text_buf[0..n], rest[0..n]);
         key.text_len = @intCast(n);
@@ -179,7 +179,7 @@ fn setPreedit(w: *Window, s: []const u8) !void {
     const n = utf8Chunk(s, ti.preedit_buf.len);
     @memcpy(ti.preedit_buf[0..n], s[0..n]);
     ti.preedit_len = n;
-    try w.queue.append(w.alloc, .{ .key = .{ .code = 0, .pressed = false, .ctrl = false, .shift = false, .preedit = true } });
+    try w.queue.append(w.alloc, .{ .key = .{ .code = .none, .pressed = false, .ctrl = false, .shift = false, .preedit = true } });
 }
 
 test "utf8 chunking never splits a character" {
@@ -223,7 +223,7 @@ test "text-input-v3 events become key-like text and preedit" {
     try t.expectEqualStrings("ñ", win.preedit());
     try t.expectEqual(@as(usize, 1), win.queue.items.len);
     const pe = win.queue.items[0].key;
-    try t.expect(pe.preedit and !pe.pressed and pe.code == 0 and pe.text_len == 0);
+    try t.expect(pe.preedit and !pe.pressed and pe.code == .none and pe.text_len == 0);
     win.queue.clearRetainingCapacity();
 
     // commit a long string: split at character boundaries, preedit cleared
@@ -237,7 +237,7 @@ test "text-input-v3 events become key-like text and preedit" {
     var saw_preedit_clear = false;
     for (win.queue.items) |ev| {
         const k = ev.key;
-        try t.expectEqual(@as(u32, 0), k.code);
+        try t.expectEqual(window.KeyCode.none, k.code);
         if (k.preedit) {
             saw_preedit_clear = true;
             continue;

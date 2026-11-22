@@ -252,16 +252,16 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
             };
             t.st.hover = if (t.dragging == null) draw.hit(x, y, &t.st) else t.dragging;
         },
-        .pointer_button => |b| if (b.button == window.BTN_LEFT) {
+        .pointer_button => |b| if (b.button == .left) {
             if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else {
                 t.dragging = null;
                 t.move_from = null;
             }
         },
         .key => |key| if (key.pressed) switch (key.code) {
-            window.KEY_ESC => t.done = true,
-            window.KEY_SPACE => t.togglePlay(),
-            window.KEY_ENTER => t.save(),
+            .escape => t.done = true,
+            .space => t.togglePlay(),
+            .enter => t.save(),
             else => {},
         },
         else => {},

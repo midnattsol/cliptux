@@ -107,11 +107,11 @@ pub fn pickerFrom(self: *Editor, c: u32) void {
 pub fn pickerKey(self: *Editor, k: window.Key) ?bool {
     if (k.ctrl or k.alt) return null;
     switch (k.code) {
-        window.KEY_ESC, window.KEY_ENTER => {
+        .escape, .enter => {
             self.picker.open = false;
             return false;
         },
-        window.KEY_BACKSPACE => {
+        .backspace => {
             if (self.picker.hex_len > 0) self.picker.hex_len -= 1;
             return false;
         },

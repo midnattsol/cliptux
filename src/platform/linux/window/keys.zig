@@ -39,13 +39,13 @@ pub fn translate(w: *Window, code: u32, pressed: bool, use_compose: bool) Key {
     w.ctrl = t.ctrl;
     w.shift = t.shift;
     return .{
-        .code = code,
+        .code = keyboard.evdev.toCode(code),
         .pressed = pressed,
         .ctrl = t.ctrl,
         .shift = t.shift,
         .alt = t.alt,
         .caps = t.caps,
-        .keysym = t.keysym,
+        .char = keyboard.keysymChar(t.keysym),
         .text_buf = t.text_buf,
         .text_len = t.text_len,
     };

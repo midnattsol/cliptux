@@ -101,7 +101,7 @@ pub const App = struct {
             },
             .pointer_motion => |m| self.onMotion(@intFromFloat(frame_mod.Frame.toContent(self.win, m.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, m.y))),
             .pointer_button => |b| {
-                if (b.button != window.BTN_LEFT or !b.pressed) return .keep;
+                if (b.button != .left or !b.pressed) return .keep;
                 return self.onClick(@intFromFloat(frame_mod.Frame.toContent(self.win, b.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, b.y)));
             },
         }
@@ -110,7 +110,7 @@ pub const App = struct {
 
     fn onKey(self: *App, k: window.Key) Next {
         const st = &self.st;
-        if (!k.pressed or k.code == 0) return .keep;
+        if (!k.pressed or k.code == .none) return .keep;
         if (!k.repeat and settings_modes.onKey(&st.modes, k, self.alloc, self.env)) {
             st.dirty = true;
             return .keep;
@@ -136,13 +136,14 @@ pub const App = struct {
     /// becomes that action's binding (Esc cancels).
     fn recordBind(self: *App, action: config.Action, k: window.Key) void {
         const st = &self.st;
-        if (k.code == window.KEY_ESC) {
+        if (k.code == .escape) {
             st.recording = null;
             st.dirty = true;
             return;
         }
-        // ignore bare modifiers; wait for the real key
-        if (focus.isModifier(k.code)) return;
+        // ignore bare modifiers, wait for the real key; keys with no
+        // name (media keys) cannot be bound
+        if (k.code.isModifier() or k.code == .other) return;
         const new_bind = config.Bind{ .code = k.code, .ctrl = k.ctrl, .shift = k.shift };
         // clear any other action using the same combo
         for (&self.cfg.binds, 0..) |*b, i| {

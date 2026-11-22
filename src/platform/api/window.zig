@@ -2,10 +2,9 @@
 //! codes, cursors, how a floating surface is placed, and drag-and-drop
 //! states. A backend's `Window` produces and takes these.
 //!
-//! Keys are described the way Linux does, whatever the platform: the
-//! physical key as an evdev code (linux/input-event-codes.h), the symbol
-//! of the active layout as an X keysym (api/keysyms.zig) and the UTF-8
-//! text it types. A port translates its native key events into these.
+//! A key event names the physical key (api/keys.zig), the character it
+//! stands for in the active layout and the UTF-8 text it types; a
+//! backend translates its native key events into these.
 
 /// Most surfaces one window has (one per monitor for the editor).
 pub const max_surfaces = 8;
@@ -14,9 +13,13 @@ pub const max_outputs = 8;
 
 pub const Rect = struct { x: i32, y: i32, w: i32, h: i32 };
 
+const keys = @import("keys.zig");
+pub const KeyCode = keys.Code;
+pub const Button = keys.Button;
+
 pub const InputEvent = union(enum) {
     pointer_motion: struct { x: f64, y: f64, surface: u8 = 0 },
-    pointer_button: struct { button: u32, pressed: bool, x: f64, y: f64, surface: u8 = 0 },
+    pointer_button: struct { button: Button, pressed: bool, x: f64, y: f64, surface: u8 = 0 },
     /// vertical scroll, positive = down. `value120`: exact wheel notches
     /// (120 per notch) when the device reports them
     pointer_axis: struct { value: f64, value120: ?i32 = null, surface: u8 = 0 },
@@ -29,8 +32,8 @@ pub const InputEvent = union(enum) {
 };
 
 pub const Key = struct {
-    /// evdev code: the physical key; 0 for text from an input method
-    code: u32,
+    /// the physical key; none for text from an input method
+    code: KeyCode,
     pressed: bool,
     ctrl: bool,
     shift: bool,
@@ -39,10 +42,12 @@ pub const Key = struct {
     caps: bool = false,
     /// true for presses synthesized by key repeat
     repeat: bool = false,
-    /// input-method preedit changed; read Window.preedit() (code is 0)
+    /// input-method preedit changed; read Window.preedit() (code is none)
     preedit: bool = false,
-    /// X keysym for the active layout; 0 when unknown
-    keysym: u32 = 0,
+    /// the character the key stands for in the active layout, with Shift
+    /// and Caps Lock applied but not Ctrl (Ctrl+Q has 'q'); 0 for keys
+    /// that are no character (Enter, arrows, dead keys) or when unknown
+    char: u21 = 0,
     /// UTF-8 text the key produces in the active layout (after dead keys
     /// and compose); empty for keys that type nothing or with Ctrl held
     text_buf: [16]u8 = @splat(0),
@@ -52,27 +57,6 @@ pub const Key = struct {
         return self.text_buf[0..self.text_len];
     }
 };
-
-pub const BTN_LEFT: u32 = 0x110;
-pub const BTN_RIGHT: u32 = 0x111;
-pub const BTN_MIDDLE: u32 = 0x112;
-
-// evdev key codes (linux/input-event-codes.h)
-pub const KEY_ESC: u32 = 1;
-pub const KEY_ENTER: u32 = 28;
-pub const KEY_BACKSPACE: u32 = 14;
-pub const KEY_TAB: u32 = 15;
-pub const KEY_SPACE: u32 = 57;
-pub const KEY_DELETE: u32 = 111;
-pub const KEY_LEFTCTRL: u32 = 29;
-pub const KEY_RIGHTCTRL: u32 = 97;
-pub const KEY_LEFTSHIFT: u32 = 42;
-pub const KEY_RIGHTSHIFT: u32 = 54;
-pub const KEY_UP: u32 = 103;
-pub const KEY_LEFT: u32 = 105;
-pub const KEY_RIGHT: u32 = 106;
-pub const KEY_DOWN: u32 = 108;
-pub const KEY_KPENTER: u32 = 96;
 
 pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
 
@@ -148,6 +132,10 @@ pub const Dropped = struct {
     mime: []const u8,
     data: []u8,
 };
+
+test {
+    _ = keys;
+}
 
 test "layer anchors and keyboard use wlr-layer-shell's values" {
     const std = @import("std");

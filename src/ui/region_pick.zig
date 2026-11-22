@@ -210,8 +210,8 @@ pub const Picker = struct {
 
     /// A press or release: the result once the picker is done.
     fn onButton(self: *Picker, b: anytype) ?Result {
-        if (b.button == window.BTN_RIGHT) return if (b.pressed) .cancelled else null;
-        if (b.button != window.BTN_LEFT) return null;
+        if (b.button == .right) return if (b.pressed) .cancelled else null;
+        if (b.button != .left) return null;
         switch (self.kind) {
             .window => if (b.pressed) {
                 self.onMotion(b.surface, b.x, b.y);
@@ -237,8 +237,8 @@ pub const Picker = struct {
 
     fn onKey(self: *const Picker, k: window.Key) ?Result {
         if (!k.pressed) return null;
-        if (k.code == window.KEY_ESC) return .cancelled;
-        if (k.code == window.KEY_ENTER or k.code == window.KEY_KPENTER) if (self.sel) |s| if (self.kind == .region) return .{ .region = s };
+        if (k.code == .escape) return .cancelled;
+        if (k.code == .enter or k.code == .kp_enter) if (self.sel) |s| if (self.kind == .region) return .{ .region = s };
         return null;
     }
 

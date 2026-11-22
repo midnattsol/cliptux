@@ -141,7 +141,7 @@ pub const Control = struct {
                     if (h != self.hover) self.dirty = true;
                     self.hover = h;
                 },
-                .pointer_button => |b| if (b.button == window.BTN_LEFT and !b.pressed) {
+                .pointer_button => |b| if (b.button == .left and !b.pressed) {
                     clicked = draw.hit(b.x / self.scale(), b.y / self.scale(), self.state.mode);
                     if (clicked == null and self.state.mode == .countdown) clicked = .skip;
                 },
