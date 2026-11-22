@@ -28,7 +28,7 @@ const dialog = @import("shot/dialog.zig");
 const next = @import("shot/next.zig");
 const winrects = @import("../platform/linux/capture/winrects.zig");
 const screencast = @import("../platform/linux/capture/screencast.zig").screencast;
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const editor_mod = @import("../ui/editor.zig");
 const Env = env_mod.Env;
 

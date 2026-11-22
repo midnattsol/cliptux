@@ -16,7 +16,7 @@
 //! Open the window with .transparent = true at outer(w, h).
 
 const std = @import("std");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const render = @import("../gfx/render.zig");
 const effects = @import("../gfx/effects.zig");
 const shapes = @import("shapes.zig");

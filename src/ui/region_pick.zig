@@ -14,7 +14,7 @@ const geom = @import("../app/modes/geom.zig");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const view_mod = @import("view.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const Rect = geom.Rect;
 const View = view_mod.View;
 

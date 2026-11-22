@@ -9,7 +9,7 @@ const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
 const portal = @import("../../platform/linux/portal.zig");
 const sys = @import("../../platform/api.zig").sys;
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const save = @import("save.zig");
 
 const Env = env_mod.Env;

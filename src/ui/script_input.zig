@@ -2,7 +2,7 @@
 //! names like "ctrl+shift+s" and "x,y" points.
 
 const std = @import("std");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const Point = @import("shapes.zig").Point;
 
 const KEY_TAB = 15;

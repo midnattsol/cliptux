@@ -8,11 +8,10 @@
 const std = @import("std");
 const env_mod = @import("env.zig");
 const sys = @import("../platform/api.zig").sys;
-const wl = @import("../platform/linux/wayland.zig");
 const portal = @import("../platform/linux/portal.zig");
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const fui = @import("../ui/floatui.zig");
 const theme = @import("../ui/theme.zig");
 const icons = @import("../ui/icons.zig");
@@ -39,12 +38,12 @@ pub fn run(gpa: std.mem.Allocator, env: Env, title: []const u8, body: []const u8
     const h: u32 = card_h + 2 * pad;
     if (win.hasLayerShell()) {
         try win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = w, .height = h, .layer = .{
-            .layer = wl.zwlr_layer_shell_v1.layer_overlay,
-            .anchor = wl.zwlr_layer_surface_v1.anchor_bottom,
+            .layer = .overlay,
+            .anchor = .{ .bottom = true },
             .width = w,
             .height = h,
             .margin = .{ 0, 0, 24, 0 },
-            .keyboard = wl.zwlr_layer_surface_v1.keyboard_none,
+            .keyboard = .none,
         } });
     } else try win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = w, .height = h });
     win.setCursor(.arrow) catch {};

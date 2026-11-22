@@ -131,18 +131,18 @@ fn createLayer(w: *Window, s: *Surface, l: Layer, output_id: u32) !void {
     const L = wl.zwlr_layer_surface_v1;
     s.layer_surf = c.newId();
     try c.request(w.globals.layer_shell, wl.zwlr_layer_shell_v1.get_layer_surface, &.{
-        .{ .new_id = s.layer_surf }, .{ .object = s.wl_surface }, .{ .object = output_id },
-        .{ .uint = l.layer },        .{ .string = l.namespace },
+        .{ .new_id = s.layer_surf },       .{ .object = s.wl_surface }, .{ .object = output_id },
+        .{ .uint = @backingInt(l.layer) }, .{ .string = l.namespace },
     });
     try c.request(s.layer_surf, L.set_size, &.{ .{ .uint = l.width }, .{ .uint = l.height } });
-    try c.request(s.layer_surf, L.set_anchor, &.{.{ .uint = l.anchor }});
+    try c.request(s.layer_surf, L.set_anchor, &.{.{ .uint = @bitCast(l.anchor) }});
     try c.request(s.layer_surf, L.set_margin, &.{
         .{ .int = l.margin[0] }, .{ .int = l.margin[1] }, .{ .int = l.margin[2] }, .{ .int = l.margin[3] },
     });
     try c.request(s.layer_surf, L.set_exclusive_zone, &.{.{ .int = 0 }});
     // on-demand focus is v4; before it the only choice that does
     // not grab every key press is none
-    var kb = l.keyboard;
+    var kb: u32 = @backingInt(l.keyboard);
     if (kb == L.keyboard_on_demand and w.globals.layer_shell_version < 4) kb = L.keyboard_none;
     try c.request(s.layer_surf, L.set_keyboard_interactivity, &.{.{ .uint = kb }});
     s.layer_kb = kb;

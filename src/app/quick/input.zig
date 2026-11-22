@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 

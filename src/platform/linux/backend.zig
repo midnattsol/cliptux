@@ -4,6 +4,7 @@
 //! desktops happen in here.
 
 pub const sys = @import("sys.zig");
+pub const window = @import("window.zig");
 pub const libs = @import("libs.zig");
 pub const fonts = @import("fonts.zig");
 /// Tesseract (portable code over api.libs; another backend may pick
@@ -14,6 +15,7 @@ pub const ocr = @import("../../ocr/tesseract.zig");
 comptime {
     _ = sys;
     _ = libs;
+    _ = window;
     _ = fonts;
     _ = ocr;
 }

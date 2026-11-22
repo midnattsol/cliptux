@@ -2,7 +2,7 @@
 //! handlers, and tracks the pointer's surface and held modifiers.
 
 const editor = @import("../editor.zig");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const ui = @import("../editor_ui.zig");
 const tall_view = @import("../tall_view.zig");
 const keys = @import("keys.zig");

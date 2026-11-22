@@ -5,9 +5,8 @@
 //! clipboard, like the editor after Copy.
 
 const std = @import("std");
-const wl = @import("../../platform/linux/wayland.zig");
 const sys = @import("../../platform/api.zig").sys;
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 
 /// Wait at most this long for the focus.
 const focus_ms = 1500;
@@ -33,7 +32,7 @@ pub fn copyPng(win: *window.Window, data: []u8) !void {
     const opts: window.Window.OpenOptions = .{ .fullscreen = false, .transparent = true, .width = 4, .height = 4, .layer = .{
         .width = 4,
         .height = 4,
-        .keyboard = wl.zwlr_layer_surface_v1.keyboard_exclusive,
+        .keyboard = .exclusive,
         .namespace = "shotlet-copy",
     } };
     try win.open("shotlet:copy", opts);

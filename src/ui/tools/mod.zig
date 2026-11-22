@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const config = @import("../../app/config.zig");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const shapes = @import("../shapes.zig");
 const doc_mod = @import("../doc.zig");
 const editor_mod = @import("../editor.zig");

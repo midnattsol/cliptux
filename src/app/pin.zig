@@ -19,12 +19,11 @@ const env_mod = @import("env.zig");
 const gnome = @import("../platform/linux/gnome.zig");
 const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
-const wl = @import("../platform/linux/wayland.zig");
 const png = @import("../gfx/png.zig");
 const resample = @import("../gfx/resample.zig");
 const text = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const fui = @import("../ui/floatui.zig");
 const Env = env_mod.Env;
 
@@ -138,8 +137,8 @@ const Pin = struct {
         const title = p.placeAt(&title_buf);
         if (p.layer) {
             try win.open(title, .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh, .layer = .{
-                .layer = wl.zwlr_layer_shell_v1.layer_top,
-                .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
+                .layer = .top,
+                .anchor = .{ .top = true, .left = true },
                 .width = p.lw,
                 .height = p.lh,
                 .margin = p.margin,

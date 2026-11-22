@@ -2,7 +2,7 @@
 //! take focus, the Tab order, and what a key press means.
 
 const std = @import("std");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const model = @import("model.zig");
 
 const Hit = model.Hit;

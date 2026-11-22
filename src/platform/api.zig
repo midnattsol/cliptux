@@ -28,6 +28,10 @@ comptime {
 /// Clocks, files, directories, pipes and local sockets.
 pub const sys = backend.sys;
 
+/// Windows: surfaces, input, cursors, outputs, clipboard and drag and
+/// drop (`Window`), with the neutral types of api/window.zig.
+pub const window = backend.window;
+
 /// Font discovery: the UI faces and a face for a codepoint (api/fonts.zig).
 pub const fonts = backend.fonts;
 

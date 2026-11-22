@@ -15,14 +15,13 @@
 //! screen. With layer shell it is an overlay in the top-right corner.
 
 const std = @import("std");
-const wl = @import("../platform/linux/wayland.zig");
 const sys = @import("../platform/api.zig").sys;
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
 const fui = @import("floatui.zig");
 const theme = @import("theme.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const Rect = @import("../app/modes/geom.zig").Rect;
 
 pub const title = "shotlet:scroll";
@@ -97,11 +96,11 @@ pub const Hud = struct {
 
     pub fn open(win: *window.Window, th: theme.Theme) !Hud {
         try win.open(title, .{ .fullscreen = false, .transparent = true, .width = width, .height = height, .layer = .{
-            .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_right,
+            .anchor = .{ .top = true, .right = true },
             .width = width,
             .height = height,
             .margin = .{ 24, 24, 0, 0 },
-            .keyboard = wl.zwlr_layer_surface_v1.keyboard_on_demand,
+            .keyboard = .on_demand,
             .namespace = "shotlet-scroll",
         } });
         win.setCursor(.arrow) catch {};

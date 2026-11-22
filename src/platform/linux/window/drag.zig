@@ -10,26 +10,8 @@ const transfer = @import("../../../ui/transfer.zig");
 const Window = window.Window;
 
 /// Progress of a drag started with startDrag().
-pub const DragState = enum {
-    none,
-    /// the pointer is carrying the data
-    active,
-    /// dropped on a target that accepted; it may still be reading
-    dropped,
-    /// the target took the data (copy done)
-    finished,
-    /// nobody accepted it, or it was cancelled
-    cancelled,
-};
-
-/// A premultiplied ARGB image to show under the pointer while dragging.
-pub const DragIcon = struct {
-    pixels: []const u32,
-    width: u32,
-    height: u32,
-    /// buffer pixels per logical pixel
-    scale: i32 = 1,
-};
+pub const DragState = window.DragState;
+pub const DragIcon = window.DragIcon;
 
 pub const Drag = struct {
     /// wl_data_source of the drag; 0 when none

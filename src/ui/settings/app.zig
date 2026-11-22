@@ -3,7 +3,7 @@
 //! input, and redrawing when something changed.
 
 const std = @import("std");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
 const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");

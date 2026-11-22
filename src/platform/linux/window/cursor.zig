@@ -9,7 +9,7 @@ const window = @import("../window.zig");
 
 const Window = window.Window;
 
-pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
+pub const Cursor = window.Cursor;
 
 const cursor_size = 27;
 

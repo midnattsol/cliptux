@@ -15,7 +15,7 @@ const gsettings = @import("../platform/linux/gnome/gsettings.zig");
 const mode = @import("../app/modes/mode.zig");
 const msettings = @import("../app/modes/settings.zig");
 const S = @import("settings.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 
 pub const Hit = union(enum) {
     after,

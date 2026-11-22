@@ -6,12 +6,11 @@
 //! the compositor to show that, so it is never in the picture.
 
 const std = @import("std");
-const wl = @import("../platform/linux/wayland.zig");
 const sys = @import("../platform/api.zig").sys;
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const fui = @import("floatui.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 
 const size = 132;
 
@@ -51,7 +50,7 @@ pub fn run(win: *window.Window, seconds: u8) !bool {
     try win.open("shotlet:timer", .{ .fullscreen = false, .transparent = true, .width = size, .height = size, .layer = .{
         .width = size,
         .height = size,
-        .keyboard = wl.zwlr_layer_surface_v1.keyboard_none,
+        .keyboard = .none,
         .namespace = "shotlet-timer",
     } });
     const end = sys.monoMs() + @as(i64, seconds) * 1000;

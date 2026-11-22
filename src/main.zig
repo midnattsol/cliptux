@@ -173,7 +173,7 @@ test {
     _ = @import("gfx/render.zig");
     _ = @import("platform/linux/wayland.zig");
     _ = @import("platform/linux/keyboard.zig");
-    _ = @import("platform/linux/window.zig");
+    _ = @import("platform/api.zig").window;
     _ = @import("ui/settings.zig");
     _ = @import("ui/frame.zig");
     _ = @import("ui/barkit.zig");

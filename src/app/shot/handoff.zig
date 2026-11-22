@@ -10,7 +10,7 @@ const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
 const sys = @import("../../platform/api.zig").sys;
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const editor_mod = @import("../../ui/editor.zig");
 
 const Env = env_mod.Env;

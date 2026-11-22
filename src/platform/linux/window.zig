@@ -109,78 +109,39 @@ comptime {
     _ = @import("window/dump.zig");
 }
 
-pub const InputEvent = union(enum) {
-    pointer_motion: struct { x: f64, y: f64, surface: u8 = 0 },
-    pointer_button: struct { button: u32, pressed: bool, x: f64, y: f64, surface: u8 = 0 },
-    /// vertical scroll, positive = down. `value120`: exact wheel notches
-    /// (120 per notch, wl_pointer v8) when the device reports them
-    pointer_axis: struct { value: f64, value120: ?i32 = null, surface: u8 = 0 },
-    key: Key,
-    /// buffer was (re)created at this pixel size; caller must redraw.
-    /// w == h == 0: the surface is gone (output unplugged)
-    resize: struct { w: u32, h: u32, surface: u8 = 0 },
-    close,
-    frame_done,
-};
-
-pub const Key = struct {
-    /// evdev code: the physical key; 0 for IME text (see the top of file)
-    code: u32,
-    pressed: bool,
-    ctrl: bool,
-    shift: bool,
-    alt: bool = false,
-    /// Caps Lock is on (already applied to text)
-    caps: bool = false,
-    /// true for presses synthesized by key repeat
-    repeat: bool = false,
-    /// IME preedit changed; read Window.preedit() (code is 0)
-    preedit: bool = false,
-    /// xkb keysym for the active layout; 0 when unknown
-    keysym: u32 = 0,
-    /// UTF-8 text the key produces in the active layout (after dead keys
-    /// and compose); empty for keys that type nothing or with Ctrl held
-    text_buf: [16]u8 = @splat(0),
-    text_len: u8 = 0,
-
-    pub fn text(self: *const Key) []const u8 {
-        return self.text_buf[0..self.text_len];
-    }
-};
-
-pub const BTN_LEFT: u32 = 0x110;
-pub const BTN_RIGHT: u32 = 0x111;
-pub const BTN_MIDDLE: u32 = 0x112;
-
-// evdev key codes (linux/input-event-codes.h)
-pub const KEY_ESC: u32 = 1;
-pub const KEY_ENTER: u32 = 28;
-pub const KEY_BACKSPACE: u32 = 14;
-pub const KEY_TAB: u32 = 15;
-pub const KEY_SPACE: u32 = 57;
-pub const KEY_DELETE: u32 = 111;
-pub const KEY_LEFTCTRL: u32 = 29;
-pub const KEY_RIGHTCTRL: u32 = 97;
-pub const KEY_LEFTSHIFT: u32 = 42;
-pub const KEY_RIGHTSHIFT: u32 = 54;
-pub const KEY_UP: u32 = 103;
-pub const KEY_LEFT: u32 = 105;
-pub const KEY_RIGHT: u32 = 106;
-pub const KEY_DOWN: u32 = 108;
-pub const KEY_KPENTER: u32 = 96;
-
-pub const max_surfaces = 8;
-pub const max_outputs = 8;
-
-pub const Rect = struct { x: i32, y: i32, w: i32, h: i32 };
+// the seam's neutral types (src/platform/api/window.zig)
+const types = @import("../api/window.zig");
+pub const InputEvent = types.InputEvent;
+pub const Key = types.Key;
+pub const BTN_LEFT = types.BTN_LEFT;
+pub const BTN_RIGHT = types.BTN_RIGHT;
+pub const BTN_MIDDLE = types.BTN_MIDDLE;
+pub const KEY_ESC = types.KEY_ESC;
+pub const KEY_ENTER = types.KEY_ENTER;
+pub const KEY_BACKSPACE = types.KEY_BACKSPACE;
+pub const KEY_TAB = types.KEY_TAB;
+pub const KEY_SPACE = types.KEY_SPACE;
+pub const KEY_DELETE = types.KEY_DELETE;
+pub const KEY_LEFTCTRL = types.KEY_LEFTCTRL;
+pub const KEY_RIGHTCTRL = types.KEY_RIGHTCTRL;
+pub const KEY_LEFTSHIFT = types.KEY_LEFTSHIFT;
+pub const KEY_RIGHTSHIFT = types.KEY_RIGHTSHIFT;
+pub const KEY_UP = types.KEY_UP;
+pub const KEY_LEFT = types.KEY_LEFT;
+pub const KEY_RIGHT = types.KEY_RIGHT;
+pub const KEY_DOWN = types.KEY_DOWN;
+pub const KEY_KPENTER = types.KEY_KPENTER;
+pub const max_surfaces = types.max_surfaces;
+pub const max_outputs = types.max_outputs;
+pub const Rect = types.Rect;
+pub const Layer = types.Layer;
+pub const Cursor = types.Cursor;
+pub const Dropped = types.Dropped;
+pub const DragState = types.DragState;
+pub const DragIcon = types.DragIcon;
 
 pub const Output = output.Output;
 pub const Surface = surface.Surface;
-pub const Layer = lifecycle.Layer;
-pub const Cursor = cursor.Cursor;
-pub const Dropped = data_device.Dropped;
-pub const DragState = drag.DragState;
-pub const DragIcon = drag.DragIcon;
 
 pub const bufferSize = scale_mod.bufferSize;
 pub const outputBufferSize = scale_mod.outputBufferSize;

@@ -11,10 +11,7 @@ const transfer = @import("../../../ui/transfer.zig");
 const Window = window.Window;
 
 /// What a drop onto one of our surfaces delivered (Window.accept_mimes).
-pub const Dropped = struct {
-    mime: []const u8,
-    data: []u8,
-};
+pub const Dropped = window.Dropped;
 
 /// A wl_data_offer and which plain-text types it carries (best first).
 const Offer = struct {

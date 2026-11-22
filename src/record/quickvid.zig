@@ -13,10 +13,9 @@ const history = @import("../app/history.zig");
 const keep = @import("../app/keep.zig");
 const portal = @import("../platform/linux/portal.zig");
 const sys = @import("../platform/api.zig").sys;
-const wl = @import("../platform/linux/wayland.zig");
 const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const fui = @import("../ui/floatui.zig");
 const card = @import("../ui/recui/vidcard.zig");
 const keepvid = @import("keepvid.zig");
@@ -221,11 +220,11 @@ const Quick = struct {
         const sz = card.windowSize();
         if (self.win.hasLayerShell()) {
             try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
-                .anchor = wl.zwlr_layer_surface_v1.anchor_bottom | wl.zwlr_layer_surface_v1.anchor_left,
+                .anchor = .{ .bottom = true, .left = true },
                 .width = sz[0],
                 .height = sz[1],
                 .margin = .{ 0, 0, 8, 8 },
-                .keyboard = wl.zwlr_layer_surface_v1.keyboard_none,
+                .keyboard = .none,
                 .namespace = "shotlet-quick-video",
             } });
         } else {

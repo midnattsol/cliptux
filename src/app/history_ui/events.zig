@@ -4,7 +4,7 @@
 //! history asks first; any other click or key backs out of it.
 
 const std = @import("std");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const layout = @import("layout.zig");
 const Panel = @import("panel.zig").Panel;
 

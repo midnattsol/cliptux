@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const capture = @import("../app/capture.zig");
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const png = @import("../gfx/png.zig");
 const config = @import("../app/config.zig");
 const shapes_mod = @import("shapes.zig");

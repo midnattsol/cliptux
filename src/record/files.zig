@@ -6,7 +6,7 @@ const env_mod = @import("../app/env.zig");
 const portal = @import("../platform/linux/portal.zig");
 const dbus = @import("../platform/linux/dbus.zig");
 const sys = @import("../platform/api.zig").sys;
-const window = @import("../platform/linux/window.zig");
+const window = @import("../platform/api.zig").window;
 const settings_mod = @import("settings.zig");
 
 /// Larger files go on the clipboard as a file reference only.

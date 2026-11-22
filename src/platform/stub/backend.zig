@@ -5,6 +5,7 @@
 //! selects it only with -Dplatform-stub. A port starts by copying it.
 
 pub const sys = @import("sys.zig");
+pub const window = @import("window.zig");
 pub const libs = @import("libs.zig");
 pub const fonts = @import("fonts.zig");
 pub const ocr = @import("ocr.zig");

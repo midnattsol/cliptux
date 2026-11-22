@@ -9,7 +9,7 @@ const fui = @import("../floatui.zig");
 const render = @import("../../gfx/render.zig");
 const text = @import("../../gfx/text.zig");
 const icons = @import("../icons.zig");
-const Rect = @import("../../platform/linux/window.zig").Rect;
+const Rect = @import("../../platform/api.zig").window.Rect;
 
 pub const Mode = enum { countdown, recording };
 pub const Button = enum { pause, stop, discard, cancel, skip };

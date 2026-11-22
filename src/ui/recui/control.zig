@@ -17,8 +17,7 @@ const env_mod = @import("../../app/env.zig");
 const gnome = @import("../../platform/linux/gnome.zig");
 const dbus = @import("../../platform/linux/dbus.zig");
 const sys = @import("../../platform/api.zig").sys;
-const wl = @import("../../platform/linux/wayland.zig");
-const window = @import("../../platform/linux/window.zig");
+const window = @import("../../platform/api.zig").window;
 const fui = @import("../floatui.zig");
 const text = @import("../../gfx/text.zig");
 const region = @import("../../record/region.zig");
@@ -57,11 +56,11 @@ pub const Control = struct {
         const title = std.fmt.bufPrint(&tbuf, "shotlet:rec:{d}:{d}", .{ c.pos[0], c.pos[1] }) catch "shotlet:rec";
         if (c.layer) {
             try c.win.open(title, .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
-                .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
+                .anchor = .{ .top = true, .left = true },
                 .width = sz[0],
                 .height = sz[1],
                 .margin = .{ c.pos[1] - mon.y, 0, 0, c.pos[0] - mon.x },
-                .keyboard = wl.zwlr_layer_surface_v1.keyboard_none,
+                .keyboard = .none,
                 .namespace = "shotlet-rec",
             } });
         } else {

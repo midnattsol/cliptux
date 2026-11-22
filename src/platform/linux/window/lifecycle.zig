@@ -22,18 +22,7 @@ const max_outputs = window.max_outputs;
 const max_surfaces = window.max_surfaces;
 
 /// A wlr-layer-shell placement (see OpenOptions.layer).
-pub const Layer = struct {
-    layer: u32 = wl.zwlr_layer_shell_v1.layer_overlay,
-    /// zwlr_layer_surface_v1.anchor_* bits
-    anchor: u32 = 0,
-    /// logical size; 0 along an axis anchored on both edges stretches
-    width: u32 = 0,
-    height: u32 = 0,
-    /// top, right, bottom, left (logical pixels)
-    margin: [4]i32 = .{ 0, 0, 0, 0 },
-    keyboard: u32 = wl.zwlr_layer_surface_v1.keyboard_on_demand,
-    namespace: []const u8 = "shotlet",
-};
+pub const Layer = window.Layer;
 
 pub const OpenOptions = struct {
     fullscreen: bool = true,

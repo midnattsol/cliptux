@@ -12,7 +12,7 @@ const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
-    const window = @import("../platform/linux/window.zig");
+    const window = @import("../platform/api.zig").window;
     var img = imgload.loadFile(gpa, path) catch |err| {
         std.log.err("edit: cannot open {s}: {t}", .{ path, err });
         return err;
