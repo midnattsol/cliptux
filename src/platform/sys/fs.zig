@@ -68,6 +68,25 @@ pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) ![]
     return list.toOwnedSlice(alloc);
 }
 
+/// Read a small file into `buf`, with no allocator; error.FileTooBig
+/// when it does not fit.
+pub fn readFileBuf(path: []const u8, buf: []u8) ![]u8 {
+    const fd = try openRead(path);
+    defer io.close(fd);
+    var len: usize = 0;
+    while (true) {
+        if (len == buf.len) {
+            var probe: [1]u8 = undefined;
+            if (try io.read(fd, &probe) != 0) return error.FileTooBig;
+            break;
+        }
+        const n = try io.read(fd, buf[len..]);
+        if (n == 0) break;
+        len += n;
+    }
+    return buf[0..len];
+}
+
 pub fn unlink(path: []const u8) !void {
     var buf: [common.path_max]u8 = undefined;
     const p = try pathZ(&buf, path);

@@ -33,9 +33,10 @@ pub fn handOff(runtime_dir: []const u8) void {
 pub fn takeHandOff(runtime_dir: []const u8) void {
     var buf: [512]u8 = undefined;
     const path = notePath(&buf, runtime_dir) catch return;
+    // no allocator: a FixedBufferAllocator smaller than an ArrayList's
+    // first growth (a cache line, 128 bytes on x86_64) failed every read
     var mem: [64]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&mem);
-    const data = sys.readFileAlloc(fba.allocator(), path, 32) catch return;
+    const data = sys.readFileBuf(path, &mem) catch return;
     sys.unlink(path) catch {};
     if (parseNote(data, sys.monoMs())) text_capture = true;
 }
@@ -45,6 +46,23 @@ fn parseNote(data: []const u8, now: i64) bool {
     if (!std.mem.eql(u8, it.next() orelse return false, "text")) return false;
     const t = std.fmt.parseInt(i64, it.next() orelse return false, 10) catch return false;
     return now - t >= 0 and now - t < 10_000;
+}
+
+test "a text capture's note reaches the shotlet the shell starts" {
+    const gpa = std.testing.allocator;
+    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
+    defer gpa.free(dir);
+    defer sys.removeTree(dir);
+    defer text_capture = false;
+    text_capture = true;
+    handOff(dir);
+    text_capture = false;
+    takeHandOff(dir);
+    try std.testing.expect(text_capture);
+    // taken once: the next shell capture is a plain one
+    text_capture = false;
+    takeHandOff(dir);
+    try std.testing.expect(!text_capture);
 }
 
 test "a capture note is honoured only while fresh" {

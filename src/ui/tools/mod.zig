@@ -73,6 +73,7 @@ pub const State = struct {
 /// Once, when the editor first shows: how it was started.
 pub fn start(ed: *Editor) void {
     ed.tools.text_capture = launch.text_capture;
+    if (ed.tools.text_capture) std.log.info("text capture: the selected area's text goes to the clipboard", .{});
     if (launch.select_all) ed.doc.sel = ed.doc.imageRect();
     // images dropped on the editor open in it
     ed.win.accept_mimes = &open.drop_mimes;

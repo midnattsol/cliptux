@@ -53,6 +53,7 @@ pub const createExclusive = fs.createExclusive;
 pub const writeFileExclusive = fs.writeFileExclusive;
 pub const writeFile = fs.writeFile;
 pub const readFileAlloc = fs.readFileAlloc;
+pub const readFileBuf = fs.readFileBuf;
 pub const unlink = fs.unlink;
 pub const rename = fs.rename;
 pub const mtimeSec = fs.mtimeSec;

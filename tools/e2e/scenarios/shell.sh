@@ -198,6 +198,14 @@ scenario_shell_terminal() {
     check "  ... with no consent dialog" no_dialog
     sleep 0.8
     keys esc
+    # `shotlet text`: the extension's shotlet reads text, not an image
+    sleep 1.2
+    run_shotlet text text
+    check "shotlet text hands the capture to the extension" wait_exit 5
+    check "  ... whose shotlet is a text capture" shell_wait 10 "text capture: the selected area" 1
+    check "  ... in its editor" shell_wait 10 "startup: capture=" 2
+    sleep 0.8
+    keys esc
     # an older or broken integration: the portal path as before
     ext_gsettings set shotlet-path "'/nonexistent/shotlet'"
     sleep 1.2
