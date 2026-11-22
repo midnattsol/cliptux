@@ -46,6 +46,7 @@ pub const Glyph = types.Glyph;
 
 pub const hasScript = common.hasScript;
 pub const shape = shaping.shape;
+pub const substitute = shaping.substitute;
 
 // Reference every submodule so their tests run (a comptime block, unlike
 // `test {}`, does not count as a test itself).

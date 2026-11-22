@@ -7,7 +7,8 @@
 const std = @import("std");
 const linux = std.os.linux;
 
-pub const Query = enum { sans, sans_bold, mono };
+/// The UI faces: the sans-serif family in four weights, and monospace.
+pub const Query = enum { sans, sans_medium, sans_semibold, sans_bold, mono };
 
 pub const Face = struct {
     path: []u8,
@@ -110,6 +111,16 @@ const bold_names = [_][]const u8{
     "Ubuntu-B.ttf",        "Roboto-Bold.ttf",         "OpenSans-Bold.ttf",
     "Arimo-Bold.ttf",      "SourceSans3-Bold.otf",    "FreeSansBold.ttf",
     "Lato-Bold.ttf",       "VeraBd.ttf",
+};
+const medium_names = [_][]const u8{
+    "Inter-Medium.ttf", "Inter-Medium.otf",       "NotoSans-Medium.ttf",
+    "Ubuntu-M.ttf",     "Roboto-Medium.ttf",      "OpenSans-Medium.ttf",
+    "Arimo-Medium.ttf", "SourceSans3-Medium.otf", "Lato-Medium.ttf",
+};
+const semibold_names = [_][]const u8{
+    "Inter-SemiBold.ttf",    "Inter-SemiBold.otf", "NotoSans-SemiBold.ttf",
+    "OpenSans-SemiBold.ttf", "Arimo-SemiBold.ttf", "SourceSans3-Semibold.otf",
+    "Lato-Semibold.ttf",
 };
 const mono_names = [_][]const u8{
     "DejaVuSansMono.ttf",        "NotoSansMono-Regular.ttf", "LiberationMono-Regular.ttf",
@@ -250,6 +261,8 @@ pub const Db = struct {
         if (self.fontconfig()) |fc| {
             const pat: [*:0]const u8 = switch (q) {
                 .sans => ui_families,
+                .sans_medium => ui_families ++ ":medium",
+                .sans_semibold => ui_families ++ ":semibold",
                 .sans_bold => ui_families ++ ":bold",
                 .mono => "monospace",
             };
@@ -263,6 +276,8 @@ pub const Db = struct {
     pub fn scanMatch(self: *Db, q: Query, skip: usize) ?Face {
         const names: []const []const u8 = switch (q) {
             .sans => &sans_names,
+            .sans_medium => &medium_names,
+            .sans_semibold => &semibold_names,
             .sans_bold => &bold_names,
             .mono => &mono_names,
         };
@@ -303,7 +318,8 @@ test "font discovery finds something or nothing, without crashing" {
     const alloc = std.testing.allocator;
     var db = Db.init(alloc);
     defer db.deinit();
-    inline for (.{ Query.sans, Query.sans_bold, Query.mono }) |q| {
+    inline for (@typeInfo(Query).@"enum".field_names) |name| {
+        const q = @field(Query, name);
         if (db.match(q)) |f| {
             defer f.deinit(alloc);
             try std.testing.expect(f.path.len > 0);

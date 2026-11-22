@@ -39,7 +39,7 @@ pub fn drawRange(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, styl
     if (!(size_px > 0 and size_px <= ttf.max_size_px)) return;
     const items = layout.layoutRange(st, size_px, style, s, dir, la, lb) orelse return;
     const primary = st.styleSlot(style);
-    const smear: i32 = if (style == .bold and st.faux_bold) state_mod.fauxBoldOffset(size_px) else 0;
+    const smear: i32 = if (st.fauxBold(style)) state_mod.fauxBoldOffset(size_px) else 0;
     const baseline = @as(f64, @floatFromInt(y)) + st.slots[primary].font.ascentPx(size_px);
     const x0: f64 = @floatFromInt(x);
     const right = @as(f64, @floatFromInt(canvas.w)) + 1024;
@@ -94,7 +94,7 @@ test "text survives invalid utf-8 and odd sizes" {
     const bad = "save\xE2\x82 dir \xFF\xC3";
     draw(&c, 2, 2, 14, 0xFFFFFFFF, bad);
     _ = measure.width(14, bad);
-    for ([_]Style{ .regular, .bold, .mono }) |st| {
+    for ([_]Style{ .regular, .medium, .semibold, .bold, .mono, Style.regular.num() }) |st| {
         drawStyled(&c, -30, -10, 40, 0xFFFFFFFF, st, "Wg漢€");
         drawStyled(&c, 60, 30, 13, 0xFFFFFFFF, st, "edge");
         _ = measure.widthStyled(13, st, "x");

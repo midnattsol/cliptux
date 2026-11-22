@@ -86,6 +86,27 @@ pub fn shape(
     return true;
 }
 
+/// Apply only the GSUB lookups of `features` (for `script`, else the
+/// font's default script) to `buf`: no other substitution, no
+/// positioning. For optional features such as tabular figures ("tnum").
+pub fn substitute(alloc: std.mem.Allocator, t: Tables, script: Script, features: []const *const [4]u8, buf: *std.ArrayList(Glyph)) !void {
+    if (rd16(t.gsub, 0) != 1) return;
+    const gdef = common.Gdef.init(t.gdef);
+    for (buf.items) |*g| g.class = common.glyphClass(gdef, g.gid, g.umark);
+    const n0 = buf.items.len;
+    var ctx: Ctx = .{
+        .alloc = alloc,
+        .buf = buf,
+        .gdef = gdef,
+        .table = t.gsub,
+        .is_gsub = true,
+        .rtl = false,
+        .budget = @intCast(@min(4_000_000, 2000 + n0 * 400)),
+        .limit = @min(n0 * 8 + 64, max_growth + n0),
+    };
+    try runStages(&ctx, script, &.{.{ .features = features }});
+}
+
 /// Nominal advances (none for ignorables) and no offsets or attachments.
 fn resetPositions(items: []Glyph, advance_ctx: anytype, comptime advance: fn (@TypeOf(advance_ctx), u16) i32) void {
     for (items) |*g| {
