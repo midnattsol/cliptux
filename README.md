@@ -112,6 +112,16 @@ shotlet record                        # record an area or a screen (again: stop)
 shotlet record --stop | --pause | --resume | --discard
 ```
 
+### Command line
+
+`shotlet --help` lists every command by group; `shotlet help COMMAND` (or
+`shotlet COMMAND --help`) shows its usage, options and examples, and
+`man shotlet` has all of it. `install.sh` installs the man page and
+completions for bash, zsh and fish (`shotlet completions bash|zsh|fish`
+prints them; for zsh, `~/.local/share/zsh/site-functions` must be in
+`fpath`). Unknown commands and options are refused with a hint and exit
+status 2; `shotlet --version` prints the version.
+
 ## Capture modes
 
 | Mode | Command | GNOME shortcut |
