@@ -16,7 +16,9 @@ pub const edge = 8;
 pub const hint_h = 52;
 pub const max_cards = 5;
 
-pub const Control = enum { body, close, annotate, pin, copy, save, menu, hint };
+/// `primary` and `secondary`: the two buttons along the bottom, whose
+/// actions depend on the card (pillActions).
+pub const Control = enum { body, close, annotate, pin, primary, secondary, menu, hint };
 
 pub const menu_items = [_]struct { label: []const u8, action: Action }{
     .{ .label = "Copy", .action = .copy },
@@ -27,7 +29,33 @@ pub const menu_items = [_]struct { label: []const u8, action: Action }{
     .{ .label = "Close", .action = .close },
 };
 
-pub const Action = enum { copy, save, save_as, annotate, pin, close };
+pub const Action = enum {
+    copy,
+    save,
+    save_as,
+    annotate,
+    pin,
+    close,
+    show_in_files,
+
+    pub fn label(a: Action) []const u8 {
+        return switch (a) {
+            .copy => "Copy",
+            .save => "Save",
+            .save_as => "Save As...",
+            .annotate => "Annotate",
+            .pin => "Pin to screen",
+            .close => "Close",
+            .show_in_files => "Show in Files",
+        };
+    }
+};
+
+/// The bottom buttons: Save comes first until the capture is saved, then
+/// Copy, with Show in Files beside it.
+pub fn pillActions(saved: bool) [2]Action {
+    return if (saved) .{ .copy, .show_in_files } else .{ .save, .copy };
+}
 
 /// What is under a logical point.
 pub const Hit = struct { card: usize = 0, control: Control, item: u8 = 0 };
@@ -50,8 +78,8 @@ pub fn controlRect(c: Control) Rect {
         .close => .{ .x = 8, .y = 8, .w = 26, .h = 26 },
         .annotate => .{ .x = card_w - 8 - 26 - 6 - 26, .y = 8, .w = 26, .h = 26 },
         .pin => .{ .x = card_w - 8 - 26, .y = 8, .w = 26, .h = 26 },
-        .copy => .{ .x = 8, .y = card_h - 8 - 30, .w = pw, .h = 30 },
-        .save => .{ .x = 8 + pw + 6, .y = card_h - 8 - 30, .w = pw, .h = 30 },
+        .primary => .{ .x = 8, .y = card_h - 8 - 30, .w = pw, .h = 30 },
+        .secondary => .{ .x = 8 + pw + 6, .y = card_h - 8 - 30, .w = pw, .h = 30 },
         else => .{ .x = 0, .y = 0, .w = card_w, .h = card_h },
     };
 }
@@ -75,7 +103,7 @@ pub fn hitTest(x: i32, y: i32, h: i32, n: usize, menus: []const bool, hint: bool
             if (row >= 0 and row < menu_items.len) return .{ .card = i, .control = .menu, .item = @intCast(row) };
             return .{ .card = i, .control = .body };
         }
-        for ([_]Control{ .close, .annotate, .pin, .copy, .save }) |c| {
+        for ([_]Control{ .close, .annotate, .pin, .primary, .secondary }) |c| {
             if (controlRect(c).contains(lx, ly)) return .{ .card = i, .control = c };
         }
         return .{ .card = i, .control = .body };
@@ -94,12 +122,15 @@ test "layout: newest card in the corner, controls where the mockup has them" {
     try t.expectEqual(@as(i32, h - pad - 150), cardRect(0, h).y);
     try t.expect(cardRect(1, h).y < cardRect(0, h).y);
     const none = [_]bool{ false, false };
-    // close top-left, pin top-right, copy and save at the bottom
+    // close top-left, pin top-right, the two buttons at the bottom
     const r0 = cardRect(0, h);
     try t.expectEqual(Control.close, hitTest(r0.x + 12, r0.y + 12, h, 2, &none, false).?.control);
     try t.expectEqual(Control.pin, hitTest(r0.x + card_w - 14, r0.y + 14, h, 2, &none, false).?.control);
-    try t.expectEqual(Control.copy, hitTest(r0.x + 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
-    try t.expectEqual(Control.save, hitTest(r0.x + card_w - 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
+    try t.expectEqual(Control.primary, hitTest(r0.x + 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
+    try t.expectEqual(Control.secondary, hitTest(r0.x + card_w - 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
+    // until saved, Save leads; then Copy and Show in Files
+    try t.expectEqual(Action.save, pillActions(false)[0]);
+    try t.expectEqual(Action.show_in_files, pillActions(true)[1]);
     try t.expectEqual(Control.body, hitTest(r0.x + 120, r0.y + 70, h, 2, &none, false).?.control);
     try t.expectEqual(@as(usize, 1), hitTest(r0.x + 120, cardRect(1, h).y + 70, h, 2, &none, false).?.card);
     // the shadow margin is not a card

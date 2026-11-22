@@ -34,5 +34,5 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = true });
     std.log.info("edit: showing {s} ({d}x{d})", .{ path, cap.image.width, cap.image.height });
-    try shot.editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, null, .{});
+    try shot.editAndFinish(gpa, env, &conn, &cfg, &win, &cap, null, 0, null, .{});
 }

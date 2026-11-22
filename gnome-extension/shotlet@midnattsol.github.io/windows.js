@@ -9,9 +9,15 @@
 //                       the monitor under the pointer, above other windows,
 //                       on every workspace, and the keyboard focus goes
 //                       back to the window that had it when it appeared
-//   shotlet:pin[:...]   a pinned screenshot: above other windows, on every
-//                       workspace (it may take the focus when clicked)
+//   shotlet:pin[:X:Y]  a pinned screenshot: above other windows, on every
+//                       workspace (it may take the focus when clicked);
+//                       with X:Y it first shows there (where the capture was)
 //   shotlet:rec:X:Y     a recording's control, where Shotlet wants it
+//
+// The editor and the recording picker (fullscreen, titled "Shotlet") show
+// a frozen frame of the desktop and fade their own dim in and out: they
+// map and go away without mutter's zoom effects, which would scale that
+// frame over the live desktop (two desktops overlapping for a few frames).
 //
 // Tagged windows are left out of Alt+Tab (both switchers build their lists
 // from Meta.Display.get_tab_list, filtered here): a Wayland client cannot
@@ -30,6 +36,8 @@ const EDGE = 8;
 // a focus change this soon after the thumbnail appears is mutter's
 // focus-on-map, not the person clicking it
 const FOCUS_ON_MAP_MS = 1000;
+// the editor's and the recording picker's title
+const FULLSCREEN_TITLE = 'Shotlet';
 
 export class ShotletWindows {
     constructor() {
@@ -38,6 +46,13 @@ export class ShotletWindows {
         this._idleId = 0;
         this._createdId = global.display.connect('window-created',
             (_display, win) => this._watch(win));
+        // going fullscreen is a size-change effect, and it takes the
+        // skip meant for the map effect: skip the next one again
+        this._quietActors = new Set();
+        this._sizeChangeId = global.window_manager.connect('size-change', (_wm, actor) => {
+            if (this._quietActors.has(actor))
+                Main.wm.skipNextEffect(actor);
+        });
         for (const actor of global.get_window_actors())
             this._watch(actor.meta_window);
 
@@ -56,6 +71,9 @@ export class ShotletWindows {
         this._injections = null;
         global.display.disconnect(this._createdId);
         this._createdId = 0;
+        global.window_manager.disconnect(this._sizeChangeId);
+        this._sizeChangeId = 0;
+        this._quietActors.clear();
         for (const [win, st] of this._windows) {
             for (const id of st.ids)
                 win.disconnect(id);
@@ -107,7 +125,10 @@ export class ShotletWindows {
         }));
         st.ids.push(win.connect('size-changed', () => this._place(win)));
         // mutter places a window when it maps: move it after that
-        st.ids.push(win.connect('shown', () => this._place(win)));
+        st.ids.push(win.connect('shown', () => {
+            this._place(win);
+            st.shown = true;
+        }));
         st.ids.push(win.connect('focus', () => this._onFocus(win)));
         st.ids.push(win.connect('unmanaged', () => this._forget(win)));
         this._apply(win);
@@ -125,32 +146,52 @@ export class ShotletWindows {
     _apply(win) {
         const st = this._windows.get(win);
         const role = roleOf(win);
+        if (st && !role && win.get_wm_class() === APP_ID && win.get_title() === FULLSCREEN_TITLE)
+            this._quiet(win, st);
         if (!st || !role || st.role)
             return;
         st.role = role;
-        // no zoom-in effect for a corner thumbnail
+        // no zoom-in effect: thumbnails and pins fade in by themselves
         const actor = win.get_compositor_private();
-        if (actor && role === 'quick')
+        if (actor && (role === 'quick' || role === 'pin'))
             Main.wm.skipNextEffect(actor);
         win.make_above();
         win.stick();
         this._place(win);
     }
 
+    // No map or destroy effect for a fullscreen editor or picker.
+    _quiet(win, st) {
+        const actor = win.get_compositor_private();
+        if (st.quiet || !actor)
+            return;
+        st.quiet = true;
+        this._quietActors.add(actor);
+        Main.wm.skipNextEffect(actor);
+        st.ids.push(win.connect('unmanaging', () => Main.wm.skipNextEffect(actor)));
+        st.ids.push(win.connect('unmanaged', () => this._quietActors.delete(actor)));
+    }
+
     _place(win) {
         const st = this._windows.get(win);
-        if (!st || (st.role !== 'quick' && st.role !== 'rec'))
+        if (!st || (st.role !== 'quick' && st.role !== 'rec' && !this._placedPin(win, st)))
             return;
         const r = win.get_frame_rect();
         if (r.width === 0 || r.height === 0)
             return;
         const monitors = global.display.get_n_monitors();
         const area = win.get_work_area_for_monitor(Math.min(st.monitor, monitors - 1));
-        // a recording's control: "shotlet:rec:X:Y", where Shotlet wants it
-        const [x, y] = st.role === 'rec' ? win.get_title().split(':').slice(2, 4).map(Number)
+        // a recording's control or a pin: "shotlet:ROLE:X:Y", where Shotlet wants it
+        const [x, y] = st.role !== 'quick' ? win.get_title().split(':').slice(2, 4).map(Number)
             : [area.x + EDGE, area.y + area.height - r.height - EDGE];
         if (r.x !== x || r.y !== y)
             win.move_frame(true, x, y);
+    }
+
+    // A pin with a place in its title goes there until it shows; after
+    // that it is the person's to move.
+    _placedPin(win, st) {
+        return st.role === 'pin' && !st.shown && win.get_title().split(':').length === 4;
     }
 
     _onFocus(win) {

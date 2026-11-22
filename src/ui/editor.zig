@@ -37,6 +37,7 @@ const history = @import("editor/history.zig");
 const hit = @import("editor/hit.zig");
 const render = @import("editor/render.zig");
 const exporter = @import("editor/export.zig");
+const fade = @import("editor/fade.zig");
 
 const Window = window.Window;
 const Point = shapes_mod.Point;
@@ -114,6 +115,8 @@ pub const Editor = struct {
     popover: ui.Popover = .none,
     pop_rect: Rect = Rect.empty,
     pop_open: motion.Tween = .{},
+    /// a closing popover, fading out
+    pop_closing: ui.PopClosing = .{},
     /// the beautify panel beside the toolbar
     panel_rect: Rect = Rect.empty,
     seps: [12]Rect = undefined,
@@ -144,6 +147,8 @@ pub const Editor = struct {
     /// session bus, to follow appearance changes while open
     bus: ?*dbus.Connection = null,
 
+    /// the dim fading in as the editor opens (editor/fade.zig)
+    enter: fade.Enter = .{},
     needs_render: bool = true,
     running: bool = true,
     action: Action = .cancel,
@@ -197,6 +202,8 @@ pub const Editor = struct {
     pub const composeRegionTo = render.composeRegionTo;
     pub const liveBounds = render.liveBounds;
     pub const exportPng = exporter.exportPng;
+    /// Ease back to the plain capture before the window goes away.
+    pub const fadeOut = fade.out;
 
     pub fn init(alloc: std.mem.Allocator, win: *Window, img: *const png.Image) Editor {
         return .{ .alloc = alloc, .win = win, .img = img, .doc = doc_mod.Document.init(alloc, img.width, img.height) };
@@ -215,6 +222,7 @@ pub const Editor = struct {
         tools.deinit(self);
         self.doc.deinit();
         self.buttons.deinit(self.alloc);
+        self.pop_closing.release(self.alloc);
         self.releaseCaches();
         self.alloc.free(self.layer);
         self.layer = &.{};
@@ -277,3 +285,7 @@ pub const Editor = struct {
         return @max(6, self.sc(10));
     }
 };
+
+comptime {
+    _ = fade;
+}

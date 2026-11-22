@@ -47,6 +47,8 @@ pub const SaveFileOptions = file_chooser.SaveFileOptions;
 pub const saveFile = file_chooser.saveFile;
 pub const FolderOptions = file_chooser.FolderOptions;
 pub const beginChooseFolder = file_chooser.beginChooseFolder;
+pub const beginSaveFile = file_chooser.beginSaveFile;
+pub const savedPath = file_chooser.savedPath;
 pub const chosenPath = file_chooser.chosenPath;
 pub const chooseFolder = file_chooser.chooseFolder;
 

@@ -16,6 +16,8 @@ const wl = @import("../../platform/wayland.zig");
 const png = @import("../../gfx/png.zig");
 const window = @import("../../ui/window.zig");
 const fui = @import("../../ui/floatui.zig");
+const motion = @import("../../ui/motion.zig");
+const theme = @import("../../ui/theme.zig");
 const layout = @import("layout.zig");
 const actions = @import("actions.zig");
 const input = @import("input.zig");
@@ -40,11 +42,14 @@ pub const Card = struct {
     scaled: []u32 = &.{},
     scaled_w: u32 = 0,
     scaled_h: u32 = 0,
-    born_ms: i64,
+    /// when it was first drawn (0: not yet); it fades in from there
+    born_ms: i64 = 0,
     deadline_ms: i64,
     /// fading out since (0: not fading)
     fade_from: i64 = 0,
     menu: bool = false,
+    /// how far its hover controls show (0..1)
+    hov: motion.Tween = .{ .dur_ms = theme.motion_fast },
     notice: []const u8 = "",
     notice_until: i64 = 0,
 
@@ -82,6 +87,8 @@ pub const Quick = struct {
     dragging: ?usize = null,
     /// the desktop's accent, for keyboard focus rings
     accent: u32 = fui.accent,
+    /// told once the first frame is committed (see quick.run)
+    ready_fd: sys.fd_t = -1,
 
     pub const act = actions.act;
     pub const notice = actions.notice;
@@ -104,7 +111,16 @@ pub const Quick = struct {
         return &self.bus.?;
     }
 
+    /// The first frame is committed: let the editor go.
+    pub fn signalReady(self: *Quick) void {
+        if (self.ready_fd < 0) return;
+        sys.writeAll(self.ready_fd, "1") catch {};
+        sys.close(self.ready_fd);
+        self.ready_fd = -1;
+    }
+
     pub fn deinit(self: *Quick) void {
+        self.signalReady();
         for (self.cards.items) |*c| c.deinit(self.gpa);
         self.cards.deinit(self.gpa);
         self.stopListening();
@@ -189,7 +205,6 @@ pub const Quick = struct {
             .meta = meta,
             .editable = editable,
             .thumb = thumb,
-            .born_ms = now,
             .deadline_ms = now + @as(i64, self.cfg.quick_access_seconds) * 1000,
         });
         while (self.cards.items.len > max_cards) {

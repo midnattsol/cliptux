@@ -6,7 +6,7 @@
 #   (900,200)-(1300,600)
 
 mkdir -p "$HOME/.config/shotlet"
-printf 'quick_access=false\nhint_shown=true\n' >"$HOME/.config/shotlet/config"
+printf 'thumbnail=never\nhint_shown=true\n' >"$HOME/.config/shotlet/config"
 IMG=$OUT/picture.png
 "${PYGTK:-/usr/bin/python3}" "$ROOT/tools/e2e/mkpng.py" "$IMG" 1600 900 2a5db0 200,150,700,450,ffffff 900,200,1300,600,ff8800
 drv_start Meta-0 || { fail "driver"; exit 1; }

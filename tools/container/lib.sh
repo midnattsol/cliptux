@@ -104,11 +104,11 @@ mon_size() {
 
 quick_cfg() {
     mkdir -p "$XDG_CONFIG_HOME/shotlet"
-    printf 'quick_access_seconds=600\n' >>"$XDG_CONFIG_HOME/shotlet/config"
+    printf 'quick_access_seconds=600\nthumbnail=after_copy_and_save\n' >>"$XDG_CONFIG_HOME/shotlet/config"
 }
 no_quick_cfg() {
     mkdir -p "$XDG_CONFIG_HOME/shotlet"
-    printf 'quick_access=false\n' >>"$XDG_CONFIG_HOME/shotlet/config"
+    printf 'thumbnail=never\n' >>"$XDG_CONFIG_HOME/shotlet/config"
 }
 
 # a capture of a test picture (red in a grey frame), copied with Enter;

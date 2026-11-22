@@ -135,6 +135,7 @@ pub fn closePopover(ed: *Editor) void {
             }
         }
     }
+    ui.beginPopoverClose(ed);
     ed.popover = .none;
     ed.picker.open = false;
     ed.needs_render = true;

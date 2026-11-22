@@ -43,7 +43,8 @@ pub const Mode = enum {
     }
 };
 
-/// A shortcut of the GNOME extension: a mode, or the self-timer.
+/// A shortcut of the GNOME extension: a mode, the self-timer, or the
+/// last thumbnail again.
 pub const Shortcut = struct {
     /// its key in the extension's settings
     key: []const u8,
@@ -62,6 +63,7 @@ pub const shortcuts = [_]Shortcut{
     .{ .key = "window-shortcut", .name = "window", .label = "Capture window", .default = "<Super>Print" },
     .{ .key = "scroll-shortcut", .name = "scroll", .label = "Scrolling capture", .default = "<Ctrl><Super>Print" },
     .{ .key = "timer-shortcut", .name = "timer", .label = "Self-timer", .default = "<Ctrl><Shift><Super>Print" },
+    .{ .key = "thumbnail-shortcut", .name = "thumbnail", .label = "Last thumbnail again", .default = "<Shift><Super>t" },
 };
 
 pub fn shortcutNamed(name: []const u8) ?Shortcut {

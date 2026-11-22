@@ -107,6 +107,10 @@ clip_png() { # clip_png FILE: the clipboard's image/png into FILE
     timeout 5 wl-paste -n -t image/png >"$1" 2>/dev/null &&
         [ "$(head -c 8 "$1" | od -An -tx1 | tr -d ' \n')" = 89504e470d0a1a0a ]
 }
+wait_file_line() { # wait_file_line SECONDS PATTERN FILE
+    local end=$((SECONDS + $1))
+    until grep -q "$2" "$3" 2>/dev/null; do [ $SECONDS -ge $end ] && return 1; sleep 0.1; done
+}
 not_grep() { ! grep -q "$1" "$2" 2>/dev/null; }
 no_find_exact() { ! drv find "$@" 2>/dev/null; }
 no_find() { ! drv find "$1" "$2" 24 10 2>/dev/null; }

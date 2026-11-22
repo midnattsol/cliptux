@@ -23,6 +23,8 @@ const mode_flow = @import("modes/flow.zig");
 const shell_bus = @import("modes/shell_bus.zig");
 const last_area = @import("modes/last_area.zig");
 const save = @import("shot/save.zig");
+const handoff = @import("shot/handoff.zig");
+const dialog = @import("shot/dialog.zig");
 const screencast = @import("shot/screencast.zig").screencast;
 const window = @import("../ui/window.zig");
 const editor_mod = @import("../ui/editor.zig");
@@ -101,11 +103,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         .edit => |e| e,
     };
 
-    const per_monitor = perMonitor(&cap);
-    try openEditor(&win, &cap, per_monitor);
+    try openEditor(&win, &cap, perMonitor(&cap));
     t.open = nowMs();
     t.log(from.shell);
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, per_monitor, preset_sel, smoke_ms, null, edit);
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, preset_sel, smoke_ms, null, edit);
 }
 
 /// With the GNOME Shell extension, the shell takes the screenshot (no
@@ -180,7 +181,7 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, per_monitor: bool, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
+pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
     configureEditor(&ed, conn, cfg, smoke_ms);
@@ -205,10 +206,9 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
             },
             .cancel, .copied => try f.closed(result.action == .copied),
             .save, .save_as => if (!try f.saved(result.action == .save, result.png_data.?)) {
-                // the file chooser was cancelled or the file could not be
-                // written: back to the editor, annotations intact, rather
-                // than losing the work
-                if (!win.surfaces[0].alive) try openEditor(win, cap, per_monitor);
+                // the file chooser (over the editor) was cancelled or the
+                // file could not be written: back to the editor,
+                // annotations intact, rather than losing the work
                 ed.running = true;
                 ed.action = .cancel;
                 continue;
@@ -267,11 +267,10 @@ const Finish = struct {
 
     /// Cancel or Copy: the window closes; a copy is kept and served.
     fn closed(f: Finish, copied: bool) !void {
-        f.win.closeWindow();
-        f.ed.releaseCaches(); // serving may outlive the session; drop ~140MB
-        if (copied) {
-            if (f.win.clipboardPng()) |data| f.keep(data, "");
-        }
+        // the clipboard's copy may be dropped while the editor fades
+        const data: ?[]u8 = if (!copied) null else if (f.win.clipboardPng()) |d| f.gpa.dupe(u8, d) catch null else null;
+        defer if (data) |d| f.gpa.free(d);
+        f.close(data, "");
         if (f.win.hasClipboard()) try f.win.serveClipboard();
     }
 
@@ -287,20 +286,20 @@ const Finish = struct {
                 std.log.warn("copy-on-save failed: {t}", .{err});
             };
         }
-        if (!quick) f.close(); // the file chooser takes the screen
         const path = f.write(quick, data) orelse return false;
         defer gpa.free(path);
-        if (quick) f.close();
-        var buf: [512]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
-        if (f.cfg.notify) portal.notify(gpa, f.conn, "Shotlet", msg);
-        f.keep(data, path);
+        // the thumbnail says it already
+        if (f.cfg.notify and !f.cfg.showsThumbnail(true)) {
+            var buf: [512]u8 = undefined;
+            portal.notify(gpa, f.conn, "Shotlet", std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved");
+        }
+        f.close(data, path);
         if (f.win.hasClipboard()) try f.win.serveClipboard();
         return true;
     }
 
     /// The file written (owned); null when the chooser was cancelled or
-    /// writing failed, which the editor shows when it is back.
+    /// writing failed, which the editor (still open) shows.
     fn write(f: Finish, quick: bool, data: []const u8) ?[]u8 {
         return f.writeFile(quick, data) catch |err| {
             std.log.warn("could not save: {t}", .{err});
@@ -311,22 +310,18 @@ const Finish = struct {
         };
     }
 
-    fn close(f: Finish) void {
-        f.win.closeWindow();
-        f.ed.releaseCaches();
-    }
-
     fn writeFile(f: Finish, quick: bool, data: []const u8) !?[]u8 {
         if (quick) return try savePng(f.gpa, f.env, f.cfg, data);
-        return saveAs(f.gpa, f.env, f.conn, f.cfg, data);
+        return dialog.saveAs(f.gpa, f.env, f.conn, f.cfg, f.win, data);
     }
 
-    /// Keeps the capture for the history (and quick access).
-    fn keep(f: Finish, data: []const u8, saved_path: []const u8) void {
+    /// The editor fades out and closes; `data` (what was copied or
+    /// saved) is kept for the history and the thumbnail meanwhile.
+    fn close(f: Finish, data: ?[]const u8, saved_path: []const u8) void {
         const ed = f.ed;
-        if (keep_mod.keep(f.gpa, f.env, f.cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace })) |k| {
-            if (f.cfg.quick_access) keep_mod.spawnQuick(f.gpa, f.env, &k);
-        }
+        const what: ?keep_mod.What = if (data) |d| .{ .image_png = d, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace } else null;
+        handoff.close(.{ .gpa = f.gpa, .env = f.env, .cfg = f.cfg, .win = f.win, .ed = ed }, what, f.cfg.showsThumbnail(saved_path.len > 0));
+        ed.releaseCaches(); // serving may outlive the session; drop ~140MB
     }
 };
 
@@ -362,7 +357,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     if (root.len > kept.root_buf.len) return error.PathTooLong;
     @memcpy(kept.root_buf[0..root.len], root);
     kept.root_len = root.len;
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, false, null, 0, .{ .kept = kept, .doc = &doc }, .{});
+    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, null, 0, .{ .kept = kept, .doc = &doc }, .{});
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the

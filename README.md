@@ -28,8 +28,8 @@ Wayland and DBus wire protocols directly.
   desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
   save, `Esc` cancels then quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
   time and never overwrite an existing file (`-2`, `-3`, ... are added).
-- After Copy or Save, a floating thumbnail (as in CleanShot X) stays in
-  the bottom-left corner for a few seconds: copy it again, save it, drag
+- After Save (or also after Copy, as you choose), a floating thumbnail (as
+  in CleanShot X) stays in the bottom-left corner for a few seconds: copy it again, save it, drag
   it into any app, annotate it again, pin it to the screen. Every copied
   or saved capture is kept in a Recent captures panel.
 - Tools beyond annotations: a colour picker (`#RRGGBB` or `rgb()` to
@@ -136,6 +136,7 @@ status 2; `shotlet --version` prints the version.
 | Scrolling capture | `shotlet scroll` | `Ctrl+Super+Print` |
 | Self-timer (3, 5 or 10 s, then an area) | `shotlet timer [S]` | `Ctrl+Shift+Super+Print` |
 | Screen recording (MP4 or GIF; see below) | `shotlet record` | `Shift+Super+R` |
+| The last thumbnail again | `shotlet thumbnail` | `Shift+Super+T` |
 
 Every mode takes `--delay S`. With the GNOME integration each mode has its
 own shortcut (none of them is one of GNOME's; a key GNOME's screenshot
@@ -187,13 +188,16 @@ timed capture too.
 
 ## After a capture
 
-After Copy or Save the editor closes and a 240×150 thumbnail appears in
-the bottom-left corner for 8 seconds (longer while the pointer is on it);
-later captures stack above it. On hover:
+After Save (by default; `thumbnail=after_copy_and_save` also after Copy,
+`thumbnail=never` turns it off, as does Settings) the editor fades out and
+a 240×150 thumbnail fades in, in the bottom-left corner, for 8 seconds
+(longer while the pointer is on it); later captures stack above it. It
+says what happened, "Copied" or "Saved · name.png". On hover:
 
 | Control | Action |
 | --- | --- |
-| Copy / Save | copy to the clipboard again / save to the screenshots folder |
+| Save / Copy | until it is saved: save to the screenshots folder / copy again |
+| Copy / Show in Files | once saved: copy again / open its folder with it selected |
 | right-click | menu, with Save As... |
 | pencil | annotate: reopens the editor with the annotations still editable |
 | pin | pin the capture to the screen |
@@ -202,8 +206,13 @@ later captures stack above it. On hover:
 
 Keyboard (after clicking it): `Ctrl+C`, `Ctrl+S`, `Ctrl+Shift+S`, `E`
 annotate, `P` pin, `Esc`/`Delete` close, `Tab` and `Enter` to reach every
-button. Turn it off with `quick_access=false` (Copy and Save then behave as
-before); `quick_access_seconds=8` sets how long it stays.
+button. `quick_access_seconds=8` sets how long it stays; a recording's
+thumbnail stays until closed. `shotlet thumbnail` (with the GNOME
+integration, Shift+Super+T) brings the last one back.
+
+Save As opens the file chooser over the editor; cancelling it returns to
+the editor as it was. With a thumbnail showing, saving sends no desktop
+notification (`notify=true` still does when there is none).
 
 **Pins** show the capture at 1:1 in a frameless window: scroll (or `-`
 `=` `0`) to zoom, drag to move, `Esc` or the × to close. Any number of
@@ -490,7 +499,8 @@ the editor for the full list.
   tokens) with ordinary redaction boxes (solid, or blur or pixelate when
   that tool is selected), one undo step, to review, move or delete.
   Nothing leaves the computer.
-- **Pin** (`Ctrl+P`, More menu) pins what Copy would copy and closes.
+- **Pin** (`Ctrl+P`, More menu) pins what Copy would copy, where the
+  selection was, and closes.
 - **Open an image**: drop an image file (or image) on the editor and it
   replaces the picture; drop one on a thumbnail or the Recent captures
   panel and it opens in a new editor.

@@ -26,7 +26,7 @@ prepare_scenario() {
     capture | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell* | perms* | gnome-install)
         # these check what happens without the floating thumbnail
         mkdir -p "$HOME/.config/shotlet"
-        printf 'quick_access=false\n' >"$HOME/.config/shotlet/config"
+        printf 'thumbnail=never\n' >"$HOME/.config/shotlet/config"
         ;;
     esac
     case $scenario in

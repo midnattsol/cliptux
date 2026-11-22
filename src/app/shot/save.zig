@@ -60,6 +60,13 @@ pub fn writeUnique(gpa: std.mem.Allocator, dir: []const u8, base: []const u8, ex
 /// cancelled (nothing is written). Falls back to the screenshots folder
 /// when there is no FileChooser portal.
 pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8) !?[]u8 {
+    return saveAsWith(gpa, env, conn, cfg, data, Blocking{ .gpa = gpa, .conn = conn });
+}
+
+/// saveAs, with `waiter` waiting for the answer: its `parent_window`
+/// ("wayland:HANDLE" or "") is the window the dialog belongs to, its
+/// `wait(*portal.Request)` returns once the request is done.
+pub fn saveAsWith(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *const config.Config, data: []const u8, waiter: anytype) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const dir = try saveDir(gpa, env, cfg, &dir_buf);
     sys.mkdirAll(dir, 0o755);
@@ -68,7 +75,10 @@ pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *co
     var file_buf: [80]u8 = undefined;
     const current_name = try std.fmt.bufPrint(&file_buf, "{s}.png", .{base});
 
-    const path = switch (try portal.saveFile(gpa, conn, .{ .current_name = current_name, .current_folder = dir })) {
+    var req = try portal.beginSaveFile(gpa, conn, .{ .current_name = current_name, .current_folder = dir, .parent_window = waiter.parent_window });
+    defer req.deinit(gpa);
+    try waiter.wait(&req);
+    const path = switch (try portal.savedPath(gpa, &req)) {
         .granted => |p| p,
         .cancelled, .denied, .timeout => return null,
         .unavailable => {
@@ -76,10 +86,29 @@ pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *co
             return try savePng(gpa, env, cfg, data);
         },
     };
-    errdefer gpa.free(path);
+    return try writeChosen(gpa, path, data);
+}
+
+/// Waits for the dialog with nothing else to do.
+const Blocking = struct {
+    gpa: std.mem.Allocator,
+    conn: *dbus.Connection,
+    parent_window: []const u8 = "",
+
+    pub fn wait(self: Blocking, req: *portal.Request) !void {
+        try req.wait(self.gpa, self.conn, portal.timeout_file_chooser_ms);
+    }
+};
+
+/// Write `data` where the chooser said (`path` is consumed); returns the
+/// path written (owned).
+fn writeChosen(gpa: std.mem.Allocator, path: []u8, data: []const u8) ![]u8 {
     if (std.ascii.endsWithIgnoreCase(path, ".png")) {
         // the chooser already confirmed replacing an existing file
-        try sys.writeFile(path, data);
+        sys.writeFile(path, data) catch |err| {
+            gpa.free(path);
+            return err;
+        };
         return path;
     }
     // a name typed without extension: add one, but never replace a file

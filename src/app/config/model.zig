@@ -8,8 +8,23 @@ const Action = binds.Action;
 const n_actions = binds.n_actions;
 const Bind = binds.Bind;
 
+/// When the floating thumbnail shows up.
+pub const Thumbnail = enum {
+    after_save,
+    after_copy_and_save,
+    never,
+
+    pub fn label(t: Thumbnail) []const u8 {
+        return switch (t) {
+            .after_save => "After Save",
+            .after_copy_and_save => "After Copy and Save",
+            .never => "Never",
+        };
+    }
+};
+
 pub const Config = struct {
-    /// desktop notification after saving
+    /// desktop notification after saving, when no thumbnail says so
     notify: bool = true,
     /// also copy to clipboard when saving to disk
     copy_on_save: bool = false,
@@ -35,8 +50,8 @@ pub const Config = struct {
     beautify_shadow: bool = true,
     /// the editor's first-run hint was shown
     hint_shown: bool = false,
-    /// after Copy/Save, a floating thumbnail with more actions
-    quick_access: bool = true,
+    /// the floating thumbnail with more actions: after which results
+    thumbnail: Thumbnail = .after_save,
     /// how long the thumbnail stays (it stays while hovered)
     quick_access_seconds: u16 = 8,
     /// keep copied and saved captures in $XDG_STATE_HOME/shotlet/history
@@ -49,6 +64,21 @@ pub const Config = struct {
     /// only keys whose value differs. All zero (a Config not read from
     /// disk) means every key is written.
     base: [n_keys]u64 = @splat(0),
+
+    /// Whether a capture that was saved (else only copied) gets a
+    /// thumbnail.
+    pub fn showsThumbnail(self: *const Config, saved: bool) bool {
+        return switch (self.thumbnail) {
+            .after_save => saved,
+            .after_copy_and_save => true,
+            .never => false,
+        };
+    }
+
+    /// Whether any capture gets a thumbnail.
+    pub fn thumbnails(self: *const Config) bool {
+        return self.thumbnail != .never;
+    }
 
     pub fn saveDir(self: *const Config) ?[]const u8 {
         if (self.save_dir_len == 0) return null;
@@ -89,7 +119,8 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     "beautify_corners",
     "beautify_shadow",
     "hint_shown",
-    "quick_access",
+    // "quick_access=false" from before still reads as never
+    "thumbnail",
     "quick_access_seconds",
     "history",
     "history_max",
@@ -132,7 +163,7 @@ pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         9 => boolText(cfg.beautify_corners),
         10 => boolText(cfg.beautify_shadow),
         11 => boolText(cfg.hint_shown),
-        12 => boolText(cfg.quick_access),
+        12 => @tagName(cfg.thumbnail),
         13 => intText(buf, cfg.quick_access_seconds),
         14 => boolText(cfg.history),
         15 => intText(buf, cfg.history_max),

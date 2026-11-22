@@ -15,7 +15,7 @@
 
 mode_cfg() { # mode_cfg AFTER [KEY=VALUE...]: Shotlet's settings
     mkdir -p "$HOME/.config/shotlet"
-    { printf 'quick_access=false\nafter_fullscreen=%s\n' "$1"; shift; printf '%s\n' "$@"; } >"$HOME/.config/shotlet/config"
+    { printf 'thumbnail=never\nafter_fullscreen=%s\n' "$1"; shift; printf '%s\n' "$@"; } >"$HOME/.config/shotlet/config"
 }
 modes_start() { # the driver, the extension pointed at this shotlet
     drv_start "$@" || { fail "driver"; exit 1; }
@@ -270,10 +270,9 @@ modes-keys)
     # Settings: the after-capture choice, and recording a mode's key
     SHOTLET_SETTINGS_FOCUS=14 run_shotlet settings settings
     wait_log 10 "keyboard focus"
-    sleep 0.5
+    sleep 1.2 # the window fades in and is raised by the extension
     keys space
-    sleep 0.5
-    check "Settings cycles what a screen capture does" grep -q "^after_fullscreen=editor" "$HOME/.config/shotlet/config"
+    check "Settings cycles what a screen capture does" wait_file_line 3 "^after_fullscreen=save" "$HOME/.config/shotlet/config"
     keys esc
     wait_exit 5
     SHOTLET_SETTINGS_VIEW=shortcuts SHOTLET_SETTINGS_FOCUS=1 run_shotlet settings-keys settings

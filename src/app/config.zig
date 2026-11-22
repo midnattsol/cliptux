@@ -26,6 +26,7 @@ pub const keyCodeName = binds.keyCodeName;
 pub const bindName = binds.bindName;
 
 pub const Config = model.Config;
+pub const Thumbnail = model.Thumbnail;
 pub const n_keys = model.n_keys;
 pub const padding_names = model.padding_names;
 pub const parseLine = parse.parseLine;
@@ -118,7 +119,7 @@ test "config save/load roundtrip" {
     cfg.default_color = 5;
     cfg.binds[@backingInt(Action.pen)] = .{ .code = 33, .ctrl = true };
     cfg.setScToken("tok-123");
-    cfg.quick_access = false;
+    cfg.thumbnail = .after_copy_and_save;
     cfg.quick_access_seconds = 12;
     cfg.history = false;
     cfg.history_max = 7;
@@ -132,7 +133,7 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(@as(u3, 5), loaded.default_color);
     try std.testing.expect(loaded.binds[@backingInt(Action.pen)].matches(33, true, false));
     try std.testing.expectEqualStrings("tok-123", loaded.scToken().?);
-    try std.testing.expectEqual(false, loaded.quick_access);
+    try std.testing.expectEqual(Thumbnail.after_copy_and_save, loaded.thumbnail);
     try std.testing.expectEqual(@as(u16, 12), loaded.quick_access_seconds);
     try std.testing.expectEqual(false, loaded.history);
     try std.testing.expectEqual(@as(u16, 7), loaded.history_max);

@@ -51,7 +51,10 @@ pub const controlRect = layout.controlRect;
 pub const hitTest = layout.hitTest;
 pub const parseAdd = quick_ipc.parseAdd;
 
-pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !void {
+/// `ready`: a pipe to write to once the first frame is committed (the
+/// editor stays until then); handing off to a running stack, or failing,
+/// closes it as this process ends.
+pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, ready: ?sys.fd_t) !void {
     if (!history.Id.valid(id)) return error.BadId;
     // another thumbnail stack is up: join it
     if (quick_ipc.handOff(env, root, id)) return;
@@ -63,6 +66,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
         .env = env,
         .cfg = config.load(gpa, env.home),
         .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
+        .ready_fd = ready orelse -1,
     };
     defer q.deinit();
     if (!q.listen()) {

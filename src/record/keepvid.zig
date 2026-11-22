@@ -89,7 +89,7 @@ pub fn store(gpa: std.mem.Allocator, env: env_mod.Env, cfg: *const config.Config
 }
 
 fn storeInner(gpa: std.mem.Allocator, env: env_mod.Env, cfg: *const config.Config, what: What) !?keep.Kept {
-    if (!cfg.history and !cfg.quick_access) return null;
+    if (!cfg.history and !cfg.thumbnails()) return null;
     var k: keep.Kept = .{ .id = undefined };
     k.root_len = (try keep.rootFor(cfg, env, &k.root_buf)).len;
     const image = try png.encode(gpa, what.first, what.first_w, what.first_h);

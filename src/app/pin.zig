@@ -9,6 +9,10 @@
 //! cannot keep a Wayland window on top unless the person chooses "Always
 //! on Top" in the window menu (right-click on the pin opens that menu, and
 //! the pin says so when it appears).
+//!
+//! Pinned from the editor it opens where the capture was (`--at`, the
+//! centre in logical pixels: the extension places a toplevel titled
+//! "shotlet:pin:X:Y"), and it fades in rather than zooming from nowhere.
 
 const std = @import("std");
 const env_mod = @import("env.zig");
@@ -28,6 +32,7 @@ const Env = env_mod.Env;
 const pad = 14;
 const radius = 8;
 const hint_ms = 5000;
+const fade_in_ms = 150;
 
 pub const zoom_min = 0.1;
 pub const zoom_max = 8.0;
@@ -48,21 +53,31 @@ test "zoom steps snap to 100% and stay in range" {
     try std.testing.expectEqual(@as(f64, zoom_min), zoomStep(0.11, 10));
 }
 
-/// `shotlet pin FILE`: PNG, JPEG or WebP (src/gfx/imgload.zig).
-pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
+/// `shotlet pin FILE [--at X,Y]`: PNG, JPEG or WebP
+/// (src/gfx/imgload.zig), centred on X,Y when given.
+pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8, at: ?[2]i32) !void {
     var img = try @import("../gfx/imgload.zig").loadFile(gpa, path);
     defer img.deinit(gpa);
-    return show(gpa, env, &img, path);
+    return show(gpa, env, &img, path, at);
 }
 
-/// Pin `img` (`what` names it in the log) until the pin is closed.
-pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []const u8) !void {
+/// "X,Y" as `--at` takes it.
+pub fn parseAt(s: []const u8) ?[2]i32 {
+    var it = std.mem.splitScalar(u8, s, ',');
+    const x = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
+    const y = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
+    return if (it.next() == null) .{ x, y } else null;
+}
+
+/// Pin `img` (`what` names it in the log) until the pin is closed;
+/// centred on `at` (logical pixels) when given.
+pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []const u8, at: ?[2]i32) !void {
     text.init(gpa);
     defer text.deinit();
 
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
-    var pin: Pin = .{ .gpa = gpa, .win = &win, .img = img, .layer = win.hasLayerShell(), .born = sys.monoMs() };
+    var pin: Pin = .{ .gpa = gpa, .win = &win, .img = img, .layer = win.hasLayerShell(), .born = sys.monoMs(), .at = at };
     defer gpa.free(pin.scaled);
     try pin.open();
     pin.hint = !pin.layer and gnome.isGnome() and needsTopHint(gpa, env);
@@ -87,6 +102,10 @@ const Pin = struct {
     /// a layer-shell surface (moved by its margins) rather than a toplevel
     layer: bool,
     born: i64,
+    /// where its centre goes (logical); null: where the compositor puts it
+    at: ?[2]i32 = null,
+    /// first drawn (0: not yet): it fades in from there
+    shown_ms: i64 = 0,
     hint: bool = false,
     margin: [4]i32 = .{ 120, 0, 0, 120 },
     // window size in logical pixels; first guess at scale 1, corrected
@@ -115,8 +134,10 @@ const Pin = struct {
         win.track_relative = p.layer;
         p.lw = p.img.width + 2 * pad;
         p.lh = p.img.height + 2 * pad;
+        var title_buf: [48]u8 = undefined;
+        const title = p.placeAt(&title_buf);
         if (p.layer) {
-            try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh, .layer = .{
+            try win.open(title, .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh, .layer = .{
                 .layer = wl.zwlr_layer_shell_v1.layer_top,
                 .anchor = wl.zwlr_layer_surface_v1.anchor_top | wl.zwlr_layer_surface_v1.anchor_left,
                 .width = p.lw,
@@ -124,10 +145,38 @@ const Pin = struct {
                 .margin = p.margin,
             } });
         } else {
-            try win.open("shotlet:pin", .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh });
+            try win.open(title, .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh });
         }
         win.report_leave = true;
         win.setCursor(.arrow) catch {};
+    }
+
+    /// With `at`: the margins (layer shell) and the title (the GNOME
+    /// extension) that put the picture's centre there, at the scale of
+    /// the output under it. Returns the title.
+    fn placeAt(p: *Pin, buf: []u8) []const u8 {
+        const at = p.at orelse return "shotlet:pin";
+        var scale: u32 = 1;
+        var origin: [2]i32 = .{ 0, 0 };
+        for (p.win.outputList()) |o| {
+            const r = o.logicalRect();
+            const inside = at[0] >= r.x and at[0] < r.x + r.w and at[1] >= r.y and at[1] < r.y + r.h;
+            if (o.id == 0 or !inside) continue;
+            scale = @intCast(@max(1, o.scale));
+            origin = .{ r.x, r.y };
+        }
+        const w: i32 = @intCast((p.img.width + scale - 1) / scale + 2 * pad);
+        const h: i32 = @intCast((p.img.height + scale - 1) / scale + 2 * pad);
+        const x = at[0] - @divTrunc(w, 2);
+        const y = at[1] - @divTrunc(h, 2);
+        p.margin = .{ y - origin[1], 0, 0, x - origin[0] };
+        return std.fmt.bufPrint(buf, "shotlet:pin:{d}:{d}", .{ x, y }) catch "shotlet:pin";
+    }
+
+    /// Opacity while fading in.
+    fn fadeIn(p: *Pin, now: i64) f64 {
+        if (p.shown_ms == 0) p.shown_ms = now;
+        return @min(1, @as(f64, @floatFromInt(now - p.shown_ms)) / fade_in_ms);
     }
 
     fn loop(p: *Pin) !void {
@@ -142,7 +191,9 @@ const Pin = struct {
                 p.dirty = false;
                 try p.draw(k, pw, ph, show_hint);
             }
-            const ev = (try p.win.nextEventTimeout(if (show_hint) 250 else 1000)) orelse {
+            const fading = p.shown_ms == 0 or sys.monoMs() - p.shown_ms < fade_in_ms;
+            if (fading) p.dirty = true;
+            const ev = (try p.win.nextEventTimeout(if (fading) 16 else if (show_hint) 250 else 1000)) orelse {
                 if (p.hint and !show_hint) {
                     p.hint = false;
                     p.dirty = true;
@@ -202,6 +253,8 @@ const Pin = struct {
         if (p.hover) p.drawHoverChrome(&cv, k, pw, ph);
         if (show_hint) drawTopHint(&cv, k, pw, ph);
         fui.placeCard(px, bw, bh, card, pw, ph, ox, ox, @intFromFloat(radius * k), @intFromFloat(@max(1, 10 * k)));
+        const a = p.fadeIn(sys.monoMs());
+        if (a < 1) fui.fadeAlpha(px, a);
         fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
         try win.present();
     }

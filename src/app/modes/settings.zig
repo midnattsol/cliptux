@@ -40,8 +40,8 @@ pub const After = enum {
 
 /// What a capture taken without the editor does: like an area copied or
 /// saved in the editor, it always lands somewhere (the clipboard or a
-/// file), and in the history; the thumbnail follows quick_access unless
-/// it was asked for.
+/// file), and in the history; the thumbnail follows the `thumbnail`
+/// setting unless it was asked for.
 pub const Delivery = struct {
     save: bool = false,
     copy: bool = false,
@@ -52,8 +52,8 @@ pub fn delivery(after: After, cfg: *const config.Config) Delivery {
     return switch (after) {
         .editor => .{},
         .thumbnail => .{ .copy = true, .thumbnail = true },
-        .copy => .{ .copy = true, .thumbnail = cfg.quick_access },
-        .save => .{ .save = true, .copy = cfg.copy_on_save, .thumbnail = cfg.quick_access },
+        .copy => .{ .copy = true, .thumbnail = cfg.showsThumbnail(false) },
+        .save => .{ .save = true, .copy = cfg.copy_on_save, .thumbnail = cfg.showsThumbnail(true) },
     };
 }
 
@@ -113,11 +113,11 @@ pub fn setTimer(gpa: std.mem.Allocator, home: []const u8, s: u8) !void {
 
 test "a capture without the editor is always copied or saved" {
     var cfg: config.Config = .{};
-    cfg.quick_access = false;
+    cfg.thumbnail = .never;
     try std.testing.expectEqual(Delivery{ .copy = true, .thumbnail = true }, delivery(.thumbnail, &cfg));
     try std.testing.expectEqual(Delivery{ .copy = true }, delivery(.copy, &cfg));
     try std.testing.expectEqual(Delivery{ .save = true }, delivery(.save, &cfg));
-    cfg.quick_access = true;
+    cfg.thumbnail = .after_save;
     cfg.copy_on_save = true;
     try std.testing.expectEqual(Delivery{ .save = true, .copy = true, .thumbnail = true }, delivery(.save, &cfg));
     try std.testing.expectEqual(After.editor, After.save.next());

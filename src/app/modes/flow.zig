@@ -113,7 +113,7 @@ fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, d: settings.
     defer doc.deinit();
     doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc, .saved = path orelse "" });
-    if (d.thumbnail) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k);
+    if (d.thumbnail) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k, null);
     // a save that failed still copies: the capture lands somewhere
     if (!d.copy and path != null) {
         c.gpa.free(data);

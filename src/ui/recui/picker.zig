@@ -2,7 +2,9 @@
 //! monitor, dimmed outside the chosen area; drag an area (or click for
 //! the whole monitor), move and resize it, and pick the format and sound
 //! on the bar under it (picker_bar.zig). Enter or Record starts, Esc
-//! cancels. Works in logical desktop pixels (what recordings use).
+//! cancels. Works in logical desktop pixels (what recordings use). It
+//! opens on the frozen desktop as it looked and dims in, and eases back
+//! to it before closing (the GNOME extension turns mutter's zoom off).
 
 const std = @import("std");
 const capture = @import("../../app/capture.zig");
@@ -14,6 +16,9 @@ const yuv = @import("../../encode/yuv.zig");
 const settings_mod = @import("../../record/settings.zig");
 const selmod = @import("picker_sel.zig");
 const bar = @import("picker_bar.zig");
+const motion = @import("../motion.zig");
+const theme = @import("../theme.zig");
+const mixRows = @import("../../gfx/effects.zig").mixRows;
 const Rect = selmod.Rect;
 const Point = selmod.Point;
 
@@ -44,6 +49,9 @@ pub const Picker = struct {
     pressed_bar: ?bar.Item = null,
     dirty: bool = true,
     result: ?Result = null,
+    /// first frame drawn, and the fade out begun (0: not yet)
+    shown_ms: i64 = 0,
+    leaving_ms: i64 = 0,
 
     pub fn deinit(self: *Picker) void {
         for (self.panes[0..self.n]) |p| self.gpa.free(p.base);
@@ -210,7 +218,26 @@ pub const Picker = struct {
         self.bar_at = .{ .x = x, .y = y };
     }
 
+    /// How far the dim is in, 0..256: fading in from the first frame, out
+    /// once there is a result.
+    fn level(self: *Picker, now: i64) u32 {
+        if (!motion.enabled) return if (self.leaving_ms != 0) 0 else 256;
+        if (self.shown_ms == 0) self.shown_ms = now;
+        var t = motion.easeOut(@as(f64, @floatFromInt(now - self.shown_ms)) / theme.motion_fast);
+        if (self.leaving_ms != 0) t = @min(t, 1 - motion.easeOut(@as(f64, @floatFromInt(now - self.leaving_ms)) / theme.motion_fast));
+        return @intFromFloat(@round(@max(0, t) * 256));
+    }
+
+    /// Still fading in or out (a frame per refresh).
+    fn fading(self: *const Picker) bool {
+        const now = motion.now();
+        if (!motion.enabled) return false;
+        if (self.leaving_ms != 0) return now - self.leaving_ms < theme.motion_fast;
+        return self.shown_ms == 0 or now - self.shown_ms < theme.motion_fast;
+    }
+
     fn draw(self: *Picker) !void {
+        if (self.fading()) self.dirty = true;
         if (!self.dirty) return;
         self.placeBar();
         for (0..self.n) |i| {
@@ -218,7 +245,8 @@ pub const Picker = struct {
             if (s.frame_pending or self.panes[i].bw == 0) return;
         }
         self.dirty = false;
-        for (0..self.n) |i| try self.renderPane(@intCast(i));
+        const k = self.level(motion.now());
+        for (0..self.n) |i| try self.renderPane(@intCast(i), k);
     }
 
     fn bufRect(self: *const Picker, i: usize, r: Rect) Rect {
@@ -231,7 +259,7 @@ pub const Picker = struct {
         return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
     }
 
-    fn renderPane(self: *Picker, i: u8) !void {
+    fn renderPane(self: *Picker, i: u8, k_dim: u32) !void {
         const p = &self.panes[i];
         const px = try self.win.backBufferOf(i);
         @memcpy(px[0..p.base.len], p.base);
@@ -245,6 +273,7 @@ pub const Picker = struct {
             const b = self.bufRect(i, .{ .x = at.x, .y = at.y, .w = 1, .h = 1 });
             if (selmod.inside(p.rect, at)) bar.paint(self.gpa, &cv, b.x, b.y, k, &self.st);
         }
+        if (k_dim < 256) mixRows(px[0..p.base.len], p.base, px[0..p.base.len], k_dim);
         try self.win.presentSurface(i);
     }
 };
@@ -308,10 +337,14 @@ pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Captur
     try p.win.openOutputs("Shotlet");
     p.setup();
     p.win.setCursor(.crosshair) catch {};
-    while (p.result == null) {
-        if (try p.win.nextEventTimeout(p.win.pollTimeoutMs(100))) |ev| {
-            try p.onEvent(ev);
-            while (p.win.queue.items.len > 0) try p.onEvent(try p.win.nextEvent());
+    while (p.result == null or p.fading()) {
+        if (p.result != null and p.leaving_ms == 0) p.leaving_ms = motion.now();
+        if (try p.win.nextEventTimeout(p.win.pollTimeoutMs(if (p.fading()) 8 else 100))) |ev| {
+            if (p.result == null) try p.onEvent(ev);
+            while (p.win.queue.items.len > 0) {
+                const e = try p.win.nextEvent();
+                if (p.result == null) try p.onEvent(e);
+            }
         }
         try p.draw();
     }

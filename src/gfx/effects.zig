@@ -18,6 +18,7 @@ pub const redact = composite.redact;
 pub const gradient = composite.gradient;
 pub const dropShadow = composite.dropShadow;
 pub const blitRounded = composite.blitRounded;
+pub const mixRows = composite.mixRows;
 pub const over = composite.over;
 
 const boxBlur = blur_.boxBlur;

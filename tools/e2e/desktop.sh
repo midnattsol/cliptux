@@ -118,5 +118,5 @@ red_capture() { # red_capture NAME [first]
 }
 quick_cfg() { # settings for the quick-access scenarios
     mkdir -p "$HOME/.config/shotlet"
-    printf 'quick_access_seconds=600\n' >>"$HOME/.config/shotlet/config"
+    printf 'quick_access_seconds=600\nthumbnail=after_copy_and_save\n' >>"$HOME/.config/shotlet/config"
 }

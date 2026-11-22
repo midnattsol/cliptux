@@ -41,6 +41,11 @@
       <summary>Self-timer</summary>
       <description>Captures an area after timer-seconds. Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
     </key>
+    <key name="thumbnail-shortcut" type="as">
+      <default>['&lt;Shift&gt;&lt;Super&gt;t']</default>
+      <summary>Show the last thumbnail again</summary>
+      <description>Shows the floating thumbnail of the last capture or recording again (shotlet thumbnail). Left unbound while GNOME's screenshot shortcuts or capture-shortcut use the same key.</description>
+    </key>
     <key name="timer-seconds" type="u">
       <range min="1" max="60"/>
       <default>5</default>

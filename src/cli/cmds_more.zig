@@ -5,7 +5,7 @@ const Command = spec.Command;
 
 const smoke: spec.Option = .{ .long = "smoke", .value = "MS", .kind = .int, .vis = .dev, .help = "Close by itself after MS milliseconds (leak checks)" };
 
-const shortcut_words = [_][]const u8{ "area", "fullscreen", "screens", "previous", "window", "scroll", "timer", "none" };
+const shortcut_words = [_][]const u8{ "area", "fullscreen", "screens", "previous", "window", "scroll", "timer", "thumbnail", "none" };
 
 const gnome_subs = [_]Command{
     .{
@@ -50,7 +50,8 @@ const gnome_subs = [_]Command{
         .summary = "Show or set the extension's capture shortcuts",
         .usage = &.{ "gnome-integration shortcut [KEY... | none]", "gnome-integration shortcut MODE [KEY... | none]" },
         .description = "Without arguments, shows the area capture's key and each capture mode's. KEY... sets the area capture's keys " ++
-            "(default Print); MODE KEY... sets a mode's (area, fullscreen, screens, previous, window, scroll, timer); none unbinds it.",
+            "(default Print); MODE KEY... sets a mode's (area, fullscreen, screens, previous, window, scroll, timer) or the key that " ++
+            "shows the last thumbnail again (thumbnail); none unbinds it.",
         .args = &.{.{ .name = "KEY", .repeat = true, .choices = &shortcut_words, .help = "A mode name, then accelerators such as '<Shift><Super>s', or none" }},
         .examples = &.{
             .{ .cmd = "gnome-integration shortcut '<Shift><Super>s'", .what = "Area: Shift+Super+S" },
@@ -60,7 +61,7 @@ const gnome_subs = [_]Command{
     },
 };
 
-const help_words = [_][]const u8{ "shot", "area", "text", "fullscreen", "screens", "previous", "window", "scroll", "timer", "record", "edit", "pin", "history", "settings", "daemon", "gnome-integration", "permissions", "completions" };
+const help_words = [_][]const u8{ "shot", "area", "text", "fullscreen", "screens", "previous", "window", "scroll", "timer", "record", "edit", "pin", "history", "thumbnail", "settings", "daemon", "gnome-integration", "permissions", "completions" };
 
 pub const list = [_]Command{
     .{
@@ -84,6 +85,7 @@ pub const list = [_]Command{
         .usage = &.{"pin [FILE]"},
         .description = "Shows the image at 1:1 in a frameless window: scroll (or - = 0) to zoom, drag to move, Esc to close.",
         .args = &.{.{ .name = "FILE", .kind = .file, .help = "The image to pin (PNG, JPEG, WebP); without it, the clipboard's image" }},
+        .options = &.{.{ .long = "at", .value = "X,Y", .vis = .hidden, .help = "Centre it there (logical pixels): where the capture was" }},
         .examples = &.{
             .{ .cmd = "pin", .what = "Pin the image in the clipboard" },
             .{ .cmd = "pin diagram.png", .what = "Pin a file" },
@@ -110,6 +112,17 @@ pub const list = [_]Command{
             .{ .cmd = "history", .what = "Open Recent captures" },
             .{ .cmd = "history clear", .what = "Forget them all" },
         },
+    },
+    .{
+        .id = .thumbnail,
+        .name = "thumbnail",
+        .group = .history,
+        .summary = "Show the last capture's thumbnail again",
+        .usage = &.{"thumbnail"},
+        .description = "Brings back the floating thumbnail of the last capture or recording kept (in the history, or the " ++
+            "thumbnail's cache when the history is off), to copy, save, drag, annotate or pin it again. " ++
+            "With the GNOME integration, Shift+Super+T does the same (shotlet gnome-integration shortcut thumbnail KEY).",
+        .examples = &.{.{ .cmd = "thumbnail", .what = "The last thumbnail again" }},
     },
     .{
         .id = .settings,
