@@ -96,15 +96,13 @@ fn runShortcut(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, rest: []
     }
 }
 
-/// Bind the extension's shortcut to `accels` ("none" unbinds it), then
-/// give it a moment to pick that up.
+/// Bind the extension's shortcut to `accels` (either notation; "none"
+/// unbinds it), then give it a moment to pick that up.
 fn setCaptureShortcut(gpa: std.mem.Allocator, env: Env, sd: []const u8, accels: []const []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const none = accels.len == 1 and std.mem.eql(u8, accels[0], "none");
-    for (accels) |a| if (a.len == 0 or a.len > 60 or std.mem.indexOfAny(u8, a, "'\"\\\n") != null) return error.BadShortcut;
-    try gsettings.set(arena, env, sd, ext_schema_id, "capture-shortcut", try gsettings.formatStrv(arena, if (none) &.{} else accels));
+    try gsettings.set(arena, env, sd, ext_schema_id, "capture-shortcut", try gnome_keys.userStrv(arena, accels));
     var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 200 * std.time.ns_per_ms };
     _ = std.os.linux.nanosleep(&ts, null);
 }

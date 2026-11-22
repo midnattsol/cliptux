@@ -64,9 +64,9 @@ test "subcommands and their options" {
     try t.expect(a.run.flag("dry-run"));
     try t.expectEqual(.permissions, (try run(&.{"permissions"})).run.id());
     try t.expectEqual(.history_clear, (try run(&.{ "history", "clear" })).run.id());
-    const s = try run(&.{ "gnome-integration", "shortcut", "window", "<Super>w" });
+    const s = try run(&.{ "gnome-integration", "shortcut", "window", "Super+W" });
     try t.expectEqual(.gnome_shortcut, s.run.id());
-    try expectRest(s, &.{ "window", "<Super>w" });
+    try expectRest(s, &.{ "window", "Super+W" });
     const f = (try run(&.{ "permissions", "rest" })).fail;
     try t.expectEqual(.unknown_command, f.kind);
     try t.expectEqualStrings("reset", f.suggestion.?);

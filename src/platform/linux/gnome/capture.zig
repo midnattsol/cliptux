@@ -4,6 +4,7 @@
 const std = @import("std");
 const dbus = @import("../dbus.zig");
 const extension = @import("extension.zig");
+const gtk_accel = @import("gtk_accel.zig");
 
 const bus_name = extension.bus_name;
 const shell1_path = "/dev/shotlet/Shell1";
@@ -64,15 +65,18 @@ fn extensionCaptures(gpa: std.mem.Allocator, bus: *dbus.Connection) bool {
     return v == .u32_ and v.u32_ >= 2;
 }
 
-/// The first accelerator of the `prop` list into `info`; false when there
-/// is none (or it cannot be read).
+/// The first accelerator of the `prop` list into `info`, in the neutral
+/// notation where it has one; false when there is none (or it cannot be
+/// read).
 fn readShortcut(gpa: std.mem.Allocator, bus: *dbus.Connection, prop: []const u8, info: *CaptureInfo) bool {
     var m = getProperty(gpa, bus, prop) catch return false;
     defer m.deinit(gpa);
     var pr = m.reader();
     const acc = (readFirstOfStrvVariant(&pr) catch return false) orelse return false;
-    const n = @min(acc.len, info.shortcut_buf.len);
-    @memcpy(info.shortcut_buf[0..n], acc[0..n]);
+    var dbuf: [64]u8 = undefined;
+    const shown = gtk_accel.display(&dbuf, acc);
+    const n = @min(shown.len, info.shortcut_buf.len);
+    @memcpy(info.shortcut_buf[0..n], shown[0..n]);
     info.shortcut_len = n;
     return true;
 }
@@ -102,7 +106,7 @@ pub fn printShortcut(info: *const CaptureInfo) void {
     if (info.shortcut()) |k| {
         if (info.blocked) {
             out("Shortcut {s}: GNOME's own screenshot tool uses that key, so Shotlet leaves it alone.\n" ++
-                "  Pick another: shotlet gnome-integration shortcut '<Shift><Super>s'\n" ++
+                "  Pick another: shotlet gnome-integration shortcut Shift+Super+S\n" ++
                 "  (or free {s} in GNOME Settings \u{203A} Keyboard \u{203A} View and Customize Shortcuts \u{203A} Screenshots)\n", .{ k, k });
         } else out("Shortcut {s} captures without prompts.\n", .{k});
     } else out("No capture shortcut (shotlet gnome-integration shortcut KEY sets one).\n", .{});

@@ -7,12 +7,15 @@ const std = @import("std");
 const dbus = @import("dbus.zig");
 const gnome = @import("gnome.zig");
 const gsettings = @import("gnome/gsettings.zig");
+const gtk_accel = @import("gnome/gtk_accel.zig");
+const mode_keys = @import("gnome/mode_keys.zig");
 const shell_bus = @import("gnome/shell_bus.zig");
 const shellcap = @import("gnome/shellcap.zig");
 const types = @import("../api/shell.zig");
 const Env = @import("../../app/env.zig").Env;
 const capture = @import("../../app/capture.zig");
 const mode = @import("../../app/modes/mode.zig");
+const Accel = @import("../../app/accel.zig").Accel;
 
 pub const State = types.State;
 pub const CaptureInfo = types.CaptureInfo;
@@ -89,18 +92,25 @@ pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, s: *dbus.Connection, buf:
     return gnome.schemaDir(gpa, env, s, buf) catch null;
 }
 
-/// The first accelerator bound to `key` ("<Ctrl>Print"); null when none.
-pub fn getShortcut(arena: std.mem.Allocator, env: Env, store: []const u8, key: []const u8) ?[]const u8 {
-    const v = gsettings.get(arena, env, store, gnome.ext_schema_id, key) catch return null;
+/// The first shortcut bound to `name` ("Ctrl+Print": GTK's notation in
+/// the extension's settings, shown in the neutral one); null when none.
+pub fn getShortcut(arena: std.mem.Allocator, env: Env, store: []const u8, name: []const u8) ?[]const u8 {
+    var kbuf: [32]u8 = undefined;
+    const v = gsettings.get(arena, env, store, gnome.ext_schema_id, mode_keys.settingsKey(&kbuf, name)) catch return null;
     const items = gsettings.parseStrv(arena, v) catch return null;
-    return if (items.len == 0) null else items[0];
+    if (items.len == 0) return null;
+    const buf = arena.alloc(u8, 64) catch return items[0];
+    return gtk_accel.display(buf, items[0]);
 }
 
-/// Bind `key` to `accel` (null: none).
-pub fn setShortcut(gpa: std.mem.Allocator, env: Env, store: []const u8, key: []const u8, accel: ?[]const u8) !void {
-    const value = if (accel) |a| try std.fmt.allocPrint(gpa, "['{s}']", .{a}) else try gpa.dupe(u8, "@as []");
+/// Bind `name` to `accel` (null: none), in GTK's notation.
+pub fn setShortcut(gpa: std.mem.Allocator, env: Env, store: []const u8, name: []const u8, accel: ?Accel) !void {
+    var gbuf: [64]u8 = undefined;
+    const gtk: ?[]const u8 = if (accel) |a| gtk_accel.fromNeutral(a, &gbuf) orelse return error.BadShortcut else null;
+    const value = if (gtk) |g| try gsettings.formatStrv(gpa, &.{g}) else try gpa.dupe(u8, "@as []");
     defer gpa.free(value);
-    try gsettings.set(gpa, env, store, gnome.ext_schema_id, key, value);
+    var kbuf: [32]u8 = undefined;
+    try gsettings.set(gpa, env, store, gnome.ext_schema_id, mode_keys.settingsKey(&kbuf, name), value);
 }
 
 /// Its self-timer's seconds, kept with Shotlet's own.

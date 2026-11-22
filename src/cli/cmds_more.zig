@@ -51,11 +51,11 @@ const gnome_subs = [_]Command{
         .usage = &.{ "gnome-integration shortcut [KEY... | none]", "gnome-integration shortcut MODE [KEY... | none]" },
         .description = "Without arguments, shows the area capture's key and each capture mode's. KEY... sets the area capture's keys " ++
             "(default Print); MODE KEY... sets a mode's (area, fullscreen, screens, previous, window, scroll, timer) or the key that " ++
-            "shows the last thumbnail again (thumbnail); none unbinds it.",
-        .args = &.{.{ .name = "KEY", .repeat = true, .choices = &shortcut_words, .help = "A mode name, then accelerators such as '<Shift><Super>s', or none" }},
+            "shows the last thumbnail again (thumbnail); none unbinds it. Keys are written as Shift+Super+S.",
+        .args = &.{.{ .name = "KEY", .repeat = true, .choices = &shortcut_words, .help = "A mode name, then shortcuts such as Shift+Super+S, or none" }},
         .examples = &.{
-            .{ .cmd = "gnome-integration shortcut '<Shift><Super>s'", .what = "Area: Shift+Super+S" },
-            .{ .cmd = "gnome-integration shortcut window '<Super>w'", .what = "Window: Super+W" },
+            .{ .cmd = "gnome-integration shortcut Shift+Super+S", .what = "Area: Shift+Super+S" },
+            .{ .cmd = "gnome-integration shortcut window Super+W", .what = "Window: Super+W" },
             .{ .cmd = "gnome-integration shortcut screens none", .what = "No key for all screens" },
         },
     },
@@ -161,7 +161,7 @@ pub const list = [_]Command{
         .subs = &gnome_subs,
         .examples = &.{
             .{ .cmd = "gnome-integration install", .what = "Install the extension" },
-            .{ .cmd = "gnome-integration shortcut '<Shift><Super>s'", .what = "Its capture key" },
+            .{ .cmd = "gnome-integration shortcut Shift+Super+S", .what = "Its capture key" },
         },
     },
     .{

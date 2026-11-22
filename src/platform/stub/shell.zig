@@ -8,6 +8,7 @@ const desktop = @import("desktop.zig");
 const Env = @import("../../app/env.zig").Env;
 const capture = @import("../../app/capture.zig");
 const mode = @import("../../app/modes/mode.zig");
+const Accel = @import("../../app/accel.zig").Accel;
 
 pub const State = types.State;
 pub const CaptureInfo = types.CaptureInfo;
@@ -72,14 +73,17 @@ pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, buf:
     _ = .{ gpa, env, s, buf };
     return null;
 }
-/// The first accelerator bound to `key` ("<Ctrl>Print"); null when none.
-pub fn getShortcut(arena: std.mem.Allocator, env: Env, store: []const u8, key: []const u8) ?[]const u8 {
-    _ = .{ arena, env, store, key };
+/// The first shortcut bound to shortcut `name` (mode.shortcuts) as
+/// people read it: app/accel.zig's notation ("Ctrl+Print"), or the
+/// desktop's own when that has a key the notation cannot name; null when
+/// none.
+pub fn getShortcut(arena: std.mem.Allocator, env: Env, store: []const u8, name: []const u8) ?[]const u8 {
+    _ = .{ arena, env, store, name };
     return null;
 }
-/// Bind `key` to `accel` (null: none).
-pub fn setShortcut(gpa: std.mem.Allocator, env: Env, store: []const u8, key: []const u8, accel: ?[]const u8) error{Unavailable}!void {
-    _ = .{ gpa, env, store, key, accel };
+/// Bind shortcut `name` to `accel` (null: none).
+pub fn setShortcut(gpa: std.mem.Allocator, env: Env, store: []const u8, name: []const u8, accel: ?Accel) error{Unavailable}!void {
+    _ = .{ gpa, env, store, name, accel };
     return error.Unavailable;
 }
 pub fn setTimerSeconds(gpa: std.mem.Allocator, env: Env, store: []const u8, seconds: u32) error{Unavailable}!void {

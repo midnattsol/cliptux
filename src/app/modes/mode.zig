@@ -43,27 +43,28 @@ pub const Mode = enum {
     }
 };
 
-/// A shortcut of the GNOME extension: a mode, the self-timer, or the
-/// last thumbnail again.
+/// A global shortcut the shell integration holds: a mode, the
+/// self-timer, or the last thumbnail again.
 pub const Shortcut = struct {
-    /// its key in the extension's settings
-    key: []const u8,
-    /// the word `shotlet gnome-integration shortcut WORD KEY` takes
+    /// the word `shotlet gnome-integration shortcut WORD KEY` takes; the
+    /// backend's name for it (api.shell.getShortcut, setShortcut)
     name: []const u8,
     label: []const u8,
-    /// none of GNOME's own shortcuts uses these (Alt+Print is SysRq)
+    /// what the integration binds it to at first (app/accel.zig's
+    /// notation); none of GNOME's own shortcuts uses these (Alt+Print is
+    /// SysRq)
     default: []const u8,
 };
 
 pub const shortcuts = [_]Shortcut{
-    .{ .key = "capture-shortcut", .name = "area", .label = "Capture area", .default = "Print" },
-    .{ .key = "fullscreen-shortcut", .name = "fullscreen", .label = "Capture screen", .default = "<Ctrl>Print" },
-    .{ .key = "screens-shortcut", .name = "screens", .label = "Capture all screens", .default = "<Ctrl><Shift>Print" },
-    .{ .key = "previous-shortcut", .name = "previous", .label = "Capture previous area", .default = "<Shift><Super>Print" },
-    .{ .key = "window-shortcut", .name = "window", .label = "Capture window", .default = "<Super>Print" },
-    .{ .key = "scroll-shortcut", .name = "scroll", .label = "Scrolling capture", .default = "<Ctrl><Super>Print" },
-    .{ .key = "timer-shortcut", .name = "timer", .label = "Self-timer", .default = "<Ctrl><Shift><Super>Print" },
-    .{ .key = "thumbnail-shortcut", .name = "thumbnail", .label = "Last thumbnail again", .default = "<Shift><Super>t" },
+    .{ .name = "area", .label = "Capture area", .default = "Print" },
+    .{ .name = "fullscreen", .label = "Capture screen", .default = "Ctrl+Print" },
+    .{ .name = "screens", .label = "Capture all screens", .default = "Ctrl+Shift+Print" },
+    .{ .name = "previous", .label = "Capture previous area", .default = "Shift+Super+Print" },
+    .{ .name = "window", .label = "Capture window", .default = "Super+Print" },
+    .{ .name = "scroll", .label = "Scrolling capture", .default = "Ctrl+Super+Print" },
+    .{ .name = "timer", .label = "Self-timer", .default = "Ctrl+Shift+Super+Print" },
+    .{ .name = "thumbnail", .label = "Last thumbnail again", .default = "Shift+Super+T" },
 };
 
 pub fn shortcutNamed(name: []const u8) ?Shortcut {
@@ -138,8 +139,12 @@ test "commands name modes" {
     try std.testing.expectEqual(Mode.area, r.mode);
 }
 
-test "every mode but area has its own shortcut key" {
-    for (shortcuts) |s| try std.testing.expect(std.mem.endsWith(u8, s.key, "-shortcut"));
+test "every shortcut has its own default, in the neutral notation" {
+    const accel = @import("../accel.zig");
+    for (shortcuts, 0..) |s, i| {
+        const a = accel.parse(s.default).?;
+        for (shortcuts[i + 1 ..]) |o| try std.testing.expect(!a.eql(accel.parse(o.default).?));
+    }
     try std.testing.expect(shortcutNamed("scroll") != null);
     try std.testing.expect(shortcutNamed("nope") == null);
 }

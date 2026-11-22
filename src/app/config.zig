@@ -54,9 +54,13 @@ pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
 
 fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
     var cfg = Config{};
-    parse.readInto(alloc, dir, &cfg);
+    const migrated = parse.readInto(alloc, dir, &cfg);
     // missing keys get their defaults as baseline: unchanged, never written
     model.rememberBase(&cfg);
+    // binds read from an older file's lines are written anew at the next save
+    for (migrated, 0..) |m, i| if (m) {
+        cfg.base[model.n_fixed_keys + i] = 0;
+    };
     return cfg;
 }
 
@@ -249,4 +253,27 @@ test "migration copies when the new directory already exists" {
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/config", .{old_dir}), "default_color=4\n");
     migrateFrom(&.{old_dir}, new_dir);
     try std.testing.expectEqual(@as(u3, 4), loadDir(alloc, new_dir).default_color);
+}
+
+test "binds of an older file are written anew in the neutral notation" {
+    const alloc = std.testing.allocator;
+    const root = try testDir();
+    defer alloc.free(root);
+    defer sys.removeTree(root);
+    var b1: [512]u8 = undefined;
+    var b2: [600]u8 = undefined;
+    const dir = try std.fmt.bufPrint(&b1, "{s}/shotlet", .{root});
+    sys.mkdirAll(dir, 0o700);
+    const path = try configFile(dir, &b2);
+    try sys.writeFile(path, "bind_pen=ctrl+33\nnotify=false\n");
+
+    var cfg = loadDir(alloc, dir);
+    try std.testing.expect(cfg.binds[@backingInt(Action.pen)].matches(.f, true, false));
+    // a save of anything else carries the migrated bind along
+    cfg.copy_on_save = true;
+    try saveDir(alloc, dir, &cfg);
+    const data = try sys.readFileAlloc(alloc, path, 4096);
+    defer alloc.free(data);
+    try std.testing.expectEqualStrings("notify=false\ncopy_on_save=true\nshortcut_pen=Ctrl+F\n", data);
+    try std.testing.expect(loadDir(alloc, dir).binds[@backingInt(Action.pen)].matches(.f, true, false));
 }

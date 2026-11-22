@@ -1,10 +1,9 @@
 //! The configuration model: the Config struct, its keys (fixed settings
-//! plus one "bind_<action>" per editor action) and how each key's value
+//! plus one "shortcut_<action>" per editor action) and how each key's value
 //! is serialized, plus the per-key hash baseline save() compares against.
 
 const std = @import("std");
 const binds = @import("../binds.zig");
-const legacy_keys = @import("legacy_keys.zig");
 const Action = binds.Action;
 const n_actions = binds.n_actions;
 const Bind = binds.Bind;
@@ -101,6 +100,8 @@ pub const Config = struct {
 // --- keys ---
 
 pub const n_fixed_keys = 17;
+/// an editor action's key: this, then the action's name
+pub const bind_prefix = "shortcut_";
 pub const n_keys = n_fixed_keys + n_actions;
 
 const fixed_key_names = [n_fixed_keys][]const u8{
@@ -130,12 +131,12 @@ const fixed_key_names = [n_fixed_keys][]const u8{
 
 pub const padding_names = [4][]const u8{ "none", "small", "medium", "large" };
 
-/// Name of key `k` ("notify", ..., "bind_pen", ...).
+/// Name of key `k` ("notify", ..., "shortcut_pen", ...).
 pub fn keyName(k: usize, buf: []u8) []const u8 {
     if (k < n_fixed_keys) return fixed_key_names[k];
     const names = comptime @typeInfo(Action).@"enum".field_names;
     inline for (names, 0..) |fld_name, i| {
-        if (k - n_fixed_keys == i) return "bind_" ++ fld_name;
+        if (k - n_fixed_keys == i) return bind_prefix ++ fld_name;
     }
     _ = buf;
     unreachable;
@@ -173,13 +174,10 @@ pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
     };
 }
 
-/// "ctrl+shift+44": modifiers, then the key code.
+/// "Ctrl+Shift+Z" (app/accel.zig's notation), or "none".
 fn formatBind(b: Bind, buf: []u8) []const u8 {
-    return std.fmt.bufPrint(buf, "{s}{s}{d}", .{
-        if (b.ctrl) "ctrl+" else "",
-        if (b.shift) "shift+" else "",
-        legacy_keys.number(b.code) orelse 0,
-    }) catch unreachable;
+    const a = b.toAccel() orelse return "none";
+    return a.format(buf) orelse "none";
 }
 
 pub fn valueHash(v: []const u8) u64 {

@@ -1,87 +1,93 @@
-//! GNOME accelerator strings ("<Ctrl><Shift>s"): telling when two name
-//! the same key.
+//! Shortcuts in Shotlet's own notation, whatever the desktop: modifiers,
+//! then the key, joined by '+' ("Print", "Ctrl+Print", "Shift+Super+S",
+//! "Super+4"). Modifiers come in the order Ctrl, Shift, Alt, Super; keys
+//! are named as api/keys.zig names them (KeyCode.name), any case.
+//!
+//! In a global shortcut a letter or digit stands for the key typing it in
+//! the active layout, as desktops match them; other keys are the key
+//! itself. A backend converts to its desktop's notation (GNOME: GTK's
+//! "<Shift><Super>s", linux/gnome/gtk_accel.zig).
 
 const std = @import("std");
+const KeyCode = @import("../platform/api/keys.zig").Code;
 
-/// "<Ctrl><Shift>s" and "<Shift><Control>S" are the same key.
-pub fn sameAccel(a: []const u8, b: []const u8) bool {
-    var na: [128]u8 = undefined;
-    var nb: [128]u8 = undefined;
-    const x = normalizeAccel(a, &na) orelse return false;
-    const y = normalizeAccel(b, &nb) orelse return false;
-    return std.mem.eql(u8, x, y);
+pub const Mods = packed struct(u4) {
+    ctrl: bool = false,
+    shift: bool = false,
+    alt: bool = false,
+    super: bool = false,
+
+    /// in bit order
+    pub const names = [_][]const u8{ "Ctrl", "Shift", "Alt", "Super" };
+
+    pub fn has(m: Mods, i: usize) bool {
+        return @as(u4, @bitCast(m)) & (@as(u4, 1) << @intCast(i)) != 0;
+    }
+};
+
+pub const Accel = struct {
+    mods: Mods = .{},
+    key: KeyCode,
+
+    /// "Ctrl+Shift+Print"; null when `buf` is too small or the key has no
+    /// name.
+    pub fn format(self: Accel, buf: []u8) ?[]const u8 {
+        const key = self.key.name() orelse return null;
+        var w: std.Io.Writer = .fixed(buf);
+        for (Mods.names, 0..) |n, i| if (self.mods.has(i)) w.print("{s}+", .{n}) catch return null;
+        w.writeAll(key) catch return null;
+        return w.buffered();
+    }
+
+    pub fn eql(a: Accel, b: Accel) bool {
+        return a.key == b.key and a.mods == b.mods;
+    }
+};
+
+/// "Shift+Super+S", "ctrl+print" ...; null when it is not one (an unknown
+/// modifier or key, a modifier twice, no key).
+pub fn parse(text: []const u8) ?Accel {
+    var bits: u4 = 0;
+    var it = std.mem.splitScalar(u8, std.mem.trim(u8, text, " "), '+');
+    var part = it.first();
+    while (it.next()) |next| : (part = next) {
+        const bit = modBit(part) orelse return null;
+        if (bits & bit != 0) return null;
+        bits |= bit;
+    }
+    const key = KeyCode.fromName(part) orelse return null;
+    if (key.isModifier()) return null;
+    return .{ .mods = @bitCast(bits), .key = key };
 }
 
-/// Modifier flags, then the key in lower case.
-fn normalizeAccel(accel: []const u8, buf: []u8) ?[]const u8 {
-    const mods = [_]struct { []const u8, u8 }{
-        .{ "shift", 'S' }, .{ "control", 'C' }, .{ "ctrl", 'C' },  .{ "primary", 'C' },
-        .{ "ctl", 'C' },   .{ "alt", 'A' },     .{ "mod1", 'A' },  .{ "super", 'W' },
-        .{ "mod4", 'W' },  .{ "meta", 'M' },    .{ "hyper", 'H' },
+fn modBit(name: []const u8) ?u4 {
+    const aliases = [_]struct { []const u8, u2 }{
+        .{ "ctrl", 0 }, .{ "control", 0 }, .{ "shift", 1 }, .{ "alt", 2 }, .{ "super", 3 },
     };
-    var flags: [6]bool = @splat(false);
-    const order = "SCAWMH";
-    var i: usize = 0;
-    while (i < accel.len and accel[i] == '<') {
-        const end = std.mem.indexOfScalarPos(u8, accel, i, '>') orelse return null;
-        const name = accel[i + 1 .. end];
-        const f = for (mods) |m| {
-            if (std.ascii.eqlIgnoreCase(m[0], name)) break m[1];
-        } else return null;
-        flags[std.mem.indexOfScalar(u8, order, f).?] = true;
-        i = end + 1;
-    }
-    const key = accel[i..];
-    if (key.len == 0 or key.len + 6 > buf.len) return null;
-    var n: usize = 0;
-    for (flags, 0..) |on, k| if (on) {
-        buf[n] = order[k];
-        n += 1;
-    };
-    buf[n] = '+';
-    n += 1;
-    for (key) |c| {
-        buf[n] = std.ascii.toLower(c);
-        n += 1;
-    }
-    return buf[0..n];
+    for (aliases) |a| if (std.ascii.eqlIgnoreCase(a[0], name)) return @as(u4, 1) << a[1];
+    return null;
 }
 
-/// "<Shift><Super>s" as people read it: "Shift+Super+S".
-pub fn display(buf: []u8, accel: []const u8) []const u8 {
-    // "<Shift><Super>s" -> "Shift+Super+S"
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < accel.len) {
-        if (accel[i] == '<') {
-            const end = std.mem.indexOfScalarPos(u8, accel, i, '>') orelse break;
-            const name = accel[i + 1 .. end];
-            if (n + name.len + 1 > buf.len) break;
-            @memcpy(buf[n..][0..name.len], name);
-            n += name.len;
-            buf[n] = '+';
-            n += 1;
-            i = end + 1;
-        } else {
-            const key = accel[i..];
-            if (n + key.len > buf.len) break;
-            @memcpy(buf[n..][0..key.len], key);
-            if (key.len == 1) buf[n] = std.ascii.toUpper(key[0]);
-            n += key.len;
-            break;
-        }
-    }
-    return buf[0..n];
+test "shortcuts read and print in the neutral notation" {
+    const t = std.testing;
+    var buf: [64]u8 = undefined;
+    const a = parse("Shift+Super+S").?;
+    try t.expect(a.mods.shift and a.mods.super and !a.mods.ctrl and a.key == .s);
+    try t.expectEqualStrings("Shift+Super+S", a.format(&buf).?);
+    // any case and order in, canonical order out
+    try t.expectEqualStrings("Ctrl+Shift+Print", parse("shift+CONTROL+print").?.format(&buf).?);
+    try t.expectEqualStrings("Super+4", parse("Super+4").?.format(&buf).?);
+    try t.expectEqualStrings("Print", parse("Print").?.format(&buf).?);
+    try t.expectEqualStrings("Alt+PageUp", parse("alt+pgup").?.format(&buf).?);
+    try t.expect(parse("Ctrl+Print").?.eql(.{ .mods = .{ .ctrl = true }, .key = .print }));
+    try t.expect(!parse("Ctrl+Print").?.eql(.{ .key = .print }));
 }
 
-test "accelerators compare as keys" {
-    try std.testing.expect(sameAccel("Print", "print"));
-    try std.testing.expect(sameAccel("<Ctrl><Shift>s", "<Shift><Control>S"));
-    try std.testing.expect(sameAccel("<Primary>p", "<Control>p"));
-    try std.testing.expect(!sameAccel("<Shift>Print", "Print"));
-    try std.testing.expect(!sameAccel("<Super>s", "<Shift><Super>s"));
-    try std.testing.expect(!sameAccel("<Bogus>s", "s"));
-    var b: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("Shift+Super+S", display(&b, "<Shift><Super>s"));
-    try std.testing.expectEqualStrings("Print", display(&b, "Print"));
+test "what is not a shortcut" {
+    const t = std.testing;
+    for ([_][]const u8{ "", "+", "Ctrl+", "Ctrl+Ctrl+S", "Hyper+S", "Ctrl+Banana", "Shift", "Ctrl+ShiftLeft", "Super+S+" }) |s|
+        try t.expectEqual(@as(?Accel, null), parse(s));
+    var small: [4]u8 = undefined;
+    try t.expectEqual(@as(?[]const u8, null), parse("Ctrl+Print").?.format(&small));
+    try t.expectEqual(@as(?[]const u8, null), (Accel{ .key = .other }).format(&small));
 }

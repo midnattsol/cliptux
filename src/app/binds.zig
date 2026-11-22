@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const KeyCode = @import("../platform/api/keys.zig").Code;
+const Accel = @import("accel.zig").Accel;
 
 pub const Action = enum {
     select,
@@ -72,6 +73,20 @@ pub const Bind = struct {
 
     pub fn matches(self: Bind, code: KeyCode, ctrl: bool, shift: bool) bool {
         return self.code != .none and self.code == code and self.ctrl == ctrl and self.shift == shift;
+    }
+
+    /// As a shortcut in app/accel.zig's notation ("Ctrl+Shift+Z"; the
+    /// key by its place, as binds match); null when unbound.
+    pub fn toAccel(self: Bind) ?Accel {
+        if (self.code == .none) return null;
+        return .{ .mods = .{ .ctrl = self.ctrl, .shift = self.shift }, .key = self.code };
+    }
+
+    /// The bind of a shortcut; null when it uses Alt or Super, which
+    /// binds have not.
+    pub fn fromAccel(a: Accel) ?Bind {
+        if (a.mods.alt or a.mods.super) return null;
+        return .{ .code = a.key, .ctrl = a.mods.ctrl, .shift = a.mods.shift };
     }
 };
 

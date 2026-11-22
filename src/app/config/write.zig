@@ -6,7 +6,8 @@ const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
 const parse = @import("parse.zig");
 const location = @import("location.zig");
-const Config = @import("model.zig").Config;
+const model = @import("model.zig");
+const Config = model.Config;
 
 pub const Change = struct { key: []const u8, value: []const u8 };
 
@@ -79,7 +80,7 @@ pub fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const 
     while (lines.next()) |line| {
         if (lines.index == null and line.len == 0) break; // trailing newline
         if (parse.parseLine(line)) |kv| {
-            if (isLegacyKey(kv.key)) continue;
+            if (isLegacyKey(kv.key) or replaced(kv.key, changes)) continue;
             if (findChange(changes, kv.key)) |ci| {
                 if (!done[ci]) {
                     try appendKv(alloc, &out, changes[ci]);
@@ -99,6 +100,17 @@ pub fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const 
 
 fn isLegacyKey(key: []const u8) bool {
     for (legacy_keys) |k| if (std.mem.eql(u8, k, key)) return true;
+    return false;
+}
+
+/// An older file's `bind_<action>` whose `shortcut_<action>` is being
+/// written (config/parse.zig reads the old one only without the new).
+fn replaced(key: []const u8, changes: []const Change) bool {
+    if (!std.mem.startsWith(u8, key, parse.legacy_prefix)) return false;
+    const action = key[parse.legacy_prefix.len..];
+    for (changes) |ch| {
+        if (std.mem.startsWith(u8, ch.key, model.bind_prefix) and std.mem.eql(u8, ch.key[model.bind_prefix.len..], action)) return true;
+    }
     return false;
 }
 
@@ -142,4 +154,13 @@ test "single-monitor restore tokens are dropped" {
     var cfg = Config{};
     parse.applyValue(&cfg, "screencast_token", "old");
     try std.testing.expect(cfg.scToken() == null);
+}
+
+test "a bind written anew drops the older file's line for it" {
+    const alloc = std.testing.allocator;
+    const out = try mergeContent(alloc, "bind_pen=33\nbind_line=38\nnotify=true\n", &.{
+        .{ .key = "shortcut_pen", .value = "Ctrl+F" },
+    });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("bind_line=38\nnotify=true\nshortcut_pen=Ctrl+F\n", out);
 }

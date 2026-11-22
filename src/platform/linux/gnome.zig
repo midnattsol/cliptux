@@ -52,7 +52,6 @@ pub const CaptureInfo = capture.CaptureInfo;
 pub const captureInfo = capture.captureInfo;
 
 pub const isShotletCommand = custom.isShotletCommand;
-pub const sameAccel = @import("../../app/accel.zig").sameAccel;
 
 pub const MoveShortcuts = setup.MoveShortcuts;
 pub const install = setup.install;
@@ -74,4 +73,6 @@ comptime {
     _ = @import("gnome/next_login.zig");
     _ = @import("gnome/shell_settings.zig");
     _ = cli;
+    _ = @import("gnome/gtk_accel.zig");
+    _ = @import("gnome/mode_keys.zig");
 }
