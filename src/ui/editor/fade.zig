@@ -11,6 +11,7 @@ const motion = @import("../motion.zig");
 const theme = @import("../theme.zig");
 const view_mod = @import("../view.zig");
 const shapes_mod = @import("../shapes.zig");
+const mix = @import("../../gfx/effects.zig").mixRows;
 
 const Editor = editor.Editor;
 const Rect = shapes_mod.Rect;
@@ -60,17 +61,6 @@ fn level(start: i64, now: i64) u32 {
     if (!motion.enabled) return 256;
     const t = @as(f64, @floatFromInt(now - start)) / @as(f64, @floatFromInt(duration_ms));
     return @intFromFloat(@round(motion.easeOut(t) * 256));
-}
-
-/// dst = a + (b - a) * k / 256 per colour channel, opaque. dst may be b.
-pub fn mix(dst: []u32, a: []const u32, b: []const u32, k: u32) void {
-    @setRuntimeSafety(false);
-    const ka = 256 - k;
-    for (dst, a, b) |*d, pa, pb| {
-        const rb = ((pa & 0x00FF00FF) * ka + (pb & 0x00FF00FF) * k) >> 8;
-        const g = ((pa & 0x0000FF00) * ka + (pb & 0x0000FF00) * k) >> 8;
-        d.* = 0xFF000000 | (rb & 0x00FF00FF) | (g & 0x0000FF00);
-    }
 }
 
 /// Per pane: the last frame shown and the plain capture as it shows.
@@ -156,17 +146,4 @@ fn waitPresented(ed: *Editor, max_ms: i64) !void {
         _ = try ed.win.nextEventTimeout(ed.win.pollTimeoutMs(@intCast(@max(1, deadline - motion.now()))));
         ed.win.queue.clearRetainingCapacity();
     }
-}
-
-test "mix goes from a to b" {
-    var a = [_]u32{ 0xFF000000, 0xFFFFFFFF };
-    var b = [_]u32{ 0xFFFFFFFF, 0xFF000000 };
-    var d: [2]u32 = undefined;
-    mix(&d, &a, &b, 0);
-    try std.testing.expectEqualSlices(u32, &a, &d);
-    mix(&d, &a, &b, 256);
-    try std.testing.expectEqualSlices(u32, &b, &d);
-    mix(&d, &a, &b, 128);
-    try std.testing.expectEqual(@as(u32, 0xFF7F7F7F), d[0]);
-    try std.testing.expectEqual(@as(u32, 0xFF7F7F7F), d[1]);
 }

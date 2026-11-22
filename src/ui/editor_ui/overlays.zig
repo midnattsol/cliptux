@@ -5,6 +5,7 @@ const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const tools = @import("../tools/mod.zig");
 const help = @import("../help.zig");
+const pop_fade = @import("pop_fade.zig");
 const material = @import("material.zig");
 const draw_chrome = @import("draw_chrome.zig");
 const selection = @import("selection.zig");
@@ -58,6 +59,7 @@ fn collectFloating(self: *Editor, list: *RectList) void {
     if (!self.toolbar_rect.isEmpty()) list.add(foot(self, self.toolbar_rect.expand(self.sc(1)), th.bar_shadow));
     if (!self.panel_rect.isEmpty()) list.add(foot(self, self.panel_rect.expand(self.sc(1)), th.bar_shadow));
     if (!self.pop_rect.isEmpty()) list.add(foot(self, self.pop_rect.expand(self.sc(1)), th.popover_shadow));
+    if (!pop_fade.rect(self).isEmpty()) list.add(pop_fade.rect(self));
     if (tooltip.tooltipRect(self)) |r| list.add(r.expand(self.sc(6)));
     if (self.picker.open and !self.toolbar_rect.isEmpty()) list.add(foot(self, self.picker.rect.expand(self.sc(1)), th.popover_shadow));
     if (self.copy_notice != .none) list.add(foot(self, notice.noticeRect(self), th.bar_shadow));

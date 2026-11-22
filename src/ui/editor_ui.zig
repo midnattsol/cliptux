@@ -12,6 +12,7 @@
 //! loupe, tooltip and notice.
 
 const buttons = @import("editor_ui/buttons.zig");
+const pop_fade = @import("editor_ui/pop_fade.zig");
 const toolbar_layout = @import("editor_ui/toolbar_layout.zig");
 const popover_layout = @import("editor_ui/popover_layout.zig");
 const hit = @import("editor_ui/hit.zig");
@@ -27,6 +28,8 @@ const tooltip = @import("editor_ui/tooltip.zig");
 const notice = @import("editor_ui/notice.zig");
 
 pub const Seg = buttons.Seg;
+pub const PopClosing = pop_fade.Closing;
+pub const beginPopoverClose = pop_fade.begin;
 pub const ButtonKind = buttons.ButtonKind;
 pub const Layer = buttons.Layer;
 pub const Button = buttons.Button;

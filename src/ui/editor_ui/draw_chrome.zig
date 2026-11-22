@@ -12,6 +12,7 @@ const selection = @import("selection.zig");
 const loupe = @import("loupe.zig");
 const draw_toolbar = @import("draw_toolbar.zig");
 const draw_popover = @import("draw_popover.zig");
+const pop_fade = @import("pop_fade.zig");
 const picker = @import("picker.zig");
 const tooltip = @import("tooltip.zig");
 const notice = @import("notice.zig");
@@ -37,6 +38,7 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (!self.isTbPane()) return;
     draw_toolbar.drawToolbar(self, canvas);
     if (self.popover != .none and !self.pop_rect.isEmpty()) draw_popover.drawPopover(self, canvas);
+    pop_fade.draw(self, canvas);
     if (self.picker.open and !self.toolbar_rect.isEmpty()) picker.drawPicker(self, canvas);
     tooltip.drawTooltip(self, canvas);
     if (self.copy_notice != .none) notice.drawCopyNotice(self, canvas);

@@ -7,6 +7,7 @@ const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const motion = @import("../motion.zig");
 const ff = @import("common.zig").ff;
+const pop_fade = @import("pop_fade.zig");
 
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
@@ -74,7 +75,7 @@ pub fn animating(self: *const Editor) bool {
     const t = motion.now();
     if (self.toolbar_rect.isEmpty()) return false;
     return self.tb_x.busy(t) or self.tb_y.busy(t) or self.tb_alpha.busy(t) or self.act_x.busy(t) or
-        self.act_y.busy(t) or self.hov.busy(t) or (self.popover != .none and self.pop_open.busy(t));
+        self.act_y.busy(t) or self.hov.busy(t) or (self.popover != .none and self.pop_open.busy(t)) or pop_fade.busy(self);
 }
 
 /// Hover highlight strength of button `bi` (fades in and out).

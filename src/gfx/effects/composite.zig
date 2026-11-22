@@ -201,3 +201,27 @@ test "over keeps colour on a transparent destination" {
     // over an opaque destination nothing changes from before
     try std.testing.expectEqual(@as(u32, 0xFF7F7F7F) & 0xFF000000, over(0xFF000000, 0x80FFFFFF) & 0xFF000000);
 }
+
+/// dst = a + (b - a) * k / 256 per colour channel, opaque. dst may be a or b.
+pub fn mixRows(dst: []u32, a: []const u32, b: []const u32, k: u32) void {
+    @setRuntimeSafety(false);
+    const ka = 256 - k;
+    for (dst, a, b) |*d, pa, pb| {
+        const rb = ((pa & 0x00FF00FF) * ka + (pb & 0x00FF00FF) * k) >> 8;
+        const g = ((pa & 0x0000FF00) * ka + (pb & 0x0000FF00) * k) >> 8;
+        d.* = 0xFF000000 | (rb & 0x00FF00FF) | (g & 0x0000FF00);
+    }
+}
+
+test "mixRows goes from a to b" {
+    var a = [_]u32{ 0xFF000000, 0xFFFFFFFF };
+    var b = [_]u32{ 0xFFFFFFFF, 0xFF000000 };
+    var d: [2]u32 = undefined;
+    mixRows(&d, &a, &b, 0);
+    try std.testing.expectEqualSlices(u32, &a, &d);
+    mixRows(&d, &a, &b, 256);
+    try std.testing.expectEqualSlices(u32, &b, &d);
+    mixRows(&d, &a, &b, 128);
+    try std.testing.expectEqual(@as(u32, 0xFF7F7F7F), d[0]);
+    try std.testing.expectEqual(@as(u32, 0xFF7F7F7F), d[1]);
+}

@@ -113,6 +113,8 @@ pub const Editor = struct {
     popover: ui.Popover = .none,
     pop_rect: Rect = Rect.empty,
     pop_open: motion.Tween = .{},
+    /// a closing popover, fading out
+    pop_closing: ui.PopClosing = .{},
     /// the beautify panel beside the toolbar
     panel_rect: Rect = Rect.empty,
     seps: [12]Rect = undefined,
@@ -215,6 +217,7 @@ pub const Editor = struct {
         tools.deinit(self);
         self.doc.deinit();
         self.buttons.deinit(self.alloc);
+        self.pop_closing.release(self.alloc);
         self.releaseCaches();
         self.alloc.free(self.layer);
         self.layer = &.{};
