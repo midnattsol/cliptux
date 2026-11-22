@@ -19,6 +19,9 @@ const bar = @import("picker_bar.zig");
 const motion = @import("../motion.zig");
 const theme = @import("../theme.zig");
 const mixRows = @import("../../gfx/effects.zig").mixRows;
+const dim = @import("../dim.zig");
+const selchrome = @import("../selchrome.zig");
+const shapes = @import("../shapes.zig");
 const Rect = selmod.Rect;
 const Point = selmod.Point;
 
@@ -46,6 +49,10 @@ pub const Picker = struct {
     /// the bar, in logical desktop pixels (null: not shown)
     bar_at: ?Point = null,
     mouse: Point = .{ .x = 0, .y = 0 },
+    /// the mid-edge handle showing under the pointer, for repaints
+    edge_handle: ?usize = null,
+    /// of 256, what the dim outside the area keeps (ui/dim.zig)
+    dim_keep: u32 = 256,
     pressed_bar: ?bar.Item = null,
     dirty: bool = true,
     result: ?Result = null,
@@ -139,10 +146,22 @@ pub const Picker = struct {
             self.sel.motion(p);
             self.dirty = true;
         }
+        const eh = self.edgeHandle();
+        if (eh != self.edge_handle) self.dirty = true;
+        self.edge_handle = eh;
         const hv = if (self.sel.drag == .none) self.barItemAt(p) else null;
         if (hv != self.st.hover) self.dirty = true;
         self.st.hover = hv;
         self.win.setCursor(self.cursorAt(p)) catch {};
+    }
+
+    /// The mid-edge handle the pointer brings out (selchrome.handleShown).
+    fn edgeHandle(self: *const Picker) ?usize {
+        const s = self.sel.sel orelse return null;
+        for ([_]usize{ 1, 3, 5, 7 }) |i| {
+            if (selchrome.handleShown(shapeRect(s), i, .{ .x = self.mouse.x, .y = self.mouse.y }, grab)) return i;
+        }
+        return null;
     }
 
     fn cursorAt(self: *const Picker, p: Point) window.Cursor {
@@ -266,8 +285,8 @@ pub const Picker = struct {
         var cv = render.Canvas.init(px, p.bw, p.bh);
         const k = self.scaleOf(i);
         const sb: ?Rect = if (self.sel.sel) |s| self.bufRect(i, s) else null;
-        dimOutside(&cv, sb);
-        if (sb) |r| drawSelection(&cv, r, k, self.sel.sel.?, self.st.th);
+        dim.outside(px[0..p.base.len], p.bw, p.bh, if (sb) |r| shapeRect(r) else null, self.dim_keep);
+        if (sb) |r| self.drawSelection(i, &cv, shapeRect(r), k);
         if (self.sel.sel == null and i == self.paneAt(self.mouse)) drawHint(&cv, k, self.st.th);
         if (self.bar_at) |at| {
             const b = self.bufRect(i, .{ .x = at.x, .y = at.y, .w = 1, .h = 1 });
@@ -276,40 +295,31 @@ pub const Picker = struct {
         if (k_dim < 256) mixRows(px[0..p.base.len], p.base, px[0..p.base.len], k_dim);
         try self.win.presentSurface(i);
     }
+
+    /// As the editor draws a capture's selection: the edge, the handles
+    /// while nothing is dragged, the size (in recorded pixels) above it.
+    fn drawSelection(self: *const Picker, i: u8, cv: *render.Canvas, r: shapes.Rect, k: f64) void {
+        const th = self.st.th;
+        selchrome.edge(cv, r, th);
+        if (self.sel.drag == .none) {
+            const m: ?shapes.Point = if (i == self.paneAt(self.mouse)) blk: {
+                const b = self.bufRect(i, .{ .x = self.mouse.x, .y = self.mouse.y, .w = 1, .h = 1 });
+                break :blk .{ .x = b.x, .y = b.y };
+            } else null;
+            selchrome.handles(cv, r, m, @max(6, @as(i32, @intFromFloat(@round(grab * k)))), k, th);
+        }
+        const logical = self.sel.sel.?;
+        var buf: [32]u8 = undefined;
+        const label = selchrome.sizeLabel(&buf, logical.w, logical.h);
+        selchrome.sizePill(cv, selchrome.sizePillRect(label, r, cv.w, k), k, th, label);
+    }
 };
 
-fn dimOutside(cv: *render.Canvas, sel: ?Rect) void {
-    const w: usize = @intCast(cv.w);
-    for (0..@intCast(cv.h)) |yu| {
-        const y: i32 = @intCast(yu);
-        const row = cv.px[yu * w ..][0..w];
-        for (row, 0..) |*c, xu| {
-            const x: i32 = @intCast(xu);
-            if (sel) |s| if (x >= s.x and y >= s.y and x < s.x + s.w and y < s.y + s.h) continue;
-            c.* = 0xFF000000 | ((c.* >> 1) & 0x7F7F7F) + ((c.* >> 3) & 0x1F1F1F);
-        }
-    }
-}
+/// how near a handle the pointer grabs it, logical px (as the editor's)
+const grab = 10;
 
-fn drawSelection(cv: *render.Canvas, r: Rect, k: f64, logical: Rect, th: theme.Theme) void {
-    const lw: i32 = @max(1, @as(i32, @intFromFloat(@round(k))));
-    cv.fillRect(r.x - lw, r.y - lw, r.w + 2 * lw, lw, 0xFFFFFFFF);
-    cv.fillRect(r.x - lw, r.y + r.h, r.w + 2 * lw, lw, 0xFFFFFFFF);
-    cv.fillRect(r.x - lw, r.y, lw, r.h, 0xFFFFFFFF);
-    cv.fillRect(r.x + r.w, r.y, lw, r.h, 0xFFFFFFFF);
-    for (0..8) |h| {
-        const hp = selmod.Selection.handlePoint(r, @intCast(h));
-        cv.fillCircleAA(@floatFromInt(hp.x), @floatFromInt(hp.y), 5 * k, 0xFFFFFFFF);
-        cv.fillCircleAA(@floatFromInt(hp.x), @floatFromInt(hp.y), 3.5 * k, 0xFFFF453A);
-    }
-    var buf: [32]u8 = undefined;
-    const label = std.fmt.bufPrint(&buf, "{d} \u{00D7} {d}", .{ logical.w, logical.h }) catch return;
-    const fs = 12 * k;
-    const tw = text.width(fs, label) + @as(i32, @intFromFloat(16 * k));
-    const lh = text.height(fs) + @as(i32, @intFromFloat(8 * k));
-    const y = if (r.y - lh - 8 > 0) r.y - lh - @as(i32, @intFromFloat(8 * k)) else r.y + @as(i32, @intFromFloat(8 * k));
-    cv.fillRoundRectAA(r.x, y, tw, lh, 6 * k, th.pill_bg);
-    text.draw(cv, r.x + @as(i32, @intFromFloat(8 * k)), y + @as(i32, @intFromFloat(4 * k)), fs, th.pill_fg, label);
+fn shapeRect(r: Rect) shapes.Rect {
+    return .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
 }
 
 fn drawHint(cv: *render.Canvas, k: f64, th: theme.Theme) void {
@@ -319,7 +329,7 @@ fn drawHint(cv: *render.Canvas, k: f64, th: theme.Theme) void {
     const hh = text.height(fs) + @as(i32, @intFromFloat(18 * k));
     const x = @divTrunc(cv.w - tw, 2);
     const y = @divTrunc(cv.h - hh, 2);
-    cv.fillRoundRectAA(x, y, tw, hh, 12 * k, th.pill_bg);
+    selchrome.pill(cv, .{ .x = x, .y = y, .w = tw, .h = hh }, 12 * k, th);
     text.draw(cv, x + @as(i32, @intFromFloat(16 * k)), y + @as(i32, @intFromFloat(9 * k)), fs, th.pill_fg, s);
 }
 
@@ -333,6 +343,7 @@ pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Captur
         .cap = cap,
         .sel = .{ .monitors = &.{} },
         .st = .{ .set = set, .overlays = overlays, .th = th },
+        .dim_keep = dim.keepFor(cap.image.pixels, cap.image.width, cap.image.height),
     };
     defer p.deinit();
     try p.win.openOutputs("Shotlet");
@@ -351,12 +362,4 @@ pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Captur
     }
     p.win.closeWindow();
     return p.result.?;
-}
-
-test "dimming leaves the selection alone" {
-    var px: [4 * 2]u32 = @splat(0xFFFFFFFF);
-    var cv = render.Canvas.init(&px, 4, 2);
-    dimOutside(&cv, .{ .x = 1, .y = 0, .w = 2, .h = 1 });
-    try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[1]);
-    try std.testing.expect(px[0] != 0xFFFFFFFF);
 }
