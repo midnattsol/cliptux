@@ -18,7 +18,7 @@ fn internal(comptime id: spec.Id, comptime name: []const u8, comptime usage: []c
 }
 
 pub const list = [_]spec.Command{
-    internal(.quick, "quick", "quick ROOT ID", "The floating thumbnail of a history entry"),
+    internal(.quick, "quick", "quick ROOT ID [READY-FD]", "The floating thumbnail of a history entry"),
     internal(.quick_video, "quick-video", "quick-video ROOT ID", "The floating thumbnail of a recording"),
     internal(.trim, "trim", "trim ROOT ID [--range A,B] [--export]", "The recording trimmer"),
     internal(.toast, "toast", "toast TITLE [BODY]", "A short notice on the screen"),

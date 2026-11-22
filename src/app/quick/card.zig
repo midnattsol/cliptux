@@ -31,6 +31,9 @@ pub fn render(self: *Quick) !void {
     const k = self.f();
     const now = sys.monoMs();
     const lh: i32 = @intCast(self.size[1]);
+    for (self.cards.items) |*c| if (c.born_ms == 0) {
+        c.born_ms = now;
+    };
     var i = self.cards.items.len;
     while (i > 0) {
         i -= 1;
@@ -45,6 +48,10 @@ pub fn render(self: *Quick) !void {
     if (self.hint) drawHint(self, px, bw, bh);
     fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
     try self.win.present();
+    // committed (the cards fade in from it): the editor may go. Not on
+    // its frame callback: mutter holds those back while the editor
+    // still covers the window.
+    self.signalReady();
 }
 
 fn drawHint(self: *Quick, px: []u32, bw: u32, bh: u32) void {

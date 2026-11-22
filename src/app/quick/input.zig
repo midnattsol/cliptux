@@ -135,7 +135,7 @@ pub fn tick(self: *Quick) void {
             c.notice = "";
             self.dirty = true;
         }
-        if (c.fade_from != 0 or now - c.born_ms < fade_in_ms) self.dirty = true;
+        if (fading(c, now)) self.dirty = true;
         if (c.fade_from != 0 and now - c.fade_from >= fade_ms) {
             self.remove(i);
             continue;
@@ -144,11 +144,16 @@ pub fn tick(self: *Quick) void {
     }
 }
 
+/// Not drawn yet, fading in or fading out: a frame per refresh.
+fn fading(c: *const stack.Card, now: i64) bool {
+    return c.born_ms == 0 or c.fade_from != 0 or now - c.born_ms < fade_in_ms;
+}
+
 pub fn nextWakeMs(self: *const Quick) i32 {
     var wait: i64 = 1000;
     const now = sys.monoMs();
-    for (self.cards.items) |c| {
-        if (c.fade_from != 0 or now - c.born_ms < fade_in_ms) return 16;
+    for (self.cards.items) |*c| {
+        if (fading(c, now)) return 16;
         wait = @min(wait, c.deadline_ms - now);
         if (c.notice_until != 0) wait = @min(wait, c.notice_until - now);
     }

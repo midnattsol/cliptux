@@ -109,7 +109,7 @@ fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, after: setti
     defer doc.deinit();
     doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc });
-    if (after == .thumbnail or c.cfg.showsThumbnail(false)) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k);
+    if (after == .thumbnail or c.cfg.showsThumbnail(false)) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k, null);
     if (after != .copy) {
         c.gpa.free(data);
         return;

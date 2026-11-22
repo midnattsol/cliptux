@@ -33,7 +33,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .permissions_reset => try @import("permissions.zig").run(gpa, env, if (p.flag("dry-run")) &.{ "reset", "--dry-run" } else &.{"reset"}),
         // answered by src/cli/front.zig
         .help, .completions, .man_page => unreachable,
-        .quick => try @import("quick.zig").run(gpa, env, (try need(p, 2))[0], r[1]),
+        .quick => try @import("quick.zig").run(gpa, env, (try need(p, 2))[0], r[1], readyFd(r[2..])),
         .quick_video => try @import("../record/quickvid.zig").run(gpa, env, (try need(p, 2))[0], r[1]),
         .trim => try @import("../ui/recui/trimui.zig").run(gpa, env, (try need(p, 2))[0], r[1], r[2..]),
         .toast => try @import("toastwin.zig").run(gpa, env, (try need(p, 1))[0], if (r.len > 1) r[1] else ""),
@@ -67,6 +67,13 @@ fn clearHistory(env: Env) !void {
     var buf: [1024]u8 = undefined;
     history.clear(try history.historyRoot(&buf, env.home));
     std.debug.print("history cleared\n", .{});
+}
+
+/// `quick ROOT ID READY-FD`: the pipe the editor waits on, if any.
+fn readyFd(rest: []const [:0]const u8) ?i32 {
+    if (rest.len == 0) return null;
+    const fd = std.fmt.parseInt(i32, rest[0], 10) catch return null;
+    return if (fd > 2) fd else null;
 }
 
 /// `--smoke MS`: auto-close after MS (leak runs); 0 when absent.
