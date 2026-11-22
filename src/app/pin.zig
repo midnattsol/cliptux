@@ -15,9 +15,9 @@
 //! "shotlet:pin:X:Y"), and it fades in rather than zooming from nowhere.
 
 const std = @import("std");
+const shell = @import("../platform/api.zig").shell;
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
-const gnome = @import("../platform/linux/gnome.zig");
 const sys = @import("../platform/api.zig").sys;
 const png = @import("../gfx/png.zig");
 const resample = @import("../gfx/resample.zig");
@@ -79,7 +79,7 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []con
     var pin: Pin = .{ .gpa = gpa, .win = &win, .img = img, .layer = win.hasLayerShell(), .born = sys.monoMs(), .at = at };
     defer gpa.free(pin.scaled);
     try pin.open();
-    pin.hint = !pin.layer and gnome.isGnome() and needsTopHint(gpa, env);
+    pin.hint = !pin.layer and shell.applies() and needsTopHint(gpa, env);
     std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (pin.layer) "layer shell" else if (pin.hint) "plain window" else "kept above by the GNOME extension" });
     try pin.loop();
     std.log.info("pin: closed", .{});
@@ -90,7 +90,7 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []con
 fn needsTopHint(gpa: std.mem.Allocator, env: Env) bool {
     var bus = desktop.connectBrief(gpa, env) catch return true;
     defer bus.deinit();
-    return !gnome.extensionActive(&bus);
+    return !shell.active(&bus);
 }
 
 /// One pin window: its placement, zoom, hover and drag state.

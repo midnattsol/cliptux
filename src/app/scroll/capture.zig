@@ -10,11 +10,10 @@ const std = @import("std");
 const capture = @import("../capture.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("../../platform/api.zig").sys;
-const gnome = @import("../../platform/linux/gnome.zig");
+const shell_seam = @import("../../platform/api.zig").shell;
 const geom = @import("../modes/geom.zig");
 const flow = @import("../modes/flow.zig");
 const settings = @import("../modes/settings.zig");
-const shell_bus = @import("../../platform/linux/gnome/shell_bus.zig");
 const region_pick = @import("../../ui/region_pick.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
 const theme = @import("../../ui/theme.zig");
@@ -28,7 +27,7 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
         else => return null,
     };
     std.log.info("scrolling capture: region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
-    const shell = gnome.isGnome() and gnome.extensionActive(c.conn);
+    const shell = shell_seam.applies() and shell_seam.active(c.conn);
     var hud = try hud_mod.Hud.open(c.win, theme.of(theme.readPrefs(c.conn, 800)));
     defer c.win.closeWindow();
     try showHud(c, &hud, cap, region, shell);
@@ -45,7 +44,7 @@ fn showHud(c: flow.Ctx, hud: *hud_mod.Hud, cap: *const capture.Capture, region: 
         try hud.draw(null);
         _ = try hud.poll(50);
         if (!placed) if (besideRegion(cap, region)) |p| {
-            placed = shell_bus.place(c.gpa, c.conn, hud_mod.title, p[0], p[1]);
+            placed = shell_seam.place(c.gpa, c.conn, hud_mod.title, p[0], p[1]);
         };
         if (placed and sys.monoMs() + 1000 > deadline) break;
     }

@@ -1,10 +1,10 @@
 //! The Settings window's capture permissions: the capture row's line
 //! (the path now and the last capture's) and Reset permissions, which
-//! does what `shotlet permissions reset` does (app/perms/reset.zig) and
+//! does what `shotlet permissions reset` does (api.capture) and
 //! shows a short line about it.
 
 const std = @import("std");
-const reset = @import("../../platform/linux/capture/perms/reset.zig");
+const platform_capture = @import("../../platform/api.zig").capture;
 const model = @import("model.zig");
 const w = @import("widgets.zig");
 const App = @import("app.zig").App;
@@ -47,11 +47,11 @@ pub fn drawRow(ui: *w.Ui, card: *w.Card, row_h: i32, note: *const Note) !void {
 pub fn resetAll(app: *App) void {
     var arena_state = std.heap.ArenaAllocator.init(app.alloc);
     defer arena_state.deinit();
-    const o = reset.run(arena_state.allocator(), app.st.env, app.busPtr(), false);
+    const o = platform_capture.resetPermissions(arena_state.allocator(), app.st.env, app.busPtr(), false);
     // the window's copy of the config must not write the token back
     app.cfg.setScToken("");
     var buf: [96]u8 = undefined;
-    app.st.perm_note.set(reset.summary(o, &buf));
+    app.st.perm_note.set(platform_capture.resetSummary(o, &buf));
     std.log.info("permissions reset from Settings: {s}", .{app.st.perm_note.text().?});
     app.st.dirty = true;
 }

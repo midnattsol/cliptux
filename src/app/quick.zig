@@ -28,7 +28,7 @@ const std = @import("std");
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
-const gnome = @import("../platform/linux/gnome.zig");
+const shell = @import("../platform/api.zig").shell;
 const clipimg = @import("clipimg.zig");
 const quick_ipc = @import("quick_ipc.zig");
 const sys = @import("../platform/api.zig").sys;
@@ -98,8 +98,8 @@ fn pruneCache(gpa: std.mem.Allocator, env: Env) void {
 /// The desktop's accent, the GNOME hint, and dropping images.
 fn setup(q: *Quick) void {
     if (q.bus_()) |b| q.accent = theme_mod.of(theme_mod.readPrefs(b, 500)).accent_fill;
-    if (!q.win.hasLayerShell() and gnome.isGnome()) {
-        q.hint = if (q.bus_()) |b| !gnome.extensionActive(b) else true;
+    if (!q.win.hasLayerShell() and shell.applies()) {
+        q.hint = if (q.bus_()) |b| !shell.active(b) else true;
         if (q.hint) std.log.info("quick access: no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});
     }
     // an image dropped on a thumbnail opens in the editor

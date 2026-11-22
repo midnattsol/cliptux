@@ -9,7 +9,7 @@ const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const clock = @import("../clock.zig");
 const shot = @import("../shot.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
+const shell = @import("../../platform/api.zig").shell;
 const sys = @import("../../platform/api.zig").sys;
 const effects = @import("../../gfx/effects.zig");
 const window = @import("../../platform/api.zig").window;
@@ -134,16 +134,16 @@ pub fn activate(self: *Quick, h: Hit) void {
 
 /// The hint's link: install the GNOME integration and say how it went.
 fn enableGnome(self: *Quick) void {
-    const res = gnome.install(self.gpa, self.env, self.bus_(), .yes);
+    const res = shell.install(self.gpa, self.env, self.bus_());
     self.hint_text = switch (res) {
         .active => "GNOME integration is on.",
-        .installed_relogin => "Installed. Log out and in once",
-        .failed => "Could not install; see the log",
+        .installed => "Installed. Log out and in once",
+        else => "Could not install; see the log",
     };
     self.hint_link = switch (res) {
         .active => "Next thumbnails stay above",
-        .installed_relogin => "to finish (GNOME needs it).",
-        .failed => "shotlet gnome-integration",
+        .installed => "to finish (GNOME needs it).",
+        else => "shotlet gnome-integration",
     };
     self.dirty = true;
 }

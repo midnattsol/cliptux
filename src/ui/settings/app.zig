@@ -11,8 +11,8 @@ const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
 const sys = @import("../../platform/api.zig").sys;
 const env_mod = @import("../../app/env.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
-const capture_path = @import("../../platform/linux/capture/path.zig");
+const shell = @import("../../platform/api.zig").shell;
+const platform_capture = @import("../../platform/api.zig").capture;
 const settings_modes = @import("../settings_modes.zig");
 const model = @import("model.zig");
 const focus = @import("focus.zig");
@@ -207,7 +207,7 @@ pub const App = struct {
 /// The window's state from the desktop: appearance, GNOME integration,
 /// capture modes, and the headless test overrides.
 fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) model.State {
-    const last = capture_path.last(env.home);
+    const last = platform_capture.lastPath(env.home);
     var st: model.State = .{ .direct = last == .direct, .last_path = last };
     if (bus) |b| {
         st.prefs = theme_mod.readPrefs(b, 1500);
@@ -216,7 +216,7 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session)
     st.theme = theme_mod.of(st.prefs);
     st.env = env;
     st.gnome = model.gnomeState(alloc, env, bus);
-    if (st.gnome == .active) st.capture = gnome.captureInfo(alloc, bus.?);
+    if (st.gnome == .active) st.capture = shell.captureInfo(alloc, bus.?);
     st.modes = settings_modes.load(alloc, env, bus);
     // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, and
     // SHOTLET_SETTINGS_VIEW=general|editor|shortcuts on that view, so

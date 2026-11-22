@@ -40,6 +40,18 @@ pub const proc = backend.proc;
 /// in Files" (`Session`, with the neutral types of api/desktop.zig).
 pub const desktop = backend.desktop;
 
+/// The shell integration (Linux: the GNOME Shell extension): captures
+/// without prompts, global shortcuts, keeping floating windows above.
+pub const shell = backend.shell;
+
+/// Screen capture: every monitor frozen, window frames, window capture,
+/// scrolling-capture frames, permissions.
+pub const capture = backend.capture;
+
+/// Development commands of the backend (`shotlet test-window` ...);
+/// false when `cmd` is none of them.
+pub const devtools = backend.devtools;
+
 /// Font discovery: the UI faces and a face for a codepoint (api/fonts.zig).
 pub const fonts = backend.fonts;
 

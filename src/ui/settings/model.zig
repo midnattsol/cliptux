@@ -6,7 +6,7 @@ const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const env_mod = @import("../../app/env.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
+const shell = @import("../../platform/api.zig").shell;
 const settings_modes = @import("../settings_modes.zig");
 const focus = @import("focus.zig");
 
@@ -61,18 +61,11 @@ pub const Region = struct {
     }
 };
 
-/// The GNOME Shell integration as the Settings window shows it.
-pub const GnomeState = enum { not_gnome, active, installed, missing, failed };
+/// The shell integration (GNOME Shell's) as the Settings window shows it.
+pub const GnomeState = shell.State;
 
 pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) GnomeState {
-    if (!gnome.isGnome()) return .not_gnome;
-    const b = bus orelse return .missing;
-    return switch (gnome.installState(alloc, env, b)) {
-        .active => .active,
-        // nothing to click: it loads at the next login
-        .next_login => .installed,
-        else => .missing,
-    };
+    return shell.state(alloc, env, bus);
 }
 
 /// What the content is drawn into: its height (buffer px, without the
@@ -98,18 +91,18 @@ pub const State = struct {
     /// keyboard focus (Tab / Shift+Tab); null until the first Tab
     focus: ?Hit = null,
     /// the last capture went through the desktop's own interface, not
-    /// the portal (app/direct.zig)
+    /// the portal (api.capture)
     direct: bool = false,
-    /// how the last capture went (app/capture_path.zig)
-    last_path: ?@import("../../platform/linux/capture/path.zig").Path = null,
+    /// how the last capture went (api.capture.lastPath)
+    last_path: ?@import("../../platform/api.zig").capture.Path = null,
     /// what Reset permissions did
     perm_note: @import("permissions.zig").Note = .{},
     pending_focus: ?usize = null,
     /// scroll the focused control into view after the next draw
     reveal_focus: bool = false,
     env: env_mod.Env = undefined,
-    gnome: GnomeState = .not_gnome,
-    capture: gnome.CaptureInfo = .{},
+    gnome: GnomeState = .unsupported,
+    capture: shell.CaptureInfo = .{},
     /// Clear history takes two clicks: the first asks
     history_clear: enum { idle, asking, cleared } = .idle,
     modes: settings_modes.State = .{},

@@ -52,7 +52,7 @@ pub const CaptureInfo = capture.CaptureInfo;
 pub const captureInfo = capture.captureInfo;
 
 pub const isShotletCommand = custom.isShotletCommand;
-pub const sameAccel = @import("gnome/accel.zig").sameAccel;
+pub const sameAccel = @import("../../app/accel.zig").sameAccel;
 
 pub const MoveShortcuts = setup.MoveShortcuts;
 pub const install = setup.install;

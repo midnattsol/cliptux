@@ -10,8 +10,7 @@
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
-const gnome = @import("../platform/linux/gnome.zig");
-const gsettings = @import("../platform/linux/gnome/gsettings.zig");
+const shell = @import("../platform/api.zig").shell;
 const mode = @import("../app/modes/mode.zig");
 const msettings = @import("../app/modes/settings.zig");
 const S = @import("settings.zig");
@@ -28,8 +27,9 @@ const n = mode.shortcuts.len;
 
 pub const State = struct {
     s: msettings.Settings = .{},
-    /// the extension is active: its keys can be changed
+    /// the shell integration holds the keys: they can be changed
     gnome: bool = false,
+    /// where it keeps them (shell.shortcutStore)
     sd_buf: [1100]u8 = undefined,
     sd_len: usize = 0,
     keys: [n][64]u8 = undefined,
@@ -48,8 +48,7 @@ pub const State = struct {
 pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) State {
     var st: State = .{ .s = msettings.load(alloc, env.home) };
     const b = bus orelse return st;
-    if (!gnome.isGnome() or !gnome.extensionActive(b)) return st;
-    const sd = gnome.schemaDir(alloc, env, b, &st.sd_buf) catch return st;
+    const sd = shell.shortcutStore(alloc, env, b, &st.sd_buf) orelse return st;
     st.sd_len = sd.len;
     st.gnome = true;
     readKeys(&st, alloc, env);
@@ -62,11 +61,10 @@ fn readKeys(st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
     const arena = arena_state.allocator();
     for (mode.shortcuts, 0..) |sc, i| {
         st.key_lens[i] = 0;
-        const v = gsettings.get(arena, env, st.schemadir(), gnome.ext_schema_id, sc.key) catch continue;
-        const items = gsettings.parseStrv(arena, v) catch continue;
-        if (items.len == 0 or items[0].len > st.keys[i].len) continue;
-        @memcpy(st.keys[i][0..items[0].len], items[0]);
-        st.key_lens[i] = items[0].len;
+        const accel = shell.getShortcut(arena, env, st.schemadir(), sc.key) orelse continue;
+        if (accel.len > st.keys[i].len) continue;
+        @memcpy(st.keys[i][0..accel.len], accel);
+        st.key_lens[i] = accel.len;
     }
 }
 
@@ -116,7 +114,7 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
 }
 
 fn displayAccel(buf: []u8, accel: []const u8) []const u8 {
-    return @import("../platform/linux/gnome/accel.zig").display(buf, accel);
+    return @import("../app/accel.zig").display(buf, accel);
 }
 
 pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
@@ -129,17 +127,11 @@ pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) 
             const i = std.mem.indexOfScalar(u8, &mode.timer_choices, st.s.timer_s) orelse 0;
             st.s.timer_s = mode.timer_choices[(i + 1) % mode.timer_choices.len];
             msettings.setTimer(alloc, env.home, st.s.timer_s) catch |err| std.log.warn("could not save: {t}", .{err});
-            if (st.gnome) setGnome(st, alloc, env, "timer-seconds", std.fmt.allocPrint(alloc, "{d}", .{st.s.timer_s}) catch return);
+            if (st.gnome) shell.setTimerSeconds(alloc, env, st.schemadir(), st.s.timer_s) catch |err|
+                std.log.warn("could not change the GNOME integration's timer-seconds: {t}", .{err});
         },
         .key => |i| st.recording = if (st.recording == i) null else i,
     }
-}
-
-/// Write one of the extension's settings; `value` is owned.
-fn setGnome(st: *State, alloc: std.mem.Allocator, env: env_mod.Env, key: []const u8, value: []u8) void {
-    defer alloc.free(value);
-    gsettings.set(alloc, env, st.schemadir(), gnome.ext_schema_id, key, value) catch |err|
-        std.log.warn("could not change the GNOME integration's {s}: {t}", .{ key, err });
 }
 
 /// A key press while a mode's shortcut is being recorded. True when it
@@ -153,11 +145,9 @@ pub fn onKey(st: *State, k: window.Key, alloc: std.mem.Allocator, env: env_mod.E
     var buf: [64]u8 = undefined;
     const accel = if (k.code == window.KEY_BACKSPACE) "" else accelFor(&buf, k) orelse return true;
     st.recording = null;
-    const value = if (accel.len == 0)
-        alloc.dupe(u8, "@as []") catch return true
-    else
-        std.fmt.allocPrint(alloc, "['{s}']", .{accel}) catch return true;
-    setGnome(st, alloc, env, mode.shortcuts[i].key, value);
+    const key = mode.shortcuts[i].key;
+    shell.setShortcut(alloc, env, st.schemadir(), key, if (accel.len == 0) null else accel) catch |err|
+        std.log.warn("could not change the GNOME integration's {s}: {t}", .{ key, err });
     readKeys(st, alloc, env);
     return true;
 }

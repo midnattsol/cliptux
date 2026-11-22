@@ -39,18 +39,7 @@ pub fn requestCapture(gpa: std.mem.Allocator, bus: *dbus.Connection) CaptureRequ
 }
 
 /// How captures go, for `status` and the Settings window.
-pub const CaptureInfo = struct {
-    /// the extension is active and captures (version 2 and later)
-    capture: bool = false,
-    /// its bound shortcut, or the one GNOME's screenshot tool holds
-    shortcut_buf: [64]u8 = undefined,
-    shortcut_len: usize = 0,
-    blocked: bool = false,
-
-    pub fn shortcut(self: *const CaptureInfo) ?[]const u8 {
-        return if (self.shortcut_len > 0) self.shortcut_buf[0..self.shortcut_len] else null;
-    }
-};
+pub const CaptureInfo = @import("../../api/shell.zig").CaptureInfo;
 
 pub fn captureInfo(gpa: std.mem.Allocator, bus: *dbus.Connection) CaptureInfo {
     var info: CaptureInfo = .{};

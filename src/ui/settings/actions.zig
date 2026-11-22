@@ -4,7 +4,7 @@
 const std = @import("std");
 const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
+const shell = @import("../../platform/api.zig").shell;
 const history = @import("../../app/history.zig");
 const keep = @import("../../app/keep.zig");
 const settings_modes = @import("../settings_modes.zig");
@@ -119,13 +119,9 @@ fn clearHistory(app: *App) void {
 fn enableGnome(app: *App) void {
     const st = &app.st;
     const bus = app.busPtr();
-    st.gnome = switch (gnome.install(app.alloc, st.env, bus, .yes)) {
-        .active => .active,
-        .installed_relogin => .installed,
-        .failed => .failed,
-    };
+    st.gnome = shell.install(app.alloc, st.env, bus);
     if (st.gnome == .active) if (bus) |b| {
-        st.capture = gnome.captureInfo(app.alloc, b);
+        st.capture = shell.captureInfo(app.alloc, b);
     };
     st.dirty = true;
 }

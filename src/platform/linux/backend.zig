@@ -6,6 +6,9 @@
 pub const sys = @import("sys.zig");
 pub const window = @import("window.zig");
 pub const desktop = @import("desktop.zig");
+pub const shell = @import("shell.zig");
+pub const capture = @import("capture.zig");
+pub const devtools = @import("devtools.zig").run;
 pub const libs = @import("libs.zig");
 pub const proc = @import("proc.zig");
 pub const fonts = @import("fonts.zig");
@@ -20,6 +23,8 @@ comptime {
     _ = proc;
     _ = window;
     _ = desktop;
+    _ = shell;
+    _ = capture;
     _ = fonts;
     _ = ocr;
 }

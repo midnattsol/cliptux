@@ -6,13 +6,13 @@
 
 const std = @import("std");
 const shot = @import("shot.zig");
-const shellcap = @import("../platform/linux/gnome/shellcap.zig");
+const shell = @import("../platform/api.zig").shell;
 const Env = @import("env.zig").Env;
 
 const ShotArgs = struct {
     from: ?[]const u8 = null,
     from_monitors: ?[]const u8 = null,
-    from_shell: ?shellcap.Args = null,
+    from_shell: ?shell.HandedCapture = null,
     shell_monitors: []const u8 = "",
     shell_pieces: []const u8 = "",
     t0: ?i64 = null,

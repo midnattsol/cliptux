@@ -30,13 +30,7 @@ pub const LogicalMonitor = struct {
 };
 
 /// `--from-shell` and its companions.
-pub const Args = struct {
-    id: []const u8,
-    monitors: []const u8 = "",
-    pieces: []const u8 = "",
-    /// the key press, on CLOCK_MONOTONIC, in ms
-    t0_ms: ?i64 = null,
-};
+pub const Args = @import("../../api/shell.zig").HandedCapture;
 
 pub const max_pieces = 32;
 

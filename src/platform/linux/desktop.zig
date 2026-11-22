@@ -82,6 +82,9 @@ pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
     return .{ .chosen = p };
 }
 
+/// The tray icon's daemon (`shotlet daemon`): StatusNotifierItem.
+pub const daemon = @import("desktop/daemon.zig").run;
+
 /// A notification (best effort).
 pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
     portal.notify(gpa, s, summary, text);

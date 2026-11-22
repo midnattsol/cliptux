@@ -106,7 +106,7 @@ test {
     _ = @import("app/keep.zig");
     _ = @import("app/quick.zig");
     _ = @import("platform/linux/gnome.zig");
-    _ = @import("platform/linux/gnome/accel.zig");
+    _ = @import("app/accel.zig");
     _ = @import("platform/linux/gnome/shellcap.zig");
     _ = @import("app/scroll/stitch.zig");
     _ = @import("app/modes/mode.zig");

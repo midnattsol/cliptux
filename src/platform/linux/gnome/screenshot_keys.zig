@@ -7,7 +7,7 @@ const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
 const gsettings = @import("gsettings.zig");
 const custom = @import("custom.zig");
-const sameAccel = @import("accel.zig").sameAccel;
+const sameAccel = @import("../../../app/accel.zig").sameAccel;
 const contains = custom.contains;
 const Env = env_mod.Env;
 

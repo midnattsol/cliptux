@@ -20,7 +20,7 @@ const flow = @import("../modes/flow.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
 const stitch = @import("stitch.zig");
 const stop = @import("stop.zig");
-const source = @import("../../platform/linux/capture/scroll_source.zig");
+const platform_capture = @import("../../platform/api.zig").capture;
 
 /// How long a natural stop's reason stays up before the editor opens.
 const done_hold_ms = 900;
@@ -40,7 +40,7 @@ pub const Session = struct {
     hud: *hud_mod.Hud,
     opener: Opener,
     max_height: u32,
-    src: ?source.Source = null,
+    src: ?platform_capture.ScrollSource = null,
     st: ?stitch.Stitcher = null,
     watch: stop.Watch,
     /// wheel notches per step, adapted to land about half a view further
@@ -64,14 +64,14 @@ pub const Session = struct {
         self.src = null;
     }
 
-    fn open(self: *Session) !*source.Source {
+    fn open(self: *Session) !*platform_capture.ScrollSource {
         const o = self.opener;
-        self.src = try source.open(self.c.gpa, self.c.env, self.c.conn, o.cap, o.region, o.shell, o.auto);
+        self.src = try platform_capture.openScroll(self.c.gpa, self.c.env, self.c.conn, o.cap, o.region, o.shell, o.auto);
         return &self.src.?;
     }
 
     /// The source over again (its session timed out, it failed).
-    fn reopen(self: *Session) !*source.Source {
+    fn reopen(self: *Session) !*platform_capture.ScrollSource {
         self.deinit();
         return self.open();
     }

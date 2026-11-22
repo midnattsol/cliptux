@@ -1,32 +1,25 @@
-//! Capture-and-edit flow: acquisition (direct, ScreenCast in
-//! shot/screencast.zig, the Screenshot portal with the first-run
-//! permission dialog), then copy/save/save-as handling around the editor
-//! (files in shot/save.zig).
+//! Capture-and-edit flow: acquisition (the shell integration, else the
+//! platform's capture seam: api.capture.screens), then copy/save/save-as
+//! handling around the editor (files in shot/save.zig).
 
 const std = @import("std");
-const desktop = @import("../platform/api.zig").desktop;
+const platform = @import("../platform/api.zig");
+const desktop = platform.desktop;
+const shell = platform.shell;
 const capture = @import("capture.zig");
-const direct = @import("../platform/linux/capture/direct.zig");
-const capture_path = @import("../platform/linux/capture/path.zig");
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
-const portal = @import("../platform/linux/portal.zig");
 const png = @import("../gfx/png.zig");
 const sys = @import("../platform/api.zig").sys;
 const keep_mod = @import("keep.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
-const gnome = @import("../platform/linux/gnome.zig");
-const shellcap = @import("../platform/linux/gnome/shellcap.zig");
 const modes = @import("modes/mode.zig");
 const mode_flow = @import("modes/flow.zig");
-const shell_bus = @import("../platform/linux/gnome/shell_bus.zig");
 const last_area = @import("modes/last_area.zig");
 const save = @import("shot/save.zig");
 const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
-const winrects = @import("../platform/linux/capture/winrects.zig");
-const screencast = @import("../platform/linux/capture/screencast.zig").screencast;
 const window = @import("../platform/api.zig").window;
 const editor_mod = @import("../ui/editor.zig");
 const Env = env_mod.Env;
@@ -41,7 +34,7 @@ comptime {
 }
 
 fn warmupPw() void {
-    _ = @import("../platform/linux/pw.zig").available();
+    platform.capture.warmup();
 }
 
 pub fn nowMs() i64 {
@@ -55,7 +48,7 @@ pub const From = struct {
     /// comma-separated PNGs, one per monitor, laid out left to right
     monitors: ?[]const u8 = null,
     /// taken by the GNOME Shell extension (not a dev source)
-    shell: ?shellcap.Args = null,
+    shell: ?shell.HandedCapture = null,
     /// the capture mode (app/modes/), and its self-timer
     req: modes.Request = .{},
     /// already taken (a window KWin captured); owned by the capture
@@ -104,10 +97,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
         .edit => |e| e,
     };
     // where the windows were, for clicking one (an area to pick)
-    if (edit.modes) edit.windows = winrects.fetch(gpa, env, &conn, &cap, if (from.shell) |s| s.id else null);
+    if (edit.modes) edit.windows = platform.capture.windows(gpa, env, &conn, &cap, if (from.shell) |s| s.id else null);
     defer gpa.free(edit.windows);
     edit.from_shell = from.shell != null;
-    if (edit.modes) edit.window_ok = winrects.windowCapture(&conn);
+    if (edit.modes) edit.window_ok = platform.capture.canCaptureWindow(&conn);
 
     try openEditor(&win, &cap, perMonitor(&cap));
     t.open = nowMs();
@@ -119,9 +112,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 /// prompt) and starts another shotlet on it. True when it took over (or
 /// declined): this process has nothing left to do.
 fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
-    if (!gnome.isGnome() or !gnome.extensionActive(conn)) return false;
+    if (!shell.applies() or !shell.active(conn)) return false;
     @import("../ui/tools/launch.zig").handOff(env.runtime_dir);
-    switch (shell_bus.requestMode(gpa, conn, req)) {
+    switch (shell.requestCapture(gpa, conn, req)) {
         .started => {
             std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
             return true;
@@ -149,9 +142,9 @@ const Startup = struct {
     capture: i64 = 0,
     open: i64 = 0,
 
-    fn log(t: Startup, shell: ?shellcap.Args) void {
+    fn log(t: Startup, handed: ?shell.HandedCapture) void {
         std.log.info("startup: capture={d}ms total={d}ms", .{ t.capture - t.t0, t.open - t.t0 });
-        if (shell) |sh| if (sh.t0_ms) |key| {
+        if (handed) |sh| if (sh.t0_ms) |key| {
             std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
         };
         std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
@@ -298,7 +291,7 @@ const Finish = struct {
         // the thumbnail says it already
         if (f.cfg.notify and !f.cfg.showsThumbnail(true)) {
             var buf: [512]u8 = undefined;
-            portal.notify(gpa, f.conn, "Shotlet", std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved");
+            desktop.notify(gpa, f.conn, "Shotlet", std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved");
         }
         f.close(data, path);
         if (f.win.hasClipboard()) try f.win.serveClipboard();
@@ -371,24 +364,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 /// caller exits quietly, with no fallback and no further dialogs.
 pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, from: From) !?capture.Capture {
     if (from.any()) return try fromGiven(gpa, env, from);
-    // the desktop's own capture interface: no consent dialog
-    if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
-        if (tryDirect(gpa, env, conn)) |cap| return cap;
-    }
-    if (@import("../platform/linux/pw.zig").available()) {
-        switch (screencast(gpa, env, conn, cfg)) {
-            .granted => |cap| {
-                std.log.info("capture path: portal (ScreenCast)", .{});
-                capture_path.remember(env.home, .portal);
-                return cap;
-            },
-            .cancelled => return null,
-            .timeout => return dialogTimedOut(),
-            .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
-            .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
-        }
-    }
-    return screenshotPortal(gpa, env, conn);
+    return platform.capture.screens(gpa, env, conn, cfg);
 }
 
 /// A capture that is already taken: by the GNOME extension, KWin, or a
@@ -396,8 +372,8 @@ pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *c
 fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
     if (from.shell) |args| {
         const t_load = nowMs();
-        const cap = try shellcap.load(gpa, env.runtime_dir, args);
-        capture_path.remember(env.home, .gnome);
+        const cap = try shell.loadHanded(gpa, env, args);
+        platform.capture.remember(env.home, .gnome);
         std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }
@@ -408,52 +384,6 @@ fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
     var img = try png.decode(gpa, data);
     errdefer img.deinit(gpa);
     return try capture.Capture.single(gpa, img);
-}
-
-/// The compositor's own capture interface; null (logged) when there is
-/// none or it failed, for the portal to take over.
-fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session) ?capture.Capture {
-    const res = direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn) catch |err| {
-        std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
-        return null;
-    };
-    switch (res) {
-        .captured => |c| {
-            std.log.info("capture path: direct ({s})", .{c.method.label()});
-            capture_path.remember(env.home, .direct);
-            return c.cap;
-        },
-        .unavailable => |why| {
-            std.log.info("capture path: no direct capture ({s}); the portal", .{why});
-            return null;
-        },
-    }
-}
-
-/// The Screenshot portal, the last resort; null when cancelled.
-fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session) !?capture.Capture {
-    std.log.info("capture path: portal (Screenshot)", .{});
-    capture_path.remember(env.home, .portal);
-    const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
-        .granted => |d| d,
-        .cancelled => return null,
-        // GNOME only shows its consent dialog to the focused app, so a
-        // windowless first run is denied (or, with no app focused, never
-        // answered); ask again from a focused window
-        .denied, .timeout => (try @import("../platform/linux/capture/first_run.zig").permissionFlow(gpa, env, conn)) orelse return null,
-        .unavailable => return error.NoScreenshotPortal,
-    };
-    defer gpa.free(png_data);
-    var img = try png.decode(gpa, png_data);
-    errdefer img.deinit(gpa);
-    return try capture.Capture.single(gpa, img);
-}
-
-/// Nobody answered a consent dialog for timeout_dialog_ms: it was closed;
-/// end quietly, like a cancel.
-fn dialogTimedOut() ?capture.Capture {
-    std.log.info("the permission dialog got no answer; closed it and stopped", .{});
-    return null;
 }
 
 /// Dev: stitch one PNG per monitor, placed left to right in a logical

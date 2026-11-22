@@ -72,6 +72,11 @@ pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
     _ = .{ gpa, d };
     return .unavailable;
 }
+/// The tray icon's daemon (`shotlet daemon`).
+pub fn daemon(gpa: std.mem.Allocator, env: Env, foreground: bool) error{Unavailable}!void {
+    _ = .{ gpa, env, foreground };
+    return error.Unavailable;
+}
 pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
     _ = .{ gpa, s, summary, text };
 }

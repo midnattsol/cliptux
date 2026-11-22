@@ -6,20 +6,7 @@ const std = @import("std");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
 
-pub const Path = enum {
-    direct,
-    portal,
-    gnome,
-
-    /// How a capture through it went, for `shotlet permissions`.
-    pub fn text(p: Path) []const u8 {
-        return switch (p) {
-            .gnome => "through the GNOME integration (no permission used)",
-            .direct => "directly from the compositor (no permission used)",
-            .portal => "through the screen-sharing portal (its permission)",
-        };
-    }
-};
+pub const Path = @import("../../api/capture.zig").Path;
 
 fn filePath(buf: []u8, dir_buf: []u8, home: []const u8) ![]u8 {
     const dir = try env_mod.stateDir(dir_buf, home);

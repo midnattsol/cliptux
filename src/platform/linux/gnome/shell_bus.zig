@@ -26,7 +26,7 @@ fn call(gpa: std.mem.Allocator, bus: *dbus.Connection, member: []const u8, sig: 
     return error.Refused;
 }
 
-pub const Handoff = enum { started, declined, unavailable };
+pub const Handoff = @import("../../api/shell.zig").Handoff;
 
 /// Ask the extension to capture in this mode (after its countdown).
 /// An area capture with no delay uses Capture(), which every version has.

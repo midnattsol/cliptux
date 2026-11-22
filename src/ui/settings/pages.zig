@@ -6,7 +6,7 @@ const std = @import("std");
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const shapes = @import("../shapes.zig");
-const gnome = @import("../../platform/linux/gnome.zig");
+const shell = @import("../../platform/api.zig").shell;
 const settings_modes = @import("../settings_modes.zig");
 const settings_rec = @import("../recui/settings_rec.zig");
 const model = @import("model.zig");
@@ -54,7 +54,7 @@ fn general(p: Page, y0: i32) !i32 {
     y = try capture(p, y);
     y = try quickAccess(p, y);
     y = try recentCaptures(p, y);
-    if (p.st.gnome != .not_gnome) y = try gnomeIntegration(p, y);
+    if (p.st.gnome != .unsupported) y = try gnomeIntegration(p, y);
     y = try globalShortcut(p, y);
     return settings_modes.drawGeneral(p.ui, p.cx, y, p.col_w, &p.st.modes);
 }
@@ -149,7 +149,7 @@ fn gnomeIntegration(p: Page, y0: i32) !i32 {
     var card = p.card(y, ui.sc(64));
     const r = w.rowBegin(ui, &card, ui.sc(64));
     w.rowTitle(ui, r, "Shell extension", switch (st.gnome) {
-        .active => gnome.note() orelse "On: no capture prompts; thumbnails and pins stay above other windows",
+        .active => shell.note() orelse "On: no capture prompts; thumbnails and pins stay above other windows",
         .installed => "Installed; log out and in once to finish",
         .failed => "Could not install it; see shotlet gnome-integration",
         else => "Off: the thumbnail is an ordinary window",
