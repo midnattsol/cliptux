@@ -1,7 +1,8 @@
 #!/bin/sh
 # Fails when a file outside the Linux backend (src/platform/linux) reaches
 # into it: an @import of one of its files, std.os.linux, or the raw
-# backend (api.backend). The core goes through src/platform/api.zig, the
+# backend (api.backend); or speaks its language in code (comments may):
+# Wayland or D-Bus, X keysyms and evdev codes, GTK accelerators. The core goes through src/platform/api.zig, the
 # one file allowed to import the backend; only the e2e drivers' module
 # root (src/testkit.zig, Linux tooling) takes api.backend.native
 # (docs/PLATFORM.md). Files still being moved out are listed in
@@ -35,6 +36,12 @@ violations() {
             line = $0
             sub(/\/\/.*/, "", line)
             if (line ~ /std\.os\.linux/) print FILENAME ": std.os.linux"
+            if (FILENAME != tools_root) {
+                low = tolower(line)
+                if (low ~ /wayland|dbus|d-bus/) print FILENAME ": names Wayland or D-Bus (the session is api.desktop.Addresses)"
+                if (low ~ /keysym|evdev/ || line ~ /(^|[^A-Za-z0-9_])(KEY|BTN)_[A-Z0-9]/) print FILENAME ": X keysyms or evdev codes (keys are api/keys.zig)"
+                if (low ~ /<(ctrl|control|shift|alt|super|primary|meta|hyper|mod[0-9])>/) print FILENAME ": a GTK accelerator (shortcuts are app/accel.zig)"
+            }
             if (line ~ /(api\.zig"\)|api)\.backend([^A-Za-z_]|$)/ && FILENAME != tools_root && FILENAME != seam)
                 print FILENAME ": uses api.backend (the core goes through the seam)"
             while (match(line, /@import\("[^"]+\.zig"\)/)) {

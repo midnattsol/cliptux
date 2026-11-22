@@ -13,7 +13,7 @@ pub fn write(w: W) !void {
     try text(w, commands.tagline);
     try w.writeAll("\n.SH SYNOPSIS\n.B shotlet\n.RI [ COMMAND ]\n.RI [ OPTIONS ]\n");
     try w.writeAll(".SH DESCRIPTION\n");
-    try text(w, "Shotlet captures the screen on Wayland, opens an annotation editor and copies " ++
+    try text(w, "Shotlet captures the screen, opens an annotation editor and copies " ++
         "or saves the result; it also records the screen as MP4 or GIF. Without a command it " ++
         "captures an area. Every command takes --help.");
     try w.writeAll("\n.SH OPTIONS\n");

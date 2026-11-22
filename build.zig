@@ -169,7 +169,7 @@ fn addPortableCheck(b: *std.Build, options: *std.Build.Step.Options, test_step: 
     layers.setName("check-layers.sh");
     layers.setCwd(b.path("."));
     layers.has_side_effects = true;
-    b.step("check-layers", "Fail when a file outside src/platform/linux imports it").dependOn(&layers.step);
+    b.step("check-layers", "Fail when a file outside src/platform/linux imports it or names Wayland, D-Bus, keysyms, evdev or GTK accelerators").dependOn(&layers.step);
     test_step.dependOn(&layers.step);
     test_step.dependOn(step);
 }

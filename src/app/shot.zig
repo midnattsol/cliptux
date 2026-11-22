@@ -33,7 +33,7 @@ comptime {
     _ = save;
 }
 
-fn warmupPw() void {
+fn warmupCapture() void {
     platform.capture.warmup();
 }
 
@@ -63,11 +63,12 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     var t: Startup = .{ .t0 = nowMs() };
     var conn = try desktop.connectBrief(gpa, env);
     defer conn.deinit();
-    t.dbus = nowMs();
+    t.session = nowMs();
     if (!from.any() and handedToShell(gpa, env, &conn, from.req, t.t0)) return;
 
-    // dlopen(libpipewire) costs ~50-80ms; overlap it with the rest of setup
-    const pw_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupPw, .{}) catch null;
+    // the capture backend's warm-up (Linux: dlopen(libpipewire), ~50-80ms)
+    // overlaps the rest of setup
+    const warmup_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupCapture, .{}) catch null;
     desktop.identify(gpa, &conn);
     t.scope = nowMs();
 
@@ -79,10 +80,10 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
-    t.wayland = nowMs();
+    t.window = nowMs();
 
-    if (pw_thread) |th| th.join();
-    t.pw = nowMs();
+    if (warmup_thread) |th| th.join();
+    t.warmup = nowMs();
     // the self-timer, where the GNOME extension did not count down
     if (from.req.delay_s > 0 and !from.any() and !try @import("../ui/countdown.zig").run(&win, from.req.delay_s)) return;
     var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
@@ -134,11 +135,11 @@ fn perMonitor(cap: *const capture.Capture) bool {
 /// Startup timestamps (ms), logged once the editor is open.
 const Startup = struct {
     t0: i64,
-    dbus: i64 = 0,
+    session: i64 = 0,
     scope: i64 = 0,
     config: i64 = 0,
-    wayland: i64 = 0,
-    pw: i64 = 0,
+    window: i64 = 0,
+    warmup: i64 = 0,
     capture: i64 = 0,
     open: i64 = 0,
 
@@ -147,13 +148,13 @@ const Startup = struct {
         if (handed) |sh| if (sh.t0_ms) |key| {
             std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
         };
-        std.log.debug("startup detail: dbus={d}ms scope={d}ms config={d}ms wayland={d}ms pw-wait={d}ms capture={d}ms open={d}ms", .{
-            t.dbus - t.t0,
-            t.scope - t.dbus,
+        std.log.debug("startup detail: session={d}ms scope={d}ms config={d}ms window={d}ms warmup-wait={d}ms capture={d}ms open={d}ms", .{
+            t.session - t.t0,
+            t.scope - t.session,
             t.config - t.scope,
-            t.wayland - t.config,
-            t.pw - t.wayland,
-            t.capture - t.pw,
+            t.window - t.config,
+            t.warmup - t.window,
+            t.capture - t.warmup,
             t.open - t.capture,
         });
     }
