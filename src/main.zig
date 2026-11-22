@@ -131,6 +131,7 @@ test {
     _ = @import("ui/frame.zig");
     _ = @import("ui/barkit.zig");
     _ = @import("ui/selchrome.zig");
+    _ = @import("ui/lens.zig");
     _ = @import("ui/dim.zig");
     _ = @import("ui/settings_modes.zig");
     _ = @import("ui/settings_steps.zig");
