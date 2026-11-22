@@ -32,6 +32,8 @@ pub const Globals = struct {
     rel_manager: u32 = 0, // zwp_relative_pointer_manager_v1
     layer_shell: u32 = 0, // zwlr_layer_shell_v1
     layer_shell_version: u32 = 0,
+    /// zxdg_exporter_v2, else zxdg_exporter_v1 (window/foreign.zig)
+    exporter: u32 = 0,
 };
 
 pub fn init(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
@@ -136,6 +138,11 @@ fn bindExtension(w: *Window, name: u32, iface: []const u8, version: u32) !bool {
         _ = try output.ensureAllXdg(w);
     } else if (eql(u8, iface, "zwp_relative_pointer_manager_v1")) {
         g.rel_manager = try c.bind(g.registry, name, iface, 1);
+    } else if (eql(u8, iface, "zxdg_exporter_v2")) {
+        g.exporter = try c.bind(g.registry, name, iface, 1);
+    } else if (eql(u8, iface, "zxdg_exporter_v1")) {
+        // the same requests and events; v2 wins when both are offered
+        if (g.exporter == 0) g.exporter = try c.bind(g.registry, name, iface, 1);
     } else if (eql(u8, iface, "zwp_text_input_manager_v3")) {
         g.ti_manager = try c.bind(g.registry, name, iface, 1);
     } else return false;

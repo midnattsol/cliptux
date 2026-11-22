@@ -87,6 +87,7 @@ const cursor = @import("window/cursor.zig");
 const data_device = @import("window/data_device.zig");
 const clipboard = @import("window/clipboard.zig");
 const drag = @import("window/drag.zig");
+const foreign = @import("window/foreign.zig");
 
 // Reach every submodule's tests (a `test {}` block would count as one).
 comptime {
@@ -223,6 +224,9 @@ pub const Window = struct {
     accept_mimes: []const []const u8 = &.{},
     dropped: ?Dropped = null,
 
+    /// our toplevel as exported for another client's dialog (foreign.zig)
+    exported: u32 = 0,
+
     /// pointer over one of our surfaces / keyboard focus on one
     pointer_in: bool = false,
     kb_focus: bool = false,
@@ -301,6 +305,8 @@ pub const Window = struct {
     pub const setInputRegion = roles.setInputRegion;
     pub const setWindowGeometry = roles.setWindowGeometry;
     pub const setTitle = roles.setTitle;
+    pub const parentHandle = foreign.parentHandle;
+    pub const unexport = foreign.unexport;
     pub const showWindowMenu = roles.showWindowMenu;
     pub const setLayerPlacement = roles.setLayerPlacement;
     pub const setLayerKeyboard = roles.setLayerKeyboard;
