@@ -12,6 +12,7 @@ const text = @import("../../gfx/text.zig");
 const effects = @import("../../gfx/effects.zig");
 const shapes = @import("../../ui/shapes.zig");
 const fui = @import("../../ui/floatui.zig");
+const theme = @import("../../ui/theme.zig");
 const layout = @import("layout.zig");
 const panel_mod = @import("panel.zig");
 
@@ -199,7 +200,7 @@ fn drawClear(self: *const Panel, cv: *Canvas, kk: f64) void {
     footerLine(self, cv, kk);
     const r = sr(self.clearRect(), kk);
     if (self.hover_clear) cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 7 * kk, th.hover);
-    fui.textCentered(cv, r, 12 * kk, if (self.hover_clear) destructive else th.muted, .regular, "Clear history\u{2026}");
+    fui.textCentered(cv, r, 12 * kk, if (self.hover_clear) theme.legible(0xFFFF453A, th.panel, theme.aa_text) else th.muted, .regular, "Clear history\u{2026}");
 }
 
 /// "Clear N captures?" with Cancel and a destructive Clear.
@@ -214,14 +215,10 @@ fn drawConfirm(self: *const Panel, cv: *Canvas, kk: f64) void {
     text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .bold, q);
     cv.fillRoundRectAA(cancel.x, cancel.y, cancel.w, cancel.h, 7 * kk, if (self.hover_confirm == .cancel) th.hover else th.field);
     fui.textCentered(cv, cancel, 12 * kk, th.fg, .regular, "Cancel");
-    const red = if (self.hover_confirm == .clear) destructive_hover else destructive;
+    const red = if (self.hover_confirm == .clear) theme.destructive_fill_hover else theme.destructive_fill;
     cv.fillRoundRectAA(clear.x, clear.y, clear.w, clear.h, 7 * kk, red);
     fui.textCentered(cv, clear, 12 * kk, fui.white, .bold, "Clear");
 }
-
-/// The system red of destructive buttons, and pressed-looking on hover.
-const destructive: u32 = 0xFFFF453A;
-const destructive_hover: u32 = 0xFFD93A30;
 
 fn drawNotice(self: *const Panel, cv: *Canvas, pw: u32, ph: u32, kk: f64) void {
     const nw = text.widthStyled(13 * kk, .bold, self.notice) + s(28, kk);

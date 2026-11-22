@@ -19,6 +19,8 @@
 //!   applySignal(&prefs, msg)  fold a SettingChanged into prefs; true when
 //!                         something the theme uses changed
 //!   withAlpha(c, a), mix(a, b, t)  colour helpers
+//!   contrast(a, b), legible(c, bg, min)  WCAG contrast; `c` darkened or
+//!                         lightened until it reads on `bg`
 //!
 //! Colour-scheme values: 1 prefer dark, 2 prefer light, 0 no preference.
 //! No preference is light, as GNOME and every other app on the desktop
@@ -70,6 +72,13 @@ pub const motion_slow: i64 = 180;
 pub const tooltip_delay: i64 = 500;
 
 pub const default_accent: u32 = 0xFF0A84FF;
+/// WCAG AA for text: what white text on a fill, and coloured text on a
+/// window, must reach
+pub const aa_text: f64 = 4.5;
+/// the red fill of destructive buttons (white text on it reads: 5.4:1),
+/// and pressed-looking on hover
+pub const destructive_fill: u32 = 0xFFD70015;
+pub const destructive_fill_hover: u32 = 0xFFB80012;
 
 pub const Shadow = struct {
     color: u32,
@@ -85,6 +94,12 @@ pub const Theme = struct {
     accent_hover: u32,
     /// text and icons on the accent
     on_accent: u32 = 0xFFFFFFFF,
+    /// the accent as a fill under `on_accent` (darkened until white text
+    /// reads on it), and when hovered
+    accent_fill: u32,
+    accent_fill_hover: u32,
+    /// the accent as text on the window background (links)
+    accent_text: u32,
 
     // --- floating material (toolbar, popovers, menus, tooltips) ---
     fg: u32,
@@ -132,13 +147,18 @@ pub const Theme = struct {
     pub fn get(dark: bool, accent_opt: ?u32) Theme {
         const accent = (accent_opt orelse default_accent) | 0xFF000000;
         const hover_accent = mix(accent, if (dark) 0xFFFFFFFF else 0xFF000000, 0.12);
+        const fill = accentFill(accent);
+        const fill_hover = mix(fill, 0xFF000000, 0.12);
         if (dark) return .{
             .dark = true,
             .accent = accent,
             .accent_hover = hover_accent,
+            .accent_fill = fill,
+            .accent_fill_hover = fill_hover,
+            .accent_text = legible(accent, 0xFF242424, aa_text),
             .fg = 0xFFF5F5F7,
-            .muted = 0x99EBEBF5,
-            .material = 0xBD242426,
+            .muted = 0xBFEBEBF5,
+            .material = 0xCC242426,
             .material_solid = 0xFF2C2C2E,
             .hairline = 0x1FFFFFFF,
             .hover = 0x14FFFFFF,
@@ -164,8 +184,11 @@ pub const Theme = struct {
             .dark = false,
             .accent = accent,
             .accent_hover = hover_accent,
+            .accent_fill = fill,
+            .accent_fill_hover = fill_hover,
+            .accent_text = legible(accent, 0xFFFAFAFB, aa_text),
             .fg = 0xFF1D1D1F,
-            .muted = 0x9E3C3C43,
+            .muted = 0xCC3C3C43,
             .material = 0xCCF6F6F8,
             .material_solid = 0xFFF2F2F7,
             .hairline = 0x1A000000,
@@ -182,7 +205,7 @@ pub const Theme = struct {
             .chip = 0x12000006,
             .switch_off = 0x26000006,
             .text = 0xCC000006,
-            .text_muted = 0x8C000006,
+            .text_muted = 0x99000006,
             .view_sel = 0x12000006,
             .panel = 0xDBFAFAFC,
             .field = 0x0D000000,
@@ -224,6 +247,43 @@ pub fn mix(a: u32, b: u32, t: f64) u32 {
         out |= @as(u32, @intFromFloat(@round(ca + (cb - ca) * k))) << sh;
     }
     return out;
+}
+
+/// WCAG relative luminance of an opaque colour (alpha ignored).
+pub fn luminance(c: u32) f64 {
+    var l: f64 = 0;
+    inline for (.{ 16, 8, 0 }, .{ 0.2126, 0.7152, 0.0722 }) |sh, w| {
+        const v = @as(f64, @floatFromInt((c >> sh) & 0xFF)) / 255;
+        l += w * (if (v <= 0.03928) v / 12.92 else std.math.pow(f64, (v + 0.055) / 1.055, 2.4));
+    }
+    return l;
+}
+
+/// WCAG contrast ratio of two opaque colours, 1..21.
+pub fn contrast(a: u32, b: u32) f64 {
+    const la = luminance(a);
+    const lb = luminance(b);
+    return (@max(la, lb) + 0.05) / (@min(la, lb) + 0.05);
+}
+
+/// `c`, darkened (on a light `bg`) or lightened (on a dark one) in small
+/// steps until it reaches `min` contrast with `bg`; `c` itself when it
+/// already does.
+pub fn legible(c: u32, bg: u32, min: f64) u32 {
+    // themes are also built at compile time (default field values)
+    @setEvalBranchQuota(200_000);
+    const toward: u32 = if (luminance(bg) > 0.18) 0xFF000000 else 0xFFFFFFFF;
+    var k: f64 = 0;
+    while (k <= 1) : (k += 1.0 / 64.0) {
+        const out = mix(c | 0xFF000000, toward, k);
+        if (contrast(out, bg) >= min) return out;
+    }
+    return toward;
+}
+
+/// The accent as a fill white text reads on (AA).
+pub fn accentFill(accent: u32) u32 {
+    return legible(accent, 0xFFFFFFFF, aa_text);
 }
 
 // --- org.freedesktop.portal.Settings ---
@@ -335,6 +395,27 @@ test "theme variants differ where they should" {
     try std.testing.expect(d.fg != l.fg);
     try std.testing.expectEqual(@as(u32, 0x80FF0000), withAlpha(0xFFFF0000, 0x80));
     try std.testing.expectEqual(@as(u32, 0xFF808080), mix(0xFF000000, 0xFFFFFFFF, 0.5));
+}
+
+test "fills and text reach AA contrast, any accent" {
+    for ([_]?u32{ null, 0xFF3584E4, 0xFFF6D32D, 0xFF2EC27E, 0xFFE01B24, 0xFF000000 }) |a| {
+        for ([_]bool{ false, true }) |dark| {
+            const t = Theme.get(dark, a);
+            try std.testing.expect(contrast(t.on_accent, t.accent_fill) >= aa_text);
+            try std.testing.expect(contrast(t.on_accent, t.accent_fill_hover) >= aa_text);
+            try std.testing.expect(contrast(t.accent_text, t.window_bg) >= aa_text);
+            try std.testing.expect(contrast(over(t.text_muted, t.window_bg), t.window_bg) >= aa_text);
+        }
+    }
+    try std.testing.expect(contrast(0xFFFFFFFF, destructive_fill) >= aa_text);
+    try std.testing.expect(contrast(0xFFFFFFFF, destructive_fill_hover) >= aa_text);
+    // a colour that already reads is kept
+    try std.testing.expectEqual(@as(u32, 0xFF1D1D1F), legible(0xFF1D1D1F, 0xFFFFFFFF, aa_text));
+}
+
+/// `top` composited over the opaque `bottom`.
+fn over(top: u32, bottom: u32) u32 {
+    return mix(bottom, top | 0xFF000000, @as(f64, @floatFromInt(top >> 24)) / 255);
 }
 
 test "portal values fold into prefs" {

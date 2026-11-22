@@ -197,7 +197,7 @@ fn drawMenuContent(self: *Editor, canvas: *Canvas) void {
             canvas.fillRect(r.x + self.sc(10), r.y - self.sc(5), r.w - self.sc(20), 1, th.hairline);
         }
         const hot = (self.hover_btn >= 0 and @as(usize, @intCast(self.hover_btn)) == bi) or self.focus == bi;
-        if (hot) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.accent);
+        if (hot) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.accent_fill);
         const fg = if (hot) th.on_accent else th.fg;
         const sub = if (hot) theme.withAlpha(th.on_accent, 0xBF) else th.muted;
         const is = self.sc(16);

@@ -10,6 +10,7 @@ const wl = @import("../platform/wayland.zig");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const fui = @import("floatui.zig");
+const theme = @import("theme.zig");
 const window = @import("window.zig");
 const Rect = @import("../app/modes/geom.zig").Rect;
 
@@ -18,6 +19,8 @@ pub const title = "shotlet:scroll";
 pub const width = 232;
 pub const height = 376;
 const pad = 14;
+/// the Stop button: the default accent, dark enough for its white label
+const stop_fill = theme.accentFill(theme.default_accent);
 const radius = 18;
 const preview_h = 220;
 
@@ -95,7 +98,7 @@ pub const Hud = struct {
     fn drawStop(self: *Hud, cv: *render.Canvas) void {
         const h = self.sc(32);
         const r: Rect = .{ .x = self.sc(pad), .y = cv.h - self.sc(pad) - h, .w = cv.w - 2 * self.sc(pad), .h = h };
-        cv.fillRoundRectAA(r.x, r.y, r.w, r.h, @floatFromInt(@divTrunc(h, 2)), if (self.hover_stop) 0xFF3D95FF else fui.accent);
+        cv.fillRoundRectAA(r.x, r.y, r.w, r.h, @floatFromInt(@divTrunc(h, 2)), if (self.hover_stop) theme.mix(stop_fill, 0xFF000000, 0.12) else stop_fill);
         fui.textCentered(cv, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, 13 * self.k(), 0xFFFFFFFF, .bold, "Stop");
         self.stop_r = r;
     }

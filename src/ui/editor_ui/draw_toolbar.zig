@@ -72,7 +72,7 @@ fn drawActiveFill(self: *const Editor, canvas: *Canvas, now: i64) void {
         if (b.kind == .tool and buttons.toolButtonActive(self, b.kind.tool)) {
             const ax = tb.x + @as(i32, @intFromFloat(@round(self.act_x.at(now))));
             const ay = tb.y + @as(i32, @intFromFloat(@round(self.act_y.at(now))));
-            canvas.fillRoundRectAA(ax, ay, b.rect.w, b.rect.h, theme.button_radius * self.uf(), self.theme.accent);
+            canvas.fillRoundRectAA(ax, ay, b.rect.w, b.rect.h, theme.button_radius * self.uf(), self.theme.accent_fill);
         }
     }
 }
@@ -107,7 +107,7 @@ fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) voi
 fn drawCopyButton(self: *const Editor, canvas: *Canvas, r: Rect, hv: f64) void {
     const th = self.theme;
     const f = self.uf();
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, theme.button_radius * f, theme.mix(th.accent, th.accent_hover, hv));
+    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, theme.button_radius * f, theme.mix(th.accent_fill, th.accent_fill_hover, hv));
     const is = self.sc(16);
     icons.draw(canvas, .copy, r.x + self.sc(10), r.y + @divTrunc(r.h - is, 2), is, th.on_accent);
     const fs = theme.font_label * f;

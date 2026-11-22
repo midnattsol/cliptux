@@ -73,7 +73,7 @@ pub fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]c
         const lw = ui.width(13, .regular, l);
         const lx = x + w - lw - ui.sc(2);
         const hov = ui.hovered(lx - ui.sc(4), y, lw + ui.sc(8), h);
-        ui.label(lx, y, h, 13, if (hov) ui.th.accent_hover else ui.th.accent, .regular, l);
+        ui.label(lx, y, h, 13, if (hov) theme_mod.mix(ui.th.accent_text, ui.th.text, 0.3) else ui.th.accent_text, .regular, l);
         try ui.add(.{ .x = lx - ui.sc(4), .y = y, .w = lw + ui.sc(8), .h = h, .hit = .reset_binds, .radius = 4 });
     }
     return y + h + ui.sc(10);
@@ -298,7 +298,7 @@ pub fn shortcutRow(ui: *Ui, card: *Card, title: []const u8, win: *Window, bind: 
     }
     rowTitle(ui, r, title, null);
     if (recording) {
-        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent);
+        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent_fill);
     } else if (bind.code == 0) {
         const s = "Not set";
         ui.label(r.x + r.w - ui.sc(16) - ui.width(13, .regular, s), r.y, r.h, 13, th.text_muted, .regular, s);

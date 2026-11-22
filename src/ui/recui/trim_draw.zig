@@ -6,11 +6,15 @@ const std = @import("std");
 const render = @import("../../gfx/render.zig");
 const text = @import("../../gfx/text.zig");
 const fui = @import("../floatui.zig");
+const theme = @import("../theme.zig");
 const glyphs = @import("glyphs.zig");
 const Rect = @import("../shapes.zig").Rect;
 
 pub const width = 720;
 pub const height = 372;
+/// Save: the accent, dark enough for its white label
+const save_fill = theme.accentFill(theme.default_accent);
+const save_fill_hover = theme.mix(save_fill, 0xFF000000, 0.12);
 const margin = 16;
 pub const preview: Rect = .{ .x = margin, .y = margin, .w = width - 2 * margin, .h = 236 };
 pub const strip: Rect = .{ .x = margin + 10, .y = 268, .w = width - 2 * margin - 20, .h = 44 };
@@ -153,7 +157,7 @@ fn paintRow(cv: *render.Canvas, k: f64, st: *const State) void {
     for ([_]Part{ .cancel, .save }) |part| {
         const r = scr(partRect(part), k);
         const save = part == .save;
-        const col: u32 = if (save) (if (st.hover == part) 0xFF3D9BFF else 0xFF0A84FF) else (if (st.hover == part) 0xFF3A3A40 else 0xFF2C2C30);
+        const col: u32 = if (save) (if (st.hover == part) save_fill_hover else save_fill) else (if (st.hover == part) 0xFF3A3A40 else 0xFF2C2C30);
         cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 8 * k, col);
         fui.textCentered(cv, r, 13 * k, fg, .bold, if (save) "Save trimmed" else "Cancel");
     }
