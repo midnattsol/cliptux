@@ -13,6 +13,7 @@ const render = @import("../gfx/render.zig");
 const effects = @import("../gfx/effects.zig");
 const text = @import("../gfx/text.zig");
 const resample = @import("../gfx/resample.zig");
+const icons = @import("icons.zig");
 
 pub const Canvas = render.Canvas;
 pub const Rect = effects.Rect;
@@ -157,49 +158,24 @@ fn fillPlan(sw: u32, sh: u32, dw: u32, dh: u32) FillPlan {
 
 pub const Icon = enum { close, pencil, pin, search, trash, copy, save, check };
 
-/// A line icon in a `size` box centred on cx, cy (24-unit design grid).
+/// A line icon (the editor's set, ui/icons.zig, a little heavier) in a
+/// `size` box centred on cx, cy.
 pub fn icon(c: *Canvas, kind: Icon, cx: f64, cy: f64, size: f64, color: u32) void {
-    const k = size / 24.0;
-    const w = @max(1.2, 2.0 * k);
-    const P = struct { x: i32, y: i32 };
-    const S = struct {
-        fn p(kk: f64, ccx: f64, ccy: f64, x: f64, y: f64) P {
-            return .{ .x = @intFromFloat(@round(ccx + (x - 12) * kk)), .y = @intFromFloat(@round(ccy + (y - 12) * kk)) };
-        }
+    const ic: icons.Icon = switch (kind) {
+        .close => .close,
+        .pencil => .pen,
+        .pin => .pin,
+        .search => .search,
+        .trash => .trash,
+        .copy => .copy,
+        .save => .save,
+        .check => .check,
     };
-    switch (kind) {
-        .close => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 7, 7), S.p(k, cx, cy, 17, 17) }, w * 1.2, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 17, 7), S.p(k, cx, cy, 7, 17) }, w * 1.2, color);
-        },
-        .pencil => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 4, 20), S.p(k, cx, cy, 8, 19), S.p(k, cx, cy, 19, 8), S.p(k, cx, cy, 16, 5), S.p(k, cx, cy, 5, 16), S.p(k, cx, cy, 4, 20) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 14, 7), S.p(k, cx, cy, 17, 10) }, w, color);
-        },
-        .pin => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 12, 16), S.p(k, cx, cy, 12, 21) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 8, 3), S.p(k, cx, cy, 16, 3), S.p(k, cx, cy, 15, 9), S.p(k, cx, cy, 18, 12), S.p(k, cx, cy, 18, 16), S.p(k, cx, cy, 6, 16), S.p(k, cx, cy, 6, 12), S.p(k, cx, cy, 9, 9), S.p(k, cx, cy, 8, 3) }, w, color);
-        },
-        .search => {
-            c.ringAA(cx + (11 - 12) * k, cy + (11 - 12) * k, 7 * k, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 16, 16), S.p(k, cx, cy, 20, 20) }, w, color);
-        },
-        .trash => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 4, 6), S.p(k, cx, cy, 20, 6) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 9, 6), S.p(k, cx, cy, 9, 3), S.p(k, cx, cy, 15, 3), S.p(k, cx, cy, 15, 6) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 6, 6), S.p(k, cx, cy, 7, 21), S.p(k, cx, cy, 17, 21), S.p(k, cx, cy, 18, 6) }, w, color);
-        },
-        .copy => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 8, 8), S.p(k, cx, cy, 20, 8), S.p(k, cx, cy, 20, 20), S.p(k, cx, cy, 8, 20), S.p(k, cx, cy, 8, 8) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 4, 16), S.p(k, cx, cy, 4, 4), S.p(k, cx, cy, 16, 4) }, w, color);
-        },
-        .check => c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 5, 12), S.p(k, cx, cy, 10, 17), S.p(k, cx, cy, 19, 7) }, w * 1.2, color),
-        .save => {
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 12, 4), S.p(k, cx, cy, 12, 15) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 7, 10), S.p(k, cx, cy, 12, 15), S.p(k, cx, cy, 17, 10) }, w, color);
-            c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 4, 17), S.p(k, cx, cy, 4, 20), S.p(k, cx, cy, 20, 20), S.p(k, cx, cy, 20, 17) }, w, color);
-        },
-    }
+    const stroke: f64 = if (kind == .close or kind == .check) 2.4 else 2;
+    const s: i32 = @intFromFloat(@round(size));
+    const x: i32 = @intFromFloat(@round(cx - @as(f64, @floatFromInt(s)) / 2));
+    const y: i32 = @intFromFloat(@round(cy - @as(f64, @floatFromInt(s)) / 2));
+    icons.drawStroke(c, ic, x, y, s, stroke, color);
 }
 
 /// Text centred in `r` (vertically by line height).

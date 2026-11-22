@@ -5,6 +5,7 @@
 //! stroke icon sets, and scaled to any pixel size.
 
 const std = @import("std");
+const hint = @import("hint.zig");
 
 pub const Seg = [4]f32; // x0, y0, x1, y1
 
@@ -351,6 +352,18 @@ pub fn rasterize(mask: []u8, size: usize, d: []const u8, box: f32, stroke_units:
     stroke(mask, size, size, flat.slice(), stroke_units * k);
 }
 
+/// rasterize, grid-fitted (hint.zig): whole-pixel strokes on pixel
+/// boundaries, so small icons stay crisp.
+pub fn rasterizeFitted(mask: []u8, size: usize, d: []const u8, box: f32, stroke_units: f32) !void {
+    @memset(mask[0 .. size * size], 0);
+    var flat: Flat = .{};
+    const k = @as(f32, @floatFromInt(size)) / box;
+    try flatten(d, k, 0, 0, &flat);
+    const w = hint.strokeWidth(stroke_units * k);
+    hint.fit(flat.segs[0..flat.n], w);
+    stroke(mask, size, size, flat.slice(), w);
+}
+
 test "path commands, relative and absolute, flatten to the same lines" {
     var a: Flat = .{};
     var b: Flat = .{};
@@ -386,4 +399,17 @@ test "a stroked line covers its middle and not far off it" {
     // the dot of "h.01" with a round cap
     try rasterize(&m, 24, "M12 12h.01", 24, 3);
     try std.testing.expect(m[12 * 24 + 12] > 200);
+}
+
+test "a fitted 1 px line fills one pixel row and nothing else" {
+    // 1.75 units at 18 px is 1.3 px, between rows 8 and 9 unfitted
+    var m: [18 * 18]u8 = undefined;
+    try rasterizeFitted(&m, 18, "M4 12h16", 24, 1.75);
+    var rows: usize = 0;
+    for (0..18) |y| {
+        if (m[y * 18 + 9] == 0) continue;
+        rows += 1;
+        try std.testing.expectEqual(@as(u8, 255), m[y * 18 + 9]);
+    }
+    try std.testing.expectEqual(@as(usize, 1), rows);
 }

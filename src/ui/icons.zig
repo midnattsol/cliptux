@@ -1,6 +1,7 @@
 //! Stroke icons for the UI, drawn from SVG path data in a 24-unit box
-//! (1.75 stroke, round caps and joins) and cached as coverage masks per
-//! (icon, pixel size, stroke), so any colour and any scale stay crisp.
+//! (1.75 stroke, round caps and joins), grid-fitted to the pixel size
+//! (gfx/hint.zig) and cached as coverage masks per (icon, pixel size,
+//! stroke), so any colour and any scale stay crisp.
 //!
 //! Stable API:
 //!   Icon                   the catalogue (paths below)
@@ -147,7 +148,7 @@ fn maskFor(icon: Icon, size: usize, stroke_units: f64) ?[]const u8 {
         if (e.icon == icon and e.size == size and e.stroke_milli == sm) return e.mask;
     }
     const m = cache_alloc.alloc(u8, size * size) catch return null;
-    path.rasterize(m, size, data(icon), 24, @floatCast(stroke_units)) catch {
+    path.rasterizeFitted(m, size, data(icon), 24, @floatCast(stroke_units)) catch {
         cache_alloc.free(m);
         return null;
     };
