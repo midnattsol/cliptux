@@ -114,6 +114,22 @@ check "the magnifier leaves no trail" no_find_exact 0 1c1c1e 12 1 260 520 780 88
 keys esc
 wait_exit 5 || stop_shotlet
 
+# --- beautify is per capture: an old beautify=true is not carried over;
+# the panel's pin ("Apply to every capture") keeps it on for new ones
+printf 'quick_access=false\nhint_shown=true\nbeautify=true\n' >"$HOME/.config/shotlet/config"
+edit_on beautify-new
+keys enter
+sleep 1
+check "a new capture starts without the beautify frame" eq "$(clip_png "$OUT/bnew.png" && png_size "$OUT/bnew.png")" 1300x700
+SHOTLET_EDITOR_SCRIPT="button beautify; button beautify_always; quit" edit_on beautify-pin
+wait_exit 5 || stop_shotlet
+check "  ... the panel's pin stores beautify_always=true" grep -q "^beautify_always=true" "$HOME/.config/shotlet/config"
+edit_on beautify-always
+keys enter
+sleep 1
+check "  ... and then every new capture starts with it" test "$(clip_png "$OUT/balways.png" && png_size "$OUT/balways.png")" != 1300x700
+printf 'quick_access=false\nhint_shown=true\n' >"$HOME/.config/shotlet/config"
+
 # --- a PNG file dragged onto the editor opens in it
 if [ -z "$PYGTK" ]; then
     skip "drop onto the editor: no Python GTK 4"

@@ -16,7 +16,9 @@ Wayland and DBus wire protocols directly.
   Every annotation can be selected again to move, resize, recolour or
   delete. Undo/redo, 11 colours plus a custom picker, mouse-wheel size,
   and a "beautify" frame (gradient, solid or transparent background,
-  padding, rounded corners, shadow).
+  padding, rounded corners, shadow): off on every new capture unless its
+  panel's pin, "Apply to every capture", is on (`beautify_always=true`);
+  its style is remembered either way.
 - One floating toolbar in a translucent, blurred material; colour, size
   and style in a popover, the rest under More. Light or dark and the
   accent colour follow the desktop (Settings portal), and transitions

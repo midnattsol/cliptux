@@ -76,8 +76,8 @@ fn applyGeneral(cfg: *Config, key: []const u8, value: []const u8) bool {
 
 /// The editor's "beautify" frame.
 fn applyBeautify(cfg: *Config, key: []const u8, value: []const u8) bool {
-    if (std.mem.eql(u8, key, "beautify")) {
-        cfg.beautify = isTrue(value);
+    if (std.mem.eql(u8, key, "beautify_always")) {
+        cfg.beautify_always = isTrue(value);
     } else if (std.mem.eql(u8, key, "beautify_background")) {
         cfg.beautify_background = std.fmt.parseInt(u8, value, 10) catch 0;
     } else if (std.mem.eql(u8, key, "beautify_padding")) {

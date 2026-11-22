@@ -84,7 +84,7 @@ fn windowShot(c: Ctx, cap: *capture.Capture) !Outcome {
 }
 
 fn beautify(cfg: *const config.Config) doc_mod.Beautify {
-    return .{ .enabled = cfg.beautify, .bg = cfg.beautify_background, .padding = cfg.beautify_padding, .rounded = cfg.beautify_corners, .shadow = cfg.beautify_shadow };
+    return .{ .enabled = cfg.beautify_always, .bg = cfg.beautify_background, .padding = cfg.beautify_padding, .rounded = cfg.beautify_corners, .shadow = cfg.beautify_shadow };
 }
 
 /// Screens and windows: no region to pick, so straight to what the

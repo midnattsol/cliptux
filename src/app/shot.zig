@@ -230,12 +230,13 @@ fn configureEditor(ed: *editor_mod.Editor, conn: *dbus.Connection, cfg: *const c
     ed.color_idx = cfg.default_color;
     ed.binds = cfg.binds;
     ed.beautify = .{
-        .enabled = cfg.beautify,
+        .enabled = cfg.beautify_always,
         .bg = cfg.beautify_background,
         .padding = cfg.beautify_padding,
         .rounded = cfg.beautify_corners,
         .shadow = cfg.beautify_shadow,
     };
+    ed.beautify_always = cfg.beautify_always;
     ed.show_hint = !cfg.hint_shown;
 }
 

@@ -82,6 +82,8 @@ pub const Editor = struct {
     /// per tool, so the rectangle's fill doesn't leak into text
     styles: std.EnumArray(Tool, u2) = .initFill(0),
     beautify: doc_mod.Beautify = .{},
+    /// new captures start with the beautify frame on (the panel's pin)
+    beautify_always: bool = false,
     /// the extra tools' state (tools/mod.zig)
     tools: tools.State = .{},
 

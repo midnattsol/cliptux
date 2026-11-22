@@ -25,8 +25,9 @@ pub const Config = struct {
     /// ScreenCast restore token (silent re-capture after first consent)
     sc_token: [512]u8 = @splat(0),
     sc_token_len: usize = 0,
-    /// editor "beautify" frame, remembered across runs
-    beautify: bool = false,
+    /// every new capture starts with the "beautify" frame on (else each
+    /// starts without it; its style below is remembered either way)
+    beautify_always: bool = false,
     beautify_background: u8 = 0,
     /// 0 none, 1 small, 2 medium, 3 large
     beautify_padding: u2 = 2,
@@ -80,7 +81,9 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     // tokens from before multi-monitor capture ("screencast_token") restore
     // a single-monitor selection forever, so they are not read any more
     "screencast_restore_token",
-    "beautify",
+    // "beautify" (the last capture's frame carried over to the next) is
+    // not read any more: the frame is per capture unless "always"
+    "beautify_always",
     "beautify_background",
     "beautify_padding",
     "beautify_corners",
@@ -123,7 +126,7 @@ pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         3 => intText(buf, cfg.default_color),
         4 => cfg.saveDir() orelse "",
         5 => cfg.scToken() orelse "",
-        6 => boolText(cfg.beautify),
+        6 => boolText(cfg.beautify_always),
         7 => intText(buf, cfg.beautify_background),
         8 => padding_names[cfg.beautify_padding],
         9 => boolText(cfg.beautify_corners),

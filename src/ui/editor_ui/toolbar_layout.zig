@@ -288,7 +288,7 @@ fn layoutPanel(self: *Editor) !void {
     const pad = self.sc(theme.bar_pad);
     const sep_w = 1 + 2 * self.sc(theme.sep_margin);
     const label_w = text_mod.width(theme.font_small * self.uf(), "Beautify") + self.sc(16);
-    const kinds = [_]ButtonKind{ .background, .padding, .corners, .shadow };
+    const kinds = [_]ButtonKind{ .background, .padding, .corners, .shadow, .beautify_always };
     const pw = 2 * pad + label_w + gap + @as(i32, kinds.len) * (btn + gap) + sep_w + gap + btn;
     const ph = 2 * pad + btn;
     const tb = self.toolbar_rect;

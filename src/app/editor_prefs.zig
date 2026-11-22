@@ -1,12 +1,14 @@
-//! What the editor remembers between captures: its beautify frame and
-//! whether the first-run hint was shown.
+//! What the editor remembers between captures: the beautify frame's
+//! style, whether every capture starts with it ("always apply"), and
+//! whether the first-run hint was shown. Beautify itself is per capture.
 
 const std = @import("std");
 const config = @import("config.zig");
 const Env = @import("env.zig").Env;
 
-/// Store the editor's beautify settings and the first-run hint flag, only
-/// the keys that changed (other settings in the file are left alone).
+/// Store the editor's beautify style, "always apply" and the first-run
+/// hint flag, only the keys that changed (other settings in the file are
+/// left alone).
 pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
     const b = ed.beautify;
     var bg_buf: [8]u8 = undefined;
@@ -17,8 +19,8 @@ pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed:
             return if (v) "true" else "false";
         }
     }.s;
-    if (b.enabled != cfg.beautify) {
-        changes[n] = .{ .key = "beautify", .value = tf(b.enabled) };
+    if (ed.beautify_always != cfg.beautify_always) {
+        changes[n] = .{ .key = "beautify_always", .value = tf(ed.beautify_always) };
         n += 1;
     }
     if (b.bg != cfg.beautify_background) {

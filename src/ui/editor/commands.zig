@@ -35,6 +35,7 @@ pub fn onButton(ed: *Editor, kind: ui.ButtonKind) !void {
         .text_width => try text_edit.toggleTextWidth(ed),
         .thickness => try props.setThickness(ed, if (ed.thickness >= 16) 1 else ed.thickness + 1),
         .beautify, .background, .padding, .corners, .shadow => beautifyButton(ed, kind),
+        .beautify_always => ed.beautify_always = !ed.beautify_always,
         .undo => try history.undo(ed),
         .redo => try history.redo(ed),
         .copy => try exporter.copyToClipboard(ed),
