@@ -17,7 +17,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
             _ = try @import("modes/cli.zig").run(gpa, env, p.chain.items[0].name, r);
         },
         .record => try @import("../record/cli.zig").main(gpa, env, r),
-        .edit => try runEdit(gpa, env, p.positionals),
+        .edit => try runEdit(gpa, env, p.positionals, p.value("pin-fd")),
         .pin => if (p.positionals.len > 0)
             try @import("pin.zig").run(gpa, env, p.positionals[0], if (p.value("at")) |a| @import("pin.zig").parseAt(a) else null)
         else
@@ -58,8 +58,10 @@ fn runShot(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
     try @import("shot_args.zig").run(gpa, env, p.rest);
 }
 
-/// `edit FILE`, or `edit ROOT ID`: a history entry again (the thumbnail).
-fn runEdit(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
+/// `edit FILE`, or `edit ROOT ID`: a history entry again (the thumbnail);
+/// `--pin-fd FD`: a pin's Annotate, which FD answers.
+fn runEdit(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8, pin_fd: ?[:0]const u8) !void {
+    if (pin_fd) |s| launch.pin_fd = readyFd(&.{s});
     if (args.len > 1) return @import("shot.zig").runEdit(gpa, env, args[0], args[1]);
     try @import("editfile.zig").run(gpa, env, args[0]);
 }
@@ -71,7 +73,8 @@ fn clearHistory(env: Env) !void {
     std.debug.print("history cleared\n", .{});
 }
 
-/// `quick ROOT ID READY-FD`: the pipe the editor waits on, if any.
+/// `quick ROOT ID READY-FD`: the pipe the editor waits on, if any (and
+/// `edit --pin-fd FD`).
 fn readyFd(rest: []const [:0]const u8) ?i32 {
     if (rest.len == 0) return null;
     const fd = std.fmt.parseInt(i32, rest[0], 10) catch return null;

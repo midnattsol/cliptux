@@ -51,11 +51,14 @@ fn replaceDocument(ed: *Editor, img: png.Image) !void {
     try ed.replaceImage(p);
 }
 
-/// Pin the export to the screen (`shotlet pin`), and close.
+/// Pin the export to the screen (`shotlet pin`), and close; annotating
+/// a pin, that pin takes it.
 pub fn pinExport(ed: *Editor) !void {
     const env = launch.env orelse return error.NoEnvironment;
     const data = try ed.exportPng();
     defer ed.alloc.free(data);
+    // annotating a pin: it shows this, where it is
+    if (launch.backToPin(data)) return ed.finish(.cancel);
     var dir_buf: [1024]u8 = undefined;
     const cache = try env_mod.cacheDir(&dir_buf, env.home);
     var path_buf: [1200]u8 = undefined;
