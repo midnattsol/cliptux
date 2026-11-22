@@ -9,6 +9,7 @@ const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
 const buttons = @import("buttons.zig");
+const draw_chrome = @import("draw_chrome.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -80,8 +81,8 @@ pub fn drawTooltip(self: *Editor, canvas: *Canvas) void {
     const th = self.theme;
     const fs = theme.font_small * f;
     canvas.fillRoundRectAA(r.x, r.y + self.sc(2), r.w, r.h, 7.0 * f, 0x1F000000);
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.pill_bg);
+    draw_chrome.drawPill(self, canvas, r, 7.0 * f);
     const ty = r.y + @divTrunc(r.h - text_mod.height(fs), 2);
     text_mod.draw(canvas, r.x + self.sc(10), ty, fs, th.pill_fg, l.name);
-    if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(fs, l.key), ty, fs, 0x99EBEBF5, l.key);
+    if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(fs, l.key), ty, fs, th.pill_muted, l.key);
 }

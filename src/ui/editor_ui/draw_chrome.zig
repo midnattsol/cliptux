@@ -24,6 +24,13 @@ const Rect = shapes_mod.Rect;
 const Point = shapes_mod.Point;
 const handlePoints = shapes_mod.handlePoints;
 
+/// A label pill over the capture (the size, tooltips, the loupe's and
+/// the colour picker's readouts), see theme.Theme.pill_bg.
+pub fn drawPill(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
+    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, radius, self.theme.pill_bg);
+    shapes_mod.roundRectRing(canvas, r, radius, 1, self.theme.pill_line);
+}
+
 pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (self.text) |t| {
         const f = self.pn().view.rectToBuf(self.doc.shapes.items[t.idx].frame()).expand(self.sc(3));

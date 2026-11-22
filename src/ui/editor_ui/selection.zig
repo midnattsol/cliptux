@@ -96,7 +96,7 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
             var buf: [64]u8 = undefined;
             const label = dimsLabel(self, &buf);
             const r = dimsPillRect(self, s);
-            canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.pill_bg);
+            draw_chrome.drawPill(self, canvas, r, 7.0 * f);
             text_mod.draw(canvas, r.x + self.sc(10), r.y + self.sc(4), theme.font_small * f, th.pill_fg, label);
         }
     }
@@ -104,7 +104,7 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
         // first run only: a quiet pill, gone at the first click or key
         self.hint_seen = true;
         const r = hintRect(self);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, ff(r.h) / 2.0, th.pill_bg);
+        draw_chrome.drawPill(self, canvas, r, ff(r.h) / 2.0);
         text_mod.draw(canvas, r.x + self.sc(16), r.y + self.sc(7), theme.font_label * f, th.pill_fg, hintText());
     }
 }

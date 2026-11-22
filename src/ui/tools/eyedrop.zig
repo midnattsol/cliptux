@@ -9,6 +9,7 @@ const text_mod = @import("../../gfx/text.zig");
 const theme = @import("../theme.zig");
 const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
+const editor_ui = @import("../editor_ui.zig");
 const color = @import("color.zig");
 
 const Editor = editor_mod.Editor;
@@ -149,7 +150,7 @@ fn drawLabel(ed: *Editor, canvas: *Canvas, r: Rect, size: i32) void {
     const lh = text_mod.height(fs) + ed.sc(12);
     const lx = r.x + @divTrunc(size - lw, 2);
     const ly = r.y + size + ed.sc(6);
-    canvas.fillRoundRectAA(lx, ly, lw, lh, @as(f64, @floatFromInt(lh)) / 2, th.pill_bg);
+    editor_ui.drawPill(ed, canvas, .{ .x = lx, .y = ly, .w = lw, .h = lh }, @as(f64, @floatFromInt(lh)) / 2);
     const scy = ly + @divTrunc(lh - sw, 2);
     canvas.fillRoundRectAA(lx + ed.sc(10), scy, sw, sw, 3 * f, c);
     canvas.rectOutline(lx + ed.sc(10), scy, sw, sw, 1, 0x40FFFFFF);

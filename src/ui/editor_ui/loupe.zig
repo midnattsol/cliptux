@@ -7,6 +7,7 @@ const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
+const draw_chrome = @import("draw_chrome.zig");
 const ff = @import("common.zig").ff;
 
 const Canvas = render.Canvas;
@@ -142,6 +143,6 @@ fn drawLabel(self: *const Editor, canvas: *Canvas, r: Rect) void {
     const label = labelText(self, &buf);
     const lr = labelRect(self, r, label);
     const fs = theme.font_small * self.uf();
-    canvas.fillRoundRectAA(lr.x, lr.y, lr.w, lr.h, 7 * self.uf(), self.theme.pill_bg);
+    draw_chrome.drawPill(self, canvas, lr, 7 * self.uf());
     text_mod.draw(canvas, r.x + @divTrunc(r.w - text_mod.width(fs, label), 2), lr.y + self.sc(4), fs, self.theme.pill_fg, label);
 }

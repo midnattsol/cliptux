@@ -58,6 +58,7 @@ pub const hoverAmount = hit.hoverAmount;
 
 pub const collectOverlays = overlays.collectOverlays;
 pub const drawChrome = draw_chrome.drawChrome;
+pub const drawPill = draw_chrome.drawPill;
 pub const hoverHandle = selection.hoverHandle;
 pub const drawSelectionChrome = selection.drawSelectionChrome;
 pub const focusRing = draw_toolbar.focusRing;

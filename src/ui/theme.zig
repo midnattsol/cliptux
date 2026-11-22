@@ -125,9 +125,14 @@ pub const Theme = struct {
     sel_edge: u32 = 0xE6FFFFFF,
     handle: u32 = 0xFFFFFFFF,
     handle_shadow: u32 = 0x66000000,
-    /// the size label and other pills drawn on the screenshot
-    pill_bg: u32 = 0xB81C1C1E,
+    /// the size label and other pills drawn on the screenshot: nearly
+    /// opaque, so the capture never shows through their text, with a
+    /// hairline that keeps their edge on dark captures
+    pill_bg: u32 = 0xEB1C1C1E,
+    pill_line: u32 = 0x1FFFFFFF,
     pill_fg: u32 = 0xFFF5F5F7,
+    /// secondary text on a pill (a tooltip's shortcut)
+    pill_muted: u32 = 0xB3EBEBF5,
 
     // --- windows (Settings, history): GNOME-like boxed lists ---
     window_bg: u32,
