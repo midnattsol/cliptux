@@ -597,6 +597,12 @@ and `check-portable` (the core compiles for Windows and macOS against a
 stub backend). Keep functions within 60 lines (`zig build long-fns --
 60`) and the tree formatted (`zig fmt --check src build.zig tools`).
 
+The version comes from git (`tools/version.zig`): a build past the last
+tag calls itself the next patch's prerelease (`0.1.7-dev.12+abc1234`).
+A release is a tag: pushing `v0.1.7` builds it with `-Dversion=v0.1.7`,
+which may not be older than `build.zig.zon`'s version; raise that one
+only to plan a minor or major release.
+
 ## Tests
 
 ```sh

@@ -1,4 +1,5 @@
 const std = @import("std");
+const version = @import("tools/version.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -19,7 +20,7 @@ pub fn build(b: *std.Build) void {
     const platform = platformOptions(b, false);
     exe.root_module.addImport("platform_options", platform);
     const options = b.addOptions();
-    options.addOption([]const u8, "version", @import("build.zig.zon").version);
+    options.addOption([]const u8, "version", resolveVersion(b));
     exe.root_module.addOptions("build_options", options);
     b.installArtifact(exe);
 
@@ -47,6 +48,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
     addSizeChecks(b, test_step);
     addPortableCheck(b, options, test_step);
+    const version_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/version.zig"),
+        .target = b.graph.host,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(version_tests).step);
 
     // end-to-end suite: shotlet driven by a virtual keyboard and pointer in
     // a private headless GNOME session (tools/e2e.sh skips without one)
@@ -111,6 +117,31 @@ pub fn build(b: *std.Build) void {
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
+}
+
+/// What `shotlet --version` prints (tools/version.zig): `-Dversion` for a
+/// release, else `git describe`'s, else build.zig.zon's.
+fn resolveVersion(b: *std.Build) []const u8 {
+    const zon = @import("build.zig.zon").version;
+    if (b.option([]const u8, "version", "Release version (the tag, e.g. 0.1.7); default: from git describe")) |tag| {
+        return version.release(tag, zon) catch |err| switch (err) {
+            error.OlderThanZon => std.process.fatal("-Dversion={s} is older than build.zig.zon's {s}", .{ tag, zon }),
+            else => std.process.fatal("-Dversion={s} is not a version like 0.1.7", .{tag}),
+        };
+    }
+    return gitVersion(b, zon) orelse zon;
+}
+
+/// The version from the checkout's last tag, or null without git or tags.
+fn gitVersion(b: *std.Build, zon: []const u8) ?[]const u8 {
+    const root = b.root.toString(b.allocator) catch return null;
+    var code: u8 = 0;
+    const out = b.runAllowFail(
+        &.{ "git", "-C", root, "describe", "--tags", "--long", "--dirty", "--match", "v[0-9]*" },
+        &code,
+        .ignore,
+    ) catch return null;
+    return version.fromDescribe(b.allocator, out, zon) catch null;
 }
 
 /// The platform layer's build option: `stub` selects the compile-only

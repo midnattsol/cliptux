@@ -21,7 +21,7 @@ const top_options = [_]spec.Option{
 const help_option: spec.Option = .{ .long = "help", .short = 'h', .help = "Show this help" };
 
 pub fn overview(w: W, s: Style) !void {
-    try w.print("Shotlet {s} — {s}\n\nUsage: shotlet [COMMAND] [OPTIONS]\n", .{ commands.version, commands.tagline });
+    try w.print("Shotlet — {s}\nVersion {s}\n\nUsage: shotlet [COMMAND] [OPTIONS]\n", .{ commands.tagline, commands.version });
     var buf: [64]u8 = undefined;
     const col = overviewColumn();
     for (groups) |g| {

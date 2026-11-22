@@ -32,7 +32,7 @@ jobs:
             target=${spec%%:*}
             arch=${spec##*:}
             rm -rf zig-out
-            zig build -Doptimize=safe -Dtarget="$target"
+            zig build -Doptimize=safe -Dtarget="$target" -Dversion="$GITHUB_REF_NAME"
             name="shotlet-${GITHUB_REF_NAME}-linux-${arch}"
             mkdir -p "dist/$name"
             cp -r zig-out/bin/shotlet io.github.midnattsol.Shotlet.desktop io.github.midnattsol.Shotlet.svg install.sh uninstall.sh gnome-extension README.md LICENSE "dist/$name/"
