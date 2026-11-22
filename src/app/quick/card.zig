@@ -9,6 +9,7 @@ const png = @import("../../gfx/png.zig");
 const text = @import("../../gfx/text.zig");
 const shapes = @import("../../ui/shapes.zig");
 const fui = @import("../../ui/floatui.zig");
+const effects = @import("../../gfx/effects.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 
@@ -87,17 +88,56 @@ fn drawCard(self: *Quick, dst: Target, i: usize, r: Rect, now: i64) !void {
     const hovered = if (self.hover) |h| h.card == i and h.control != .hint else false;
     const focused = if (self.focus) |fo| fo.card == i else false;
     const dragged = self.dragging == i;
+    // the controls fade in and out with the hover, the status the other way
+    c.hov.to(if ((hovered or focused) and !dragged and !c.menu) 1 else 0, now);
+    const shown = c.hov.at(now);
     if (c.menu) {
         drawMenu(self, &cv, c, i, r, k);
-    } else if ((hovered or focused) and !dragged) {
-        cv.fillRect(0, 0, r.w, r.h, fui.veil);
-        const fo: ?Control = if (focused) self.focus.?.control else null;
-        const hv: ?Control = if (hovered) self.hover.?.control else null;
-        drawRoundButtons(self, &cv, c, fo, hv, k);
-        drawPills(self, &cv, fo, hv, k);
+    } else {
+        if (shown < 1) drawStatus(&cv, c, k);
+        if (shown > 0) try drawControls(self, card, cw, ch, i, .{ .hovered = hovered, .focused = focused }, shown);
     }
     if (c.notice.len > 0) drawNotice(&cv, c.notice, r, k);
     try composite(self, dst, card, r, cardAlpha(c, now, dragged), k);
+}
+
+/// The veil, the round buttons and the bottom pills over the picture,
+/// mixed into `card` at `shown` (0..1).
+fn drawControls(self: *Quick, card: []u32, cw: u32, ch: u32, i: usize, on: struct { hovered: bool, focused: bool }, shown: f64) !void {
+    const c = &self.cards.items[i];
+    const k = self.f();
+    const deco = try self.gpa.dupe(u32, c.scaled);
+    defer self.gpa.free(deco);
+    var dv = Canvas.init(deco, cw, ch);
+    dv.fillRect(0, 0, @intCast(cw), @intCast(ch), fui.veil);
+    const fo: ?Control = if (on.focused) self.focus.?.control else null;
+    const hv: ?Control = if (on.hovered) self.hover.?.control else null;
+    drawRoundButtons(self, &dv, c, fo, hv, k);
+    drawPills(self, &dv, layout.pillActions(c.meta.saved.len > 0), fo, hv, k);
+    effects.mixRows(card, card, deco, @intFromFloat(@round(shown * 256)));
+}
+
+/// What happened to the capture, along the bottom: "Copied" or
+/// "Saved · NAME".
+fn drawStatus(cv: *Canvas, c: *const Card, k: f64) void {
+    const saved = c.meta.saved;
+    var buf: [300]u8 = undefined;
+    var cut: [300]u8 = undefined;
+    const label = if (saved.len == 0) "Copied" else blk: {
+        const name = saved[(std.mem.lastIndexOfScalar(u8, saved, '/') orelse return) + 1 ..];
+        break :blk std.fmt.bufPrint(&buf, "Saved \u{00B7} {s}", .{name}) catch "Saved";
+    };
+    const fs = 12 * k;
+    const icon_w = sc(14, k);
+    const max_w = sc(card_w - 16 - 24, k) - icon_w;
+    const shown = fui.ellipsize(&cut, fs, label, max_w);
+    const h = sc(24, k);
+    const w = text.widthStyled(fs, .bold, shown) + icon_w + sc(22, k);
+    const x = sc(8, k);
+    const y = @as(i32, @intCast(cv.h)) - h - sc(8, k);
+    cv.fillRoundRectAA(x, y, w, h, @as(f64, @floatFromInt(h)) / 2, 0xB8000000);
+    fui.icon(cv, .check, @as(f64, @floatFromInt(x + sc(9, k))) + @as(f64, @floatFromInt(icon_w)) / 2, @as(f64, @floatFromInt(y)) + @as(f64, @floatFromInt(h)) / 2, 14 * k, fui.white);
+    text.drawStyled(cv, x + sc(13, k) + icon_w, y + @divTrunc(h - text.heightStyled(fs, .bold), 2), fs, fui.white, .bold, shown);
 }
 
 /// The card's picture, scaled once per size.
@@ -143,13 +183,15 @@ fn drawRoundButtons(self: *const Quick, cv: *Canvas, c: *const Card, fo: ?Contro
     }
 }
 
-/// Copy and Save: pills along the bottom.
-fn drawPills(self: *const Quick, cv: *Canvas, fo: ?Control, hv: ?Control, k: f64) void {
-    for ([_]Control{ .copy, .save }) |ctl| {
+/// The two pills along the bottom: the primary one in the accent.
+fn drawPills(self: *const Quick, cv: *Canvas, acts: [2]layout.Action, fo: ?Control, hv: ?Control, k: f64) void {
+    for ([_]Control{ .primary, .secondary }, acts) |ctl, a| {
         const cr = layout.controlRect(ctl);
         const rr: Rect = .{ .x = sc(cr.x, k), .y = sc(cr.y, k), .w = sc(cr.w, k), .h = sc(cr.h, k) };
-        cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (hv == ctl) fui.pill_hover else fui.pill);
-        fui.textCentered(cv, rr, 13 * k, fui.pill_text, .bold, if (ctl == .copy) "Copy" else "Save");
+        const primary = ctl == .primary;
+        const bg = if (primary) self.accent else if (hv == ctl) fui.pill_hover else fui.pill;
+        cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (primary and hv == ctl) effects.over(bg, 0x24FFFFFF) else bg);
+        fui.textCentered(cv, rr, @as(f64, if (a == .show_in_files) 12 else 13) * k, if (primary) fui.white else fui.pill_text, .bold, a.label());
         if (fo == ctl) shapes.roundRectRing(cv, .{ .x = rr.x - sc(2, k), .y = rr.y - sc(2, k), .w = rr.w + sc(4, k), .h = rr.h + sc(4, k) }, 10 * k, 2 * k, self.accent);
     }
 }

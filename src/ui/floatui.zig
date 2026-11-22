@@ -168,7 +168,7 @@ pub fn sampleBilinear(src: []const u32, sw: u32, sh: u32, fx: f64, fy: f64) u32 
     return out;
 }
 
-pub const Icon = enum { close, pencil, pin, search, trash, copy, save };
+pub const Icon = enum { close, pencil, pin, search, trash, copy, save, check };
 
 /// A line icon in a `size` box centred on cx, cy (24-unit design grid).
 pub fn icon(c: *Canvas, kind: Icon, cx: f64, cy: f64, size: f64, color: u32) void {
@@ -206,6 +206,7 @@ pub fn icon(c: *Canvas, kind: Icon, cx: f64, cy: f64, size: f64, color: u32) voi
             c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 8, 8), S.p(k, cx, cy, 20, 8), S.p(k, cx, cy, 20, 20), S.p(k, cx, cy, 8, 20), S.p(k, cx, cy, 8, 8) }, w, color);
             c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 4, 16), S.p(k, cx, cy, 4, 4), S.p(k, cx, cy, 16, 4) }, w, color);
         },
+        .check => c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 5, 12), S.p(k, cx, cy, 10, 17), S.p(k, cx, cy, 19, 7) }, w * 1.2, color),
         .save => {
             c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 12, 4), S.p(k, cx, cy, 12, 15) }, w, color);
             c.strokePolylineAA(&[_]P{ S.p(k, cx, cy, 7, 10), S.p(k, cx, cy, 12, 15), S.p(k, cx, cy, 17, 10) }, w, color);

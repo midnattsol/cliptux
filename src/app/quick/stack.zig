@@ -16,6 +16,8 @@ const wl = @import("../../platform/wayland.zig");
 const png = @import("../../gfx/png.zig");
 const window = @import("../../ui/window.zig");
 const fui = @import("../../ui/floatui.zig");
+const motion = @import("../../ui/motion.zig");
+const theme = @import("../../ui/theme.zig");
 const layout = @import("layout.zig");
 const actions = @import("actions.zig");
 const input = @import("input.zig");
@@ -46,6 +48,8 @@ pub const Card = struct {
     /// fading out since (0: not fading)
     fade_from: i64 = 0,
     menu: bool = false,
+    /// how far its hover controls show (0..1)
+    hov: motion.Tween = .{ .dur_ms = theme.motion_fast },
     notice: []const u8 = "",
     notice_until: i64 = 0,
 

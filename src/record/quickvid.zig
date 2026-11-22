@@ -4,7 +4,8 @@
 //! extension places). Hovering plays the filmstrip; Copy puts the file on
 //! the clipboard (text/uri-list, and the video itself as video/mp4 or
 //! image/gif); Save as… copies it elsewhere; the scissors open the trim
-//! window; dragging it drops the file into another app.
+//! window; dragging it drops the file into another app. It fades in and
+//! stays until closed: a recording is not glanced at like a screenshot.
 
 const std = @import("std");
 const env_mod = @import("../app/env.zig");
@@ -22,8 +23,8 @@ const keepvid = @import("keepvid.zig");
 const files = @import("files.zig");
 const Env = env_mod.Env;
 
-const show_ms = 8000;
 const fade_ms = 250;
+const fade_in_ms = 150;
 const frame_ms = 160;
 
 const Quick = struct {
@@ -39,7 +40,8 @@ const Quick = struct {
     hover: ?card.Control = null,
     pressed: ?card.Control = null,
     press_at: [2]f64 = .{ 0, 0 },
-    deadline: i64,
+    /// first drawn (0: not yet); it fades in from there
+    born: i64 = 0,
     fade_from: i64 = 0,
     notice: []const u8 = "",
     notice_until: i64 = 0,
@@ -82,7 +84,8 @@ const Quick = struct {
         const px = try self.win.backBuffer();
         @memset(px, 0);
         const pic = self.picture(now);
-        var alpha: f64 = 1;
+        if (self.born == 0) self.born = now;
+        var alpha: f64 = @min(1, @as(f64, @floatFromInt(now - self.born)) / fade_in_ms);
         if (self.fade_from != 0) alpha = @max(0, 1 - @as(f64, @floatFromInt(now - self.fade_from)) / fade_ms);
         if (self.dragging) alpha = 0.5;
         card.paint(self.gpa, px, self.win.width, self.win.height, self.scale(), &.{
@@ -103,7 +106,6 @@ const Quick = struct {
     fn say(self: *Quick, s: []const u8) void {
         self.notice = s;
         self.notice_until = sys.monoMs() + 1200;
-        self.deadline = @max(self.deadline, self.notice_until + 1500);
         self.dirty = true;
     }
 
@@ -204,8 +206,7 @@ const Quick = struct {
 
     fn tick(self: *Quick) void {
         const now = sys.monoMs();
-        if (self.hover != null) self.deadline = @max(self.deadline, now + 2000);
-        if (self.fade_from == 0 and now > self.deadline and !self.dragging) self.fade_from = now;
+        if (self.born == 0 or now - self.born < fade_in_ms) self.dirty = true;
         if (self.fade_from != 0) {
             self.dirty = true;
             if (now - self.fade_from >= fade_ms) self.done = true;
@@ -266,7 +267,6 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
         .thumb = thumb,
         .strip = strip,
         .strip_n = n_pics,
-        .deadline = sys.monoMs() + show_ms,
     };
     defer q.win.deinit();
     try q.open();
@@ -274,7 +274,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     while (!q.done) {
         try q.win.conn.flush();
         var fds = [_]sys.pollfd{.{ .fd = q.win.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
-        _ = try sys.poll(&fds, q.win.pollTimeoutMs(if (q.hover != null or q.fade_from != 0) 30 else 200));
+        _ = try sys.poll(&fds, q.win.pollTimeoutMs(if (q.hover != null or q.fade_from != 0 or sys.monoMs() - q.born < fade_in_ms) 16 else 200));
         while (try q.win.nextEventTimeout(0)) |ev| q.onEvent(ev);
         q.checkDrag();
         q.tick();

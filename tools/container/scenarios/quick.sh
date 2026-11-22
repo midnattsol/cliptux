@@ -25,7 +25,7 @@ scenario_quick() {
     drv move 0 "$x" "$y"; sleep 0.4
     shot 0 hover
     timeout 5 wl-copy -- "something else"
-    read -r x y <<<"$(card_point 60 23)"
+    read -r x y <<<"$(card_point 177 23)"  # Copy: the second button until saved
     click 0 "$x" "$y"
     sleep 1
     drv move 0 $((MW / 2)) $((MH / 3)); sleep 0.3

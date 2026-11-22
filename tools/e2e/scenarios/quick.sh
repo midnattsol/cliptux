@@ -38,7 +38,7 @@ quick_copy() {
     : >"$OUT/clip-before"
     timeout 5 wl-copy -- "something else" &
     sleep 0.5
-    read -r x y <<<"$(card_point 60 23)"
+    read -r x y <<<"$(card_point 177 23)"  # Copy: the second button until saved
     click 0 "$x" "$y"
     sleep 1
     check "thumbnail Copy puts the PNG back on the clipboard" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300

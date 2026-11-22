@@ -75,6 +75,12 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             keep.spawnSelf(self.env, &.{ "pin", p.ptr });
             self.remove(i);
         },
+        .show_in_files => {
+            if (c.meta.saved.len == 0) return;
+            const b = self.bus_() orelse return error.NoBus;
+            try @import("../filemanager.zig").showItem(self.gpa, b, c.meta.saved);
+            std.log.info("quick access: showing {s} in the file manager", .{c.meta.saved});
+        },
         .close => {
             std.log.info("quick access: closed {s}", .{c.kept.id.slice()});
             if (c.fade_from == 0) c.fade_from = sys.monoMs() - stack.fade_ms / 2;
@@ -105,13 +111,15 @@ fn save(self: *Quick, i: usize, ask: bool) !void {
     notice(self, i, "Saved");
 }
 
-fn controlAction(c: Control) ?Action {
+/// What control `c` of card i does.
+fn controlAction(self: *const Quick, i: usize, c: Control) ?Action {
+    const pills = layout.pillActions(self.cards.items[i].meta.saved.len > 0);
     return switch (c) {
         .close => .close,
         .annotate => .annotate,
         .pin => .pin,
-        .copy => .copy,
-        .save => .save,
+        .primary => pills[0],
+        .secondary => pills[1],
         else => null,
     };
 }
@@ -120,7 +128,7 @@ pub fn activate(self: *Quick, h: Hit) void {
     switch (h.control) {
         .menu => act(self, h.card, layout.menu_items[h.item].action),
         .hint => enableGnome(self),
-        else => if (controlAction(h.control)) |a| act(self, h.card, a),
+        else => if (h.card < self.cards.items.len) if (controlAction(self, h.card, h.control)) |a| act(self, h.card, a),
     }
 }
 
