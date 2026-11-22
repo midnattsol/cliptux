@@ -151,7 +151,7 @@ pub fn draw(ed: *Editor, canvas: *Canvas) void {
     material.drawShadow(ed, canvas, .loupe, lr, radius, ed.theme.loupe_shadow, 1);
     const ip = imgPoint(ed);
     const px = pixels(ed);
-    lens_mod.draw(canvas, .{ .rect = lr, .size = pl.lens.w, .radius = radius, .cell = cellSize(ed), .centre = ip }, px, ed.theme.accent);
+    lens_mod.draw(canvas, .{ .rect = lr, .size = pl.lens.w, .radius = radius, .cell = cellSize(ed), .centre = ip, .mark = @max(1, ed.sc(1)) }, px, ed.theme.accent);
     var lab = pl.label;
     lab.x = pl.anchor.x + scaled(pl.label.x - pl.anchor.x, k);
     lab.y = pl.anchor.y + scaled(pl.label.y - pl.anchor.y, k);

@@ -36,7 +36,7 @@ const mark_inner: u32 = 0xFFFFFFFF;
 const mark_outer: u32 = 0xD9000000;
 /// the edge: a dark line around the lens, a light one just inside it
 pub const edge_outer: u32 = 0x59000000;
-pub const edge_inner: u32 = 0x33FFFFFF;
+pub const edge_inner: u32 = 0x40FFFFFF;
 
 pub const Pixels = struct {
     px: []const u32,
@@ -58,6 +58,9 @@ pub const Lens = struct {
     cell: i32,
     /// the picture's pixel in the middle
     centre: Point,
+    /// the light part of its frame, physical px (one logical px: the
+    /// dark part around it stays a hairline)
+    mark: i32 = 1,
 
     /// Where the centre cell starts, in lens coordinates (both axes).
     fn origin(self: Lens) i32 {
@@ -93,12 +96,12 @@ fn cellColor(lens: Lens, pixels: Pixels, accent: u32, u: i32, v: i32) u32 {
     const cell = lens.cell;
     const dx = @divFloor(u - o, cell);
     const dy = @divFloor(v - o, cell);
-    // the centre pixel's frame: one light pixel around it, a dark one
+    // the centre pixel's frame: a light line around it, a dark hairline
     // around that
     const ring = @max(ringDist(u - o, cell), ringDist(v - o, cell));
-    if (ring == 1) return mark_inner;
+    if (ring >= 1 and ring <= lens.mark) return mark_inner;
     var c = pixels.at(lens.centre.x + dx, lens.centre.y + dy);
-    if (ring == 2) return blendOpaque(c, mark_outer);
+    if (ring == lens.mark + 1) return blendOpaque(c, mark_outer);
     if (cell >= grid_min_cell and (@mod(u - o, cell) == 0 or @mod(v - o, cell) == 0)) c = gridTint(c);
     if ((dx == 0) != (dy == 0)) c = mixRgb(c, accent, band_k);
     return c;
