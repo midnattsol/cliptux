@@ -152,7 +152,7 @@ pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, 
         var ib: [40]u8 = undefined;
         const rz = std.fmt.bufPrintSentinel(&rb, "{s}", .{k.root()}, 0) catch return;
         const iz = std.fmt.bufPrintSentinel(&ib, "{s}", .{k.id.slice()}, 0) catch return;
-        if (cfg.quick_access) keep.spawnSelf(env, &.{ "quick-video", rz.ptr, iz.ptr });
+        if (cfg.showsThumbnail(true)) keep.spawnSelf(env, &.{ "quick-video", rz.ptr, iz.ptr });
     }
 }
 

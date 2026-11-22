@@ -303,7 +303,7 @@ const Finish = struct {
     fn keep(f: Finish, data: []const u8, saved_path: []const u8) void {
         const ed = f.ed;
         if (keep_mod.keep(f.gpa, f.env, f.cfg, .{ .image_png = data, .source = ed.img, .doc = &ed.doc, .beautify = ed.beautify, .saved = saved_path, .replace = f.replace })) |k| {
-            if (f.cfg.quick_access) keep_mod.spawnQuick(f.gpa, f.env, &k);
+            if (f.cfg.showsThumbnail(saved_path.len > 0)) keep_mod.spawnQuick(f.gpa, f.env, &k);
         }
     }
 };

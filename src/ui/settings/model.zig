@@ -33,7 +33,8 @@ pub const Hit = union(enum) {
     bind: config.Action,
     reset_binds,
     win_close,
-    toggle_quick,
+    /// when the thumbnail shows: after Save, Copy and Save, never
+    cycle_thumbnail,
     quick_minus,
     quick_plus,
     toggle_history,

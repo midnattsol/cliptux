@@ -96,8 +96,11 @@ fn applyBeautify(cfg: *Config, key: []const u8, value: []const u8) bool {
 fn applyQuickAndHistory(cfg: *Config, key: []const u8, value: []const u8) bool {
     if (std.mem.eql(u8, key, "hint_shown")) {
         cfg.hint_shown = isTrue(value);
+    } else if (std.mem.eql(u8, key, "thumbnail")) {
+        cfg.thumbnail = std.meta.stringToEnum(model.Thumbnail, value) orelse cfg.thumbnail;
     } else if (std.mem.eql(u8, key, "quick_access")) {
-        cfg.quick_access = notFalse(value);
+        // the switch before there was a choice: off is never
+        if (!notFalse(value)) cfg.thumbnail = .never;
     } else if (std.mem.eql(u8, key, "quick_access_seconds")) {
         const v = std.fmt.parseInt(u16, value, 10) catch cfg.quick_access_seconds;
         cfg.quick_access_seconds = std.math.clamp(v, 1, 3600);
@@ -147,4 +150,17 @@ test "bind parse and format roundtrip" {
     // malformed input degrades to unbound, never crashes
     try std.testing.expect(parseBind("ctrl+banana").code == 0);
     try std.testing.expect(parseBind("").code == 0);
+}
+
+test "the thumbnail setting, and the switch it replaced" {
+    var cfg: Config = .{};
+    try std.testing.expect(cfg.showsThumbnail(true) and !cfg.showsThumbnail(false));
+    applyValue(&cfg, "thumbnail", "after_copy_and_save");
+    try std.testing.expect(cfg.showsThumbnail(false));
+    applyValue(&cfg, "thumbnail", "sometimes");
+    try std.testing.expectEqual(model.Thumbnail.after_copy_and_save, cfg.thumbnail);
+    applyValue(&cfg, "quick_access", "true");
+    try std.testing.expectEqual(model.Thumbnail.after_copy_and_save, cfg.thumbnail);
+    applyValue(&cfg, "quick_access", "false");
+    try std.testing.expect(!cfg.thumbnails() and !cfg.showsThumbnail(true));
 }

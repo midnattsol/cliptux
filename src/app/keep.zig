@@ -53,7 +53,7 @@ pub fn keep(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: W
 }
 
 fn keepInner(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: What) !?Kept {
-    if (!cfg.history and !cfg.quick_access) return null;
+    if (!cfg.history and !cfg.thumbnails()) return null;
     var k: Kept = .{ .id = undefined };
     if (what.replace) |r| {
         k = r;

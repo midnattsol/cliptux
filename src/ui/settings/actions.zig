@@ -67,7 +67,7 @@ fn applyConfig(app: *App, hit: Hit) void {
         .th_plus => cfg.default_thickness = @min(32, cfg.default_thickness + 1),
         .color => |c| cfg.default_color = c,
         .reset_binds => cfg.binds = config.default_binds,
-        .toggle_quick => cfg.quick_access = !cfg.quick_access,
+        .cycle_thumbnail => cfg.thumbnail = @fromBackingInt(@intCast((@backingInt(cfg.thumbnail) + 1) % 3)),
         .quick_minus, .quick_plus => cfg.quick_access_seconds = steps.stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
         .toggle_history => cfg.history = !cfg.history,
         .hist_minus, .hist_plus => cfg.history_max = steps.stepCount(cfg.history_max, hit == .hist_plus),

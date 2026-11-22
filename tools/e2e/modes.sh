@@ -15,7 +15,7 @@
 
 mode_cfg() { # mode_cfg AFTER [KEY=VALUE...]: Shotlet's settings
     mkdir -p "$HOME/.config/shotlet"
-    { printf 'quick_access=false\nafter_fullscreen=%s\n' "$1"; shift; printf '%s\n' "$@"; } >"$HOME/.config/shotlet/config"
+    { printf 'thumbnail=never\nafter_fullscreen=%s\n' "$1"; shift; printf '%s\n' "$@"; } >"$HOME/.config/shotlet/config"
 }
 modes_start() { # the driver, the extension pointed at this shotlet
     drv_start "$@" || { fail "driver"; exit 1; }

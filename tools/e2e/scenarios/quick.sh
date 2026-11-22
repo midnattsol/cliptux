@@ -134,13 +134,13 @@ open_settings() {
 # the quick-access, history and GNOME integration settings, from the
 # keyboard (SHOTLET_SETTINGS_FOCUS=n focuses the n-th control: 3 Reset
 # permissions (4 while a token is stored: 3 is Choose again), 4 thumbnail
-# switch, 6 seconds +, 12 Clear history, 14 Enable)
+# choice, 6 seconds +, 12 Clear history, 14 Enable)
 scenario_settings() {
     drv_ready Meta-0
     cfgf=$HOME/.config/shotlet/config
     settings_reset
     open_settings 4 space
-    check "the thumbnail switch turns quick access off" grep -q "^quick_access=false" "$cfgf"
+    check "the thumbnail choice goes to after Copy and Save" grep -q "^thumbnail=after_copy_and_save" "$cfgf"
     open_settings 6 enter
     check "  ... and + makes it stay longer" grep -q "^quick_access_seconds=10" "$cfgf"
     mkdir -p "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"

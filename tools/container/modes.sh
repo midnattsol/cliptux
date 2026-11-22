@@ -5,7 +5,7 @@
 # authorized by the installed desktop entry), and on wlroots an area
 # selection with a note that windows are not offered.
 mkdir -p "$XDG_CONFIG_HOME/shotlet"
-printf 'quick_access=false\nafter_fullscreen=copy\nwindow_shadow=false\n' >"$XDG_CONFIG_HOME/shotlet/config"
+printf 'thumbnail=never\nafter_fullscreen=copy\nwindow_shadow=false\n' >"$XDG_CONFIG_HOME/shotlet/config"
 check "a window to capture is up" start_droptarget
 run_shotlet fullscreen fullscreen
 check "shotlet fullscreen captures directly, with no editor" wait_log 15 "capture copied to the clipboard"

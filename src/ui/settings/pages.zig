@@ -99,7 +99,11 @@ fn quickAccess(p: Page, y0: i32) !i32 {
     const cfg = p.cfg;
     const y = try p.title(y0, "Quick access", null);
     var card = p.card(y, 2 * p.rowH());
-    try w.switchRow(ui, &card, "Thumbnail after Copy and Save", "Copy again, save, drag into apps, annotate or pin it", cfg.quick_access, .toggle_quick);
+    {
+        const r = w.rowBegin(ui, &card, p.rowH());
+        w.rowTitle(ui, r, "Show the thumbnail", "Copy again, save, drag into apps, annotate or pin it");
+        try w.chipButton(ui, r, .cycle_thumbnail, null, cfg.thumbnail.label(), false);
+    }
     const r = w.rowBegin(ui, &card, p.rowH());
     w.rowTitle(ui, r, "Stays for", "Longer while the pointer is on it");
     var buf: [16]u8 = undefined;

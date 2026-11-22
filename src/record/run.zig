@@ -71,7 +71,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
                 std.log.warn("record: could not finish: {t}", .{err});
                 return err;
             };
-            if (kept) |k| if (cfg.quick_access) showThumbnail(env, &k);
+            if (kept) |k| if (cfg.showsThumbnail(true)) showThumbnail(env, &k);
         },
     }
 }
