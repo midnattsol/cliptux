@@ -17,6 +17,8 @@ fi
 rm -f "$prefix/bin/shotlet" \
     "$data/applications/$app_id.desktop" "$data/applications/shotlet.desktop" \
     "$data/icons/hicolor/scalable/apps/$app_id.svg" "$data/icons/hicolor/scalable/apps/shotlet.svg" \
-    "$config/autostart/$app_id.desktop" "$config/autostart/shotlet.desktop"
+    "$config/autostart/$app_id.desktop" "$config/autostart/shotlet.desktop" \
+    "$data/man/man1/shotlet.1" "$data/bash-completion/completions/shotlet" \
+    "$data/zsh/site-functions/_shotlet" "$config/fish/completions/shotlet.fish"
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$data/applications" || true
 echo "Shotlet removed (settings and history kept in $config/shotlet and ${XDG_STATE_HOME:-$HOME/.local/state}/shotlet)"

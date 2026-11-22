@@ -21,6 +21,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addOptions("build_options", options);
     b.installArtifact(exe);
 
+    addManPage(b, exe);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     run_cmd.addPassthruArgs();
@@ -118,6 +120,16 @@ pub fn build(b: *std.Build) void {
     drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
     drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
+}
+
+/// `zig build man`: shotlet(1), which `shotlet man-page` writes from the
+/// command table, in zig-out/share/man/man1.
+fn addManPage(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const gen = b.addRunArtifact(exe);
+    gen.addArg("man-page");
+    const page = gen.captureStdOut(.{});
+    const install = b.addInstallFileWithDir(page, .{ .custom = "share/man/man1" }, "shotlet.1");
+    b.step("man", "Generate the man page (zig-out/share/man/man1/shotlet.1)").dependOn(&install.step);
 }
 
 /// The GNOME Shell extension ships inside the binary, for

@@ -56,6 +56,16 @@ command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1 || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$data/icons/hicolor" 2>/dev/null || true
 echo "installed $prefix/bin/shotlet, $app_id.desktop and its icon"
 
+# the man page and the shell completions, generated from the binary
+sl=$prefix/bin/shotlet
+mkdir -p "$data/man/man1" "$data/bash-completion/completions" "$data/zsh/site-functions" "$config/fish/completions"
+"$sl" man-page >"$data/man/man1/shotlet.1"
+"$sl" completions bash >"$data/bash-completion/completions/shotlet"
+"$sl" completions zsh >"$data/zsh/site-functions/_shotlet"
+"$sl" completions fish >"$config/fish/completions/shotlet.fish"
+echo "installed man shotlet and completions for bash, zsh and fish"
+echo "  zsh: add $data/zsh/site-functions to fpath (before compinit) if it is not there"
+
 if [ "$autostart" = yes ]; then
     mkdir -p "$config/autostart"
     sed -e "s|^Exec=shotlet --daemon|Exec=$prefix/bin/shotlet --daemon|" \
