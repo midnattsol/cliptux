@@ -278,8 +278,9 @@ pub const Window = struct {
     pub fn setLayerPlacement(w: *Window, idx: u8, width: u32, height: u32, margin: [4]i32) Error!void {
         _ = .{ w, idx, width, height, margin };
     }
-    pub fn setLayerKeyboard(w: *Window, idx: u8, on_demand: bool) Error!void {
-        _ = .{ w, idx, on_demand };
+    /// When a floating surface takes the keyboard (Layer.Keyboard).
+    pub fn setLayerKeyboard(w: *Window, idx: u8, keyboard: types.Layer.Keyboard) Error!void {
+        _ = .{ w, idx, keyboard };
     }
     pub fn resizeTo(w: *Window, idx: u8, width: u32, height: u32) Error!void {
         _ = .{ w, idx, width, height };
