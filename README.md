@@ -331,6 +331,12 @@ the pointer in the middle of the region, turns the wheel there (at most
 10 notches a step, 25 steps a second) and puts the pointer back at the
 end; the device is dropped when the session ends, when Shotlet's
 connection goes away, after 30 s without a step or after 5 minutes.
+`CaptureWindows(id)` gives the shotlet started on capture `id` (same
+caller check) where the windows were in that frame: their frames only
+(no titles, no contents), once, and only within a minute; it is what the
+editor's click-a-window uses. It came with the extension's version 4:
+after updating Shotlet, `shotlet gnome-integration install` and logging
+out and back in load it (until then the click is simply not offered).
 
 When the extension is missing, older, or cannot capture, Shotlet uses the
 screen-sharing portal as before. `shotlet gnome-integration status` and
