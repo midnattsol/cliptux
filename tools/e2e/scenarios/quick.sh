@@ -145,7 +145,9 @@ scenario_settings() {
     check "  ... and + makes it stay longer" grep -q "^quick_access_seconds=10" "$cfgf"
     mkdir -p "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
     open_settings 12 enter
-    check "Clear history empties it" test ! -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+    check "Clear history asks first" test -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+    open_settings 12 enter enter
+    check "  ... and a second press empties it" test ! -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
     open_settings 14 enter
     check "Enable installs the GNOME Shell extension" test -f "$HOME/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io/extension.js"
     check "  ... enabled for the next login" eval "gsettings get org.gnome.shell enabled-extensions | grep -q shotlet@midnattsol.github.io"
@@ -255,11 +257,34 @@ history_panel() {
     wait_exit 5
 }
 
+# the panel's Clear history (in the footer, away from close) asks first:
+# Esc backs out, Clear clears
+history_clear_asks() {
+    local hist=$HOME/.local/state/shotlet/history
+    # the panel: its light or dark card, the biggest blob of its colour
+    drv find 0 fafafc 3 200 || drv find 0 242426 3 200 || { fail "the history panel on screen"; return; }
+    read -r cx cy w h <<<"$VAL"
+    local bottom=$((cy + h / 2)) right=$((cx + w / 2))
+    click 0 "$cx" $((bottom - 22))
+    check "Clear history asks first" wait_log 3 "history: asking before clearing 1 captures"
+    shot 0 clear-asks
+    check "  ... keeping the captures meanwhile" eq "$(ls "$hist" | wc -l)" 1
+    keys esc
+    check "  ... Esc backs out" wait_log 3 "history: clearing cancelled"
+    check "  ... leaving the panel open" alive
+    click 0 "$cx" $((bottom - 22))
+    click 0 $((right - 44)) $((bottom - 22))
+    check "  ... and its Clear clears" wait_log 3 "history: cleared"
+    check "  ... every capture" eq "$(ls "$hist" 2>/dev/null | wc -l)" 0
+}
+
 history_restart() {
     pkill -f "shotlet (quick|history|pin)" 2>/dev/null
     sleep 0.5
     run_shotlet again history
     check "the history survives a restart" wait_log 5 "history: 1 captures"
+    sleep 1
+    history_clear_asks
     keys esc esc
     wait_exit 5
     "$BIN" history clear >/dev/null 2>&1

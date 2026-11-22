@@ -127,8 +127,13 @@ fn recentCaptures(p: Page, y0: i32) !i32 {
         try w.valueStepper(ui, r, std.fmt.bufPrint(&buf, "{d} MB", .{cfg.history_max_mb}) catch "?", .hist_mb_minus, .hist_mb_plus);
     }
     const r = w.rowBegin(ui, &card, rh);
-    w.rowTitle(ui, r, "Captures kept so far", if (p.st.history_cleared) "Cleared" else null);
-    try w.chipButton(ui, r, .clear_history, null, "Clear history", false);
+    const asking = p.st.history_clear == .asking;
+    w.rowTitle(ui, r, "Captures kept so far", switch (p.st.history_clear) {
+        .idle => null,
+        .asking => "This deletes every kept capture",
+        .cleared => "Cleared",
+    });
+    try w.chipButton(ui, r, .clear_history, null, if (asking) "Yes, clear all" else "Clear history\u{2026}", asking);
     try w.chipButtonAt(ui, r, .open_history, "Open\u{2026}", ui.sc(150));
     return w.endCard(&card) + ui.sc(26);
 }

@@ -47,6 +47,9 @@ pub const Panel = struct {
     hover_item: ?usize = null,
     hover_action: ?usize = null,
     hover_clear: bool = false,
+    /// "Clear N captures?" is showing, and which of its buttons is hovered
+    confirm_clear: bool = false,
+    hover_confirm: ?layout.Confirm = null,
     hover_close: bool = false,
     pressed: ?u32 = null,
     scroll: i32 = 0,
@@ -66,6 +69,7 @@ pub const Panel = struct {
     pub const itemRect = layout.itemRect;
     pub const actionRect = layout.actionRect;
     pub const clearRect = layout.clearRect;
+    pub const confirmRect = layout.confirmRect;
     pub const closeRect = layout.closeRect;
     pub const resize = layout.resize;
     pub const startOcr = ocr_scan.startOcr;
@@ -232,6 +236,7 @@ pub const Panel = struct {
     }
 
     pub fn clearAll(self: *Panel) !void {
+        self.confirm_clear = false;
         history.clear(self.root());
         std.log.info("history: cleared", .{});
         self.selected = null;

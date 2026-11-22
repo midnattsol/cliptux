@@ -1,6 +1,7 @@
 //! Input of the "Recent captures" panel: hover, clicks, the wheel, and
 //! keys (Enter copies, Delete removes, arrows move the pick, typing
-//! searches, Esc clears the search, then the pick, then closes).
+//! searches, Esc clears the search, then the pick, then closes). Clear
+//! history asks first; any other click or key backs out of it.
 
 const std = @import("std");
 const window = @import("../../ui/window.zig");
@@ -25,6 +26,17 @@ fn hitAction(self: *const Panel, x: i32, y: i32) ?usize {
     return null;
 }
 
+/// Clear history shows in the footer while nothing is picked.
+fn hitClear(self: *const Panel, x: i32, y: i32) bool {
+    return self.selected == null and !self.confirm_clear and self.items.items.len > 0 and self.clearRect().contains(x, y);
+}
+
+fn hitConfirm(self: *const Panel, x: i32, y: i32) ?layout.Confirm {
+    if (!self.confirm_clear) return null;
+    for ([_]layout.Confirm{ .cancel, .clear }) |c| if (self.confirmRect(c).contains(x, y)) return c;
+    return null;
+}
+
 fn onMotion(self: *Panel, bx: f64, by: f64) void {
     const kk = self.k();
     const x: i32 = @intFromFloat(bx / kk - pad);
@@ -32,12 +44,14 @@ fn onMotion(self: *Panel, bx: f64, by: f64) void {
     const inside = bx >= 0;
     const hi = if (inside) hitItem(self, x, y) else null;
     const ha = if (inside) hitAction(self, x, y) else null;
-    const hc = inside and self.clearRect().contains(x, y) and self.items.items.len > 0;
+    const hc = inside and hitClear(self, x, y);
+    const hf = if (inside) hitConfirm(self, x, y) else null;
     const hx = inside and self.closeRect().contains(x, y);
-    if (hi != self.hover_item or ha != self.hover_action or hc != self.hover_clear or hx != self.hover_close) self.dirty = true;
+    if (hi != self.hover_item or ha != self.hover_action or hc != self.hover_clear or hf != self.hover_confirm or hx != self.hover_close) self.dirty = true;
     self.hover_item = hi;
     self.hover_action = ha;
     self.hover_clear = hc;
+    self.hover_confirm = hf;
     self.hover_close = hx;
 }
 
@@ -70,8 +84,9 @@ pub fn onEvent(self: *Panel, ev: window.InputEvent) !bool {
 fn onPress(self: *Panel, by: f64) !bool {
     const y: i32 = @intFromFloat(by / self.k() - pad);
     if (self.hover_close) return false;
+    if (self.confirm_clear) return try onConfirmPress(self);
     if (self.hover_clear) {
-        try self.clearAll();
+        askClear(self);
     } else if (self.hover_action) |a| {
         self.act(@fromBackingInt(@intCast(a)));
     } else if (self.hover_item) |i| {
@@ -83,8 +98,35 @@ fn onPress(self: *Panel, by: f64) !bool {
     return true;
 }
 
+/// The first step of Clear history: ask.
+fn askClear(self: *Panel) void {
+    self.confirm_clear = true;
+    self.hover_clear = false;
+    self.dirty = true;
+    std.log.info("history: asking before clearing {d} captures", .{self.items.items.len});
+}
+
+/// While asking: Clear clears, any other click backs out.
+fn onConfirmPress(self: *Panel) !bool {
+    if (self.hover_confirm == .clear) {
+        try self.clearAll();
+    } else {
+        self.confirm_clear = false;
+        std.log.info("history: clearing cancelled", .{});
+    }
+    self.hover_confirm = null;
+    self.dirty = true;
+    return true;
+}
+
 /// A key press; returns false to close.
 fn onKey(self: *Panel, key: window.Key) bool {
+    if (self.confirm_clear) {
+        // any key backs out of clearing; Esc does nothing else
+        self.confirm_clear = false;
+        std.log.info("history: clearing cancelled", .{});
+        if (key.code == window.KEY_ESC) return true;
+    }
     switch (key.code) {
         window.KEY_ESC => {
             if (self.search.items.len > 0) {

@@ -18,6 +18,7 @@ pub const thumb_h = 82;
 pub const label_h = 18;
 pub const row_gap = 10;
 pub const actions_h = 40;
+pub const footer_button_h = 28;
 pub const max_panel_h = 620;
 
 pub const Action = enum { copy, save, annotate, pin, delete };
@@ -67,9 +68,24 @@ pub fn actionRect(self: *const Panel, i: usize) Rect {
     return .{ .x = inset + @as(i32, @intCast(i)) * w, .y = self.panelH() - actions_h - 4, .w = w, .h = actions_h };
 }
 
+/// "Clear history…" in the footer while nothing is picked: away from the
+/// close button, and only ever a first step (see confirmRect).
 pub fn clearRect(self: *const Panel) Rect {
-    _ = self;
-    return .{ .x = panel_w - inset - 26 - 44, .y = inset - 3, .w = 44, .h = header_h + 6 };
+    const w = 120;
+    return .{ .x = @divTrunc(panel_w - w, 2), .y = self.panelH() - actions_h + 4, .w = w, .h = footer_button_h };
+}
+
+/// Clearing asks first: the footer turns into "Clear N captures?" with
+/// Cancel and a destructive Clear.
+pub const Confirm = enum { cancel, clear };
+
+pub fn confirmRect(self: *const Panel, c: Confirm) Rect {
+    const y = self.panelH() - actions_h + 4;
+    const clear: Rect = .{ .x = panel_w - inset - 60, .y = y, .w = 60, .h = footer_button_h };
+    return switch (c) {
+        .clear => clear,
+        .cancel => .{ .x = clear.x - 8 - 64, .y = y, .w = 64, .h = footer_button_h },
+    };
 }
 
 pub fn closeRect(self: *const Panel) Rect {

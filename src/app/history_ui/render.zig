@@ -51,7 +51,11 @@ pub fn render(self: *Panel) !void {
     drawHeader(self, &cv, kk);
     if (self.searchable) drawSearch(self, &cv, kk);
     try drawGrid(self, panel, pw, ph, kk);
-    if (self.selected) |si| drawActions(self, &cv, &self.items.items[si], kk);
+    if (self.selected) |si| {
+        drawActions(self, &cv, &self.items.items[si], kk);
+    } else if (self.confirm_clear) {
+        drawConfirm(self, &cv, kk);
+    } else if (self.items.items.len > 0) drawClear(self, &cv, kk);
     if (self.notice.len > 0) drawNotice(self, &cv, pw, ph, kk);
 
     const o: i32 = @intFromFloat(@round(pad * kk));
@@ -60,14 +64,10 @@ pub fn render(self: *Panel) !void {
     try self.win.present();
 }
 
-/// Title, Clear (when there is something to clear) and the close button.
+/// Title and the close button.
 fn drawHeader(self: *const Panel, cv: *Canvas, kk: f64) void {
     const th = self.theme;
     text.drawStyled(cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .bold, "Recent captures");
-    if (self.items.items.len > 0) {
-        const cr = self.clearRect();
-        fui.textCentered(cv, .{ .x = s(cr.x, kk), .y = s(cr.y, kk), .w = s(cr.w, kk), .h = s(cr.h, kk) }, 12 * kk, if (self.hover_clear) th.accent else th.muted, .regular, "Clear");
-    }
     const xr = self.closeRect();
     const xcx = (@as(f64, @floatFromInt(xr.x)) + 11) * kk;
     const xcy = (@as(f64, @floatFromInt(xr.y)) + 11) * kk;
@@ -181,6 +181,47 @@ fn drawActions(self: *const Panel, cv: *Canvas, it: *const Item, kk: f64) void {
         fui.textCentered(cv, .{ .x = s(r.x, kk), .y = s(r.y + 24, kk), .w = s(r.w, kk), .h = s(14, kk) }, 10 * kk, if (dim) th.line else th.muted, .regular, name);
     }
 }
+
+/// Logical to buffer pixels, for a whole rectangle.
+fn sr(r: Rect, kk: f64) Rect {
+    return .{ .x = s(r.x, kk), .y = s(r.y, kk), .w = s(r.w, kk), .h = s(r.h, kk) };
+}
+
+/// The footer's separator, as above the action bar.
+fn footerLine(self: *const Panel, cv: *Canvas, kk: f64) void {
+    const ay = s(self.actionRect(0).y, kk);
+    cv.fillRect(s(inset, kk), ay - s(2, kk), s(panel_w - 2 * inset, kk), @max(1, s(1, kk)), self.theme.line);
+}
+
+/// "Clear history…" in the footer, the first of two steps.
+fn drawClear(self: *const Panel, cv: *Canvas, kk: f64) void {
+    const th = self.theme;
+    footerLine(self, cv, kk);
+    const r = sr(self.clearRect(), kk);
+    if (self.hover_clear) cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 7 * kk, th.hover);
+    fui.textCentered(cv, r, 12 * kk, if (self.hover_clear) destructive else th.muted, .regular, "Clear history\u{2026}");
+}
+
+/// "Clear N captures?" with Cancel and a destructive Clear.
+fn drawConfirm(self: *const Panel, cv: *Canvas, kk: f64) void {
+    const th = self.theme;
+    footerLine(self, cv, kk);
+    const cancel = sr(self.confirmRect(.cancel), kk);
+    const clear = sr(self.confirmRect(.clear), kk);
+    var buf: [48]u8 = undefined;
+    const n = self.items.items.len;
+    const q = std.fmt.bufPrint(&buf, "Clear {d} capture{s}?", .{ n, if (n == 1) "" else "s" }) catch "Clear all?";
+    text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .bold, q);
+    cv.fillRoundRectAA(cancel.x, cancel.y, cancel.w, cancel.h, 7 * kk, if (self.hover_confirm == .cancel) th.hover else th.field);
+    fui.textCentered(cv, cancel, 12 * kk, th.fg, .regular, "Cancel");
+    const red = if (self.hover_confirm == .clear) destructive_hover else destructive;
+    cv.fillRoundRectAA(clear.x, clear.y, clear.w, clear.h, 7 * kk, red);
+    fui.textCentered(cv, clear, 12 * kk, fui.white, .bold, "Clear");
+}
+
+/// The system red of destructive buttons, and pressed-looking on hover.
+const destructive: u32 = 0xFFFF453A;
+const destructive_hover: u32 = 0xFFD93A30;
 
 fn drawNotice(self: *const Panel, cv: *Canvas, pw: u32, ph: u32, kk: f64) void {
     const nw = text.widthStyled(13 * kk, .bold, self.notice) + s(28, kk);

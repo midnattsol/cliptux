@@ -18,6 +18,11 @@ const Hit = model.Hit;
 /// Perform a control's action. Returns true when the window should close.
 pub fn activate(app: *App, hit: Hit) bool {
     const st = &app.st;
+    // anything else backs out of Clear history's question
+    if (st.history_clear == .asking and hit != .clear_history) {
+        st.history_clear = .idle;
+        st.dirty = true;
+    }
     switch (hit) {
         .view => |v| showView(st, v),
         .forget_monitors => forgetMonitors(app),
@@ -98,12 +103,17 @@ fn chooseFolder(app: *App) void {
     };
 }
 
+/// The first click asks, the second clears.
 fn clearHistory(app: *App) void {
+    app.st.dirty = true;
+    if (app.st.history_clear != .asking) {
+        app.st.history_clear = .asking;
+        return;
+    }
     var buf: [1024]u8 = undefined;
     if (history.historyRoot(&buf, app.env.home)) |root| history.clear(root) else |_| {}
     std.log.info("history cleared from Settings", .{});
-    app.st.history_cleared = true;
-    app.st.dirty = true;
+    app.st.history_clear = .cleared;
 }
 
 fn enableGnome(app: *App) void {

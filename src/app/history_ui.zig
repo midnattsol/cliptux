@@ -1,7 +1,9 @@
 //! "Recent captures" (`shotlet history`, and the tray menu): a small
 //! panel listing the kept captures as a two-column grid of thumbnails
 //! with relative times. Click one to pick it, then Copy, Save, Annotate,
-//! Pin or Delete it (Enter copies, Delete removes, Esc closes). When
+//! Pin or Delete it (Enter copies, Delete removes, Esc closes). Clear
+//! history, in the footer while nothing is picked, asks before it clears
+//! everything (Cancel, Esc or any other click back out). When
 //! Tesseract is installed the captures are read in the background and a
 //! search field filters them by their text; without it there is no field.
 //!

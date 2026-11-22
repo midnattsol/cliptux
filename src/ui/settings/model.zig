@@ -107,7 +107,8 @@ pub const State = struct {
     env: env_mod.Env = undefined,
     gnome: GnomeState = .not_gnome,
     capture: gnome.CaptureInfo = .{},
-    history_cleared: bool = false,
+    /// Clear history takes two clicks: the first asks
+    history_clear: enum { idle, asking, cleared } = .idle,
     modes: settings_modes.State = .{},
 
     pub fn scrollBy(self: *State, step: i32, win: *const Window) void {
