@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const ttf = @import("../ttf.zig");
-const fontdb = @import("../fontdb.zig");
+const fontdb = @import("../../platform/api.zig").fonts;
 const bidi = @import("../bidi.zig");
 const layout = @import("layout.zig");
 const wrap_lines = @import("wrap_lines.zig");

@@ -7,17 +7,9 @@
 const std = @import("std");
 const linux = std.os.linux;
 
-/// The UI faces: the sans-serif family in four weights, and monospace.
-pub const Query = enum { sans, sans_medium, sans_semibold, sans_bold, mono };
-
-pub const Face = struct {
-    path: []u8,
-    index: u32 = 0,
-
-    pub fn deinit(self: Face, alloc: std.mem.Allocator) void {
-        alloc.free(self.path);
-    }
-};
+const types = @import("../api/fonts.zig");
+pub const Query = types.Query;
+pub const Face = types.Face;
 
 // --- fontconfig (optional, dlopen) ---
 

@@ -1,5 +1,5 @@
 //! High-level text drawing: system fonts (found through fontconfig or a
-//! directory scan, see fontdb.zig) with a per-codepoint fallback chain, so
+//! directory scan, see the platform backend's fonts.zig) with a per-codepoint fallback chain, so
 //! characters the UI font lacks come from another installed face instead of
 //! tofu. Falls back to the 5x7 bitmap font when no usable font exists.
 //! Sizes are in pixels (already display-scaled). Text is decoded lossily:
@@ -62,6 +62,5 @@ test {
     _ = @import("bidi.zig");
     _ = @import("otl.zig");
     _ = @import("ttf.zig");
-    _ = @import("fontdb.zig");
     _ = @import("utf8.zig");
 }
