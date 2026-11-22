@@ -224,6 +224,7 @@ fn fixedKeys(p: Page, y0: i32) !i32 {
         .{ "Cancel, then close", &.{"Esc"} },
         .{ "Preset colours", &.{ "1", "\u{2013}", "8" } },
         .{ "Size", &.{ "-", "=" } },
+        .{ "Copy the magnified colour", &.{"C"} },
         .{ "All shortcuts", &.{"?"} },
     };
     var card = p.card(y, @as(i32, fixed.len) * ui.sc(48));

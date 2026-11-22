@@ -13,6 +13,7 @@ const props = @import("props.zig");
 const text_edit = @import("text_edit.zig");
 const history = @import("history.zig");
 const render = @import("render.zig");
+const loupe_input = @import("loupe_input.zig");
 
 const Editor = editor.Editor;
 
@@ -91,10 +92,12 @@ fn trackModifiers(ed: *Editor, k: window.Key) !void {
     }
 }
 
-/// The wheel scrolls a tall image, else changes the stroke width.
+/// The wheel scrolls a tall image, else zooms the magnifier while it
+/// shows, else changes the stroke width.
 fn onScroll(ed: *Editor, value: f64, value120: ?i32) !void {
     // exact notches when the wheel reports them (8 units = 1/15 notch)
     const steps = if (value120) |v| editor.scrollSteps(&ed.scroll_acc, @as(f64, @floatFromInt(v)) / 8.0) else editor.scrollSteps(&ed.scroll_acc, value);
     if (steps != 0 and !ed.win.ctrl and tall_view.isTall(ed.img.width, ed.img.height, ed.screenRect())) return caches.scrollTall(ed, -steps);
+    if (loupe_input.onScroll(ed, steps)) return;
     if (steps != 0) try props.setThickness(ed, ed.thickness + steps);
 }

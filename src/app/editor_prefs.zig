@@ -1,18 +1,20 @@
 //! What the editor remembers between captures: the beautify frame's
-//! style, whether every capture starts with it ("always apply"), and
-//! whether the first-run hint was shown. Beautify itself is per capture.
+//! style, whether every capture starts with it ("always apply"), whether
+//! the first-run hint was shown and the magnifier's zoom. Beautify itself
+//! is per capture.
 
 const std = @import("std");
 const config = @import("config.zig");
 const Env = @import("env.zig").Env;
 
-/// Store the editor's beautify style, "always apply" and the first-run
-/// hint flag, only the keys that changed (other settings in the file are
+/// Store the editor's beautify style, "always apply", the first-run
+/// hint flag and the magnifier's zoom, only the keys that changed (other settings in the file are
 /// left alone).
 pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
     const b = ed.beautify;
     var bg_buf: [8]u8 = undefined;
-    var changes: [6]config.Change = undefined;
+    var zoom_buf: [8]u8 = undefined;
+    var changes: [7]config.Change = undefined;
     var n: usize = 0;
     const tf = struct {
         fn s(v: bool) []const u8 {
@@ -41,6 +43,10 @@ pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed:
     }
     if (ed.hint_seen and !cfg.hint_shown) {
         changes[n] = .{ .key = "hint_shown", .value = "true" };
+        n += 1;
+    }
+    if (ed.loupe.zoom != cfg.loupe_zoom) {
+        changes[n] = .{ .key = "loupe_zoom", .value = std.fmt.bufPrint(&zoom_buf, "{d}", .{ed.loupe.zoom}) catch "8" };
         n += 1;
     }
     if (n == 0) return;

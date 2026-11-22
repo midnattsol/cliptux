@@ -13,6 +13,7 @@ const Rect = @import("shapes.zig").Rect;
 const help_lines = [_][2][]const u8{
     .{ "Drag / click", "Select a region / a window; drag inside to move it" },
     .{ "G W D J O Q H", "Mode: area, window, screen, scroll, OCR, record, timer" },
+    .{ "Magnifier: C, scroll, - =", "Copy the pixel's #RRGGBB; zoom in and out" },
     .{ "Shift / Alt + drag", "Square, circle, 45\u{00B0} lines; from the centre" },
     .{ "Space + drag", "Move the region or shape while drawing it" },
     .{ "Arrows / Shift", "Move selection or shape by 1 / 10 px" },

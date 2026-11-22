@@ -1,6 +1,7 @@
 //! Key presses, in order of priority: help and the colour picker, the
-//! text being edited, the extra tools, fixed chords, the configurable
-//! binds (config.zig), popover navigation, the capture modes' letters
+//! text being edited, the extra tools, fixed chords, the magnifier's keys
+//! (while it shows), the configurable binds (config.zig), popover
+//! navigation, the capture modes' letters
 //! (before a selection), then the plain keys.
 
 const std = @import("std");
@@ -19,6 +20,7 @@ const exporter = @import("export.zig");
 const hit = @import("hit.zig");
 const discard = @import("discard.zig");
 const capmode = @import("capmode.zig");
+const loupe_input = @import("loupe_input.zig");
 
 const Editor = editor.Editor;
 const Key = window.Key;
@@ -42,6 +44,7 @@ pub fn onKey(ed: *Editor, k: Key) !void {
     if (try textKey(ed, k)) return;
     if (try tools.onKey(ed, k)) return;
     if (try fixedChord(ed, k)) return;
+    if (try loupe_input.onKey(ed, k)) return;
     if (!k.alt) {
         if (bindFor(ed, k)) |a| return runBind(ed, a);
     }
