@@ -77,7 +77,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     defer text.deinit();
     t.config = nowMs();
 
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     t.wayland = nowMs();
 
@@ -349,7 +349,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = true });
     std.log.info("editing {s} again", .{id});

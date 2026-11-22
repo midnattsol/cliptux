@@ -43,7 +43,7 @@ pub const Control = struct {
     pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, area: region.Rect) !Control {
         text.init(gpa);
         errdefer text.deinit();
-        var c: Control = .{ .gpa = gpa, .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display), .bus = bus, .pos = .{ 0, 0 }, .layer = false };
+        var c: Control = .{ .gpa = gpa, .win = try window.Window.init(gpa, env), .bus = bus, .pos = .{ 0, 0 }, .layer = false };
         errdefer c.win.deinit();
         const mon = monitorOf(&c.win, area);
         c.pos = place(area, mon);

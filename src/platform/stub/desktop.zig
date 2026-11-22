@@ -28,11 +28,22 @@ pub const Dialog = struct {
     }
 };
 
-/// Where the session's services are, from the environment (`vars.get`);
-/// the core keeps them in Env.bus_addr and Env.wayland_display.
-pub fn addresses(arena: std.mem.Allocator, vars: anytype, runtime_dir: []const u8) error{OutOfMemory}!struct { bus: []const u8, display: []const u8 } {
+/// Where the desktop session's services are (Linux: the D-Bus session
+/// bus and the Wayland display). Opaque to the core, which keeps it in
+/// Env.session and hands it back through Env.
+pub const Addresses = struct {
+    /// A short name telling this session from the user's others, for
+    /// per-session names (sockets in the runtime directory).
+    pub fn tag(self: *const Addresses) []const u8 {
+        _ = self;
+        return "";
+    }
+};
+
+/// The session's Addresses, from the environment (`vars.get`).
+pub fn addresses(arena: std.mem.Allocator, vars: anytype, runtime_dir: []const u8) error{OutOfMemory}!Addresses {
     _ = .{ arena, vars, runtime_dir };
-    return .{ .bus = "", .display = "" };
+    return .{};
 }
 pub fn connect(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Session {
     _ = .{ gpa, env };

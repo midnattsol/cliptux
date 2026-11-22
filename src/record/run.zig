@@ -25,7 +25,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
-    var server = ctlsock.Server.listen(env.runtime_dir, env.wayland_display) catch |err| {
+    var server = ctlsock.Server.listen(env.runtime_dir, env.session.tag()) catch |err| {
         std.log.warn("record: another recording is under way ({t})", .{err});
         return err;
     };
@@ -140,7 +140,7 @@ fn sleepCountdown(seconds: u32) bool {
 /// The whole monitor: the first one the compositor lists (the picker
 /// knows better; this is for `--full` from a script).
 fn fullArea(gpa: std.mem.Allocator, env: Env) !region.Rect {
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     for (win.outputList()) |o| {
         if (o.id == 0) continue;

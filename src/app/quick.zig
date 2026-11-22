@@ -65,7 +65,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, r
         .gpa = gpa,
         .env = env,
         .cfg = config.load(gpa, env.home),
-        .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
+        .win = try window.Window.init(gpa, env),
         .ready_fd = ready orelse -1,
     };
     defer q.deinit();

@@ -6,6 +6,7 @@ const wl = @import("../wayland.zig");
 const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const output = @import("output.zig");
+const Env = @import("../../../app/env.zig").Env;
 const pointer = @import("pointer.zig");
 const keys = @import("keys.zig");
 const events = @import("events.zig");
@@ -55,7 +56,14 @@ pub const Effects = enum {
     }
 };
 
-pub fn init(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
+/// Connect to the session's display (Env.session).
+pub fn init(alloc: std.mem.Allocator, env: Env) !Window {
+    return connect(alloc, env.runtime_dir, env.session.display);
+}
+
+/// Connect to Wayland display `display` (a name in `runtime_dir`, or a
+/// path).
+pub fn connect(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
     var self = Window{
         .alloc = alloc,
         .conn = try wl.Connection.connect(alloc, runtime_dir, display),

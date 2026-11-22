@@ -30,7 +30,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = true });
     std.log.info("edit: showing {s} ({d}x{d})", .{ path, cap.image.width, cap.image.height });

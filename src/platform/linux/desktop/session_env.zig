@@ -4,7 +4,16 @@
 
 const std = @import("std");
 
-pub const Addresses = struct { bus: []const u8, display: []const u8 };
+pub const Addresses = struct {
+    bus: []const u8,
+    display: []const u8,
+
+    /// The display's name ("wayland-0"; a path's last part).
+    pub fn tag(self: *const Addresses) []const u8 {
+        const d = self.display;
+        return if (std.mem.lastIndexOfScalar(u8, d, '/')) |i| d[i + 1 ..] else d;
+    }
+};
 
 /// `vars`: the environment (`get(name) ?[]const u8`); empty values count
 /// as unset.
@@ -48,4 +57,11 @@ test "default bus address escapes the runtime dir" {
     var out: [2]@import("../dbus.zig").Address = undefined;
     const parsed = try @import("../dbus.zig").parseAddresses(b, &buf, &out);
     try std.testing.expectEqualStrings("/tmp/a b;c/bus", parsed[0].path);
+}
+
+test "the session's tag is its display's name" {
+    const a: Addresses = .{ .bus = "", .display = "wayland-1" };
+    try std.testing.expectEqualStrings("wayland-1", a.tag());
+    const b: Addresses = .{ .bus = "", .display = "/run/user/1000/wl-test" };
+    try std.testing.expectEqualStrings("wl-test", b.tag());
 }

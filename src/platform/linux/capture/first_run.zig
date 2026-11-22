@@ -14,7 +14,7 @@ const render = @import("../../../gfx/render.zig");
 /// so GNOME can show its permission dialog, then recapture once granted.
 /// Null when the person closes the window.
 pub fn permissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?[]u8 {
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = false, .width = 640, .height = 220 });
 

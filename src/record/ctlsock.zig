@@ -1,5 +1,6 @@
 //! One recording at a time, controlled from outside: the recording
-//! listens on $XDG_RUNTIME_DIR/shotlet-record-<display>.sock; `shotlet
+//! listens on $XDG_RUNTIME_DIR/shotlet-record-<session>.sock (the
+//! session's tag, api.desktop.Addresses.tag); `shotlet
 //! record` while one runs (the same shortcut again), `shotlet record
 //! --stop` and the tray send it a command instead of starting another.
 //!
@@ -17,16 +18,15 @@ pub fn parse(line: []const u8) ?Command {
     return if (c == .resume_) null else c;
 }
 
-pub fn path(buf: []u8, runtime_dir: []const u8, display: []const u8) ![]u8 {
-    const base = if (std.mem.lastIndexOfScalar(u8, display, '/')) |i| display[i + 1 ..] else display;
-    return std.fmt.bufPrint(buf, "{s}/shotlet-record-{s}.sock", .{ runtime_dir, base });
+pub fn path(buf: []u8, runtime_dir: []const u8, session: []const u8) ![]u8 {
+    return std.fmt.bufPrint(buf, "{s}/shotlet-record-{s}.sock", .{ runtime_dir, session });
 }
 
 /// Send a command to the running recording; its answer, or null when
 /// none is running.
-pub fn send(runtime_dir: []const u8, display: []const u8, cmd: []const u8, ans: []u8) ?[]const u8 {
+pub fn send(runtime_dir: []const u8, session: []const u8, cmd: []const u8, ans: []u8) ?[]const u8 {
     var pbuf: [512]u8 = undefined;
-    const p = path(&pbuf, runtime_dir, display) catch return null;
+    const p = path(&pbuf, runtime_dir, session) catch return null;
     const fd = sys.socketUnixStream() catch return null;
     defer sys.close(fd);
     sys.connectUnix(fd, p) catch return null;
@@ -43,14 +43,14 @@ pub const Server = struct {
     path_len: usize = 0,
 
     /// Listen; error.AddressInUse when another recording answers there.
-    pub fn listen(runtime_dir: []const u8, display: []const u8) !Server {
+    pub fn listen(runtime_dir: []const u8, session: []const u8) !Server {
         var s: Server = .{ .fd = -1 };
-        const p = try path(&s.path_buf, runtime_dir, display);
+        const p = try path(&s.path_buf, runtime_dir, session);
         s.path_len = p.len;
         s.fd = sys.listenUnix(p) catch |err| blk: {
             if (err != error.AddressInUse) return err;
             var ans: [64]u8 = undefined;
-            if (send(runtime_dir, display, "status", &ans) != null) return error.AddressInUse;
+            if (send(runtime_dir, session, "status", &ans) != null) return error.AddressInUse;
             // a stale socket of a recording that crashed
             sys.unlink(p) catch {};
             break :blk try sys.listenUnix(p);

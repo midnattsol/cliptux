@@ -329,7 +329,7 @@ fn drawHint(cv: *render.Canvas, k: f64, th: theme.Theme) void {
 pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Capture, set: *settings_mod.Settings, overlays: bool, th: theme.Theme) !Result {
     var p: Picker = .{
         .gpa = gpa,
-        .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
+        .win = try window.Window.init(gpa, env),
         .cap = cap,
         .sel = .{ .monitors = &.{} },
         .st = .{ .set = set, .overlays = overlays, .th = th },

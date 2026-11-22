@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const types = @import("../api/window.zig");
+const Env = @import("../../app/env.zig").Env;
 
 pub const InputEvent = types.InputEvent;
 pub const Key = types.Key;
@@ -117,9 +118,9 @@ pub const Window = struct {
 
     pub const OpenOptions = types.OpenOptions;
 
-    /// Connect to the display (`runtime_dir`, `display`: Env's).
-    pub fn init(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) Error!Window {
-        _ = .{ runtime_dir, display };
+    /// Connect to the session's display (Env.session).
+    pub fn init(alloc: std.mem.Allocator, env: Env) Error!Window {
+        _ = env;
         return .{ .alloc = alloc };
     }
     pub fn deinit(w: *Window) void {

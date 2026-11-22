@@ -18,7 +18,7 @@ const mode = @import("../../../app/modes/mode.zig");
 
 /// True when handled (captured, or the person cancelled KWin's picker).
 pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, req: mode.Request) !bool {
-    var bus = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer bus.deinit();
     const f = (try kwinPick(gpa, &bus)) orelse return false;
     std.log.info("window capture: KWin gave {d}x{d}", .{ f.width, f.height });

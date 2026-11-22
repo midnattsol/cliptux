@@ -29,7 +29,7 @@ pub const Now = union(enum) {
 pub fn current(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) Now {
     if (gnome.isGnome() and gnome.extensionActive(bus)) return .gnome;
     if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
-        if (direct.probe(gpa, env.runtime_dir, env.wayland_display, bus)) |m| return .{ .direct = m };
+        if (direct.probe(gpa, env.runtime_dir, env.session.display, bus)) |m| return .{ .direct = m };
     }
     return .portal;
 }

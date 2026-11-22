@@ -36,12 +36,9 @@ pub fn main(init: std.process.Init) !void {
 fn readEnv(arena: std.mem.Allocator, init: std.process.Init) !Env {
     const vars = init.environ_map;
     const runtime_dir = env_mod.absolute(vars.get("XDG_RUNTIME_DIR")) orelse return error.NoRuntimeDir;
-    // the desktop session's services (Linux: D-Bus and Wayland)
-    const addr = try desktop.addresses(arena, vars, runtime_dir);
     return .{
-        .bus_addr = addr.bus,
+        .session = try desktop.addresses(arena, vars, runtime_dir),
         .runtime_dir = runtime_dir,
-        .wayland_display = addr.display,
         .home = env_mod.absolute(vars.get("HOME")) orelse return error.NoHome,
         .envp = proc.processEnv(init.minimal.environ),
         .tz = vars.get("TZ"),

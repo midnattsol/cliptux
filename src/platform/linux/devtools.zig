@@ -32,7 +32,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
 /// `test-window`: fullscreen gradient for ~3s, Esc to close.
 fn testWindow(gpa: std.mem.Allocator, env: Env) !void {
     const window = @import("window.zig");
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet test", .{});
     var elapsed_ms: i64 = 0;
@@ -63,7 +63,7 @@ fn testWindow(gpa: std.mem.Allocator, env: Env) !void {
 /// `test-grab`: ScreenCast + PipeWire, every monitor, stitched to a PNG.
 fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
     var cfg = @import("../../app/config.zig").load(gpa, env.home);
-    var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer conn.deinit();
     portal.registerApp(gpa, &conn);
     const t0 = nowMs();

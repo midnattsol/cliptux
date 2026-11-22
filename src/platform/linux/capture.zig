@@ -59,7 +59,7 @@ pub fn screens(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
 /// The compositor's own capture interface; null (logged) when there is
 /// none or it failed, for the portal to take over.
 fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.Capture {
-    const res = direct.captureAll(gpa, env.runtime_dir, env.wayland_display, conn) catch |err| {
+    const res = direct.captureAll(gpa, env.runtime_dir, env.session.display, conn) catch |err| {
         std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
         return null;
     };

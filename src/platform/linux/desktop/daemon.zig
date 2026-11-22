@@ -18,7 +18,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     if (!foreground) detach(env);
     reapChildrenAutomatically();
 
-    var conn = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer conn.deinit();
 
     // single instance: lose the name race -> another daemon already runs

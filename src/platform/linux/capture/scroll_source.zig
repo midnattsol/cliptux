@@ -61,7 +61,7 @@ fn directFrame(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, 
         var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 160 * std.time.ns_per_ms };
         _ = std.os.linux.nanosleep(&ts, null);
     };
-    var cap = switch (try direct.captureAll(gpa, env.runtime_dir, env.wayland_display, bus)) {
+    var cap = switch (try direct.captureAll(gpa, env.runtime_dir, env.session.display, bus)) {
         .captured => |c| c.cap,
         .unavailable => return error.NoDirectCapture,
     };
@@ -98,6 +98,6 @@ fn layoutBox(mons: []const capture.Monitor) geom.Rect {
 pub fn open(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) !Source {
     const l = geom.imageToLogical(cap.monitors, region) orelse return error.RegionOffScreen;
     if (shell) return .{ .shell = .{ .session = try shell_bus.Scroll.begin(gpa, bus, l.rect, auto), .auto = auto } };
-    const wheel = if (auto) inject.Wheel.open(gpa, env.runtime_dir, env.wayland_display, layoutBox(cap.monitors)) catch null else null;
+    const wheel = if (auto) inject.Wheel.open(gpa, env.runtime_dir, env.session.display, layoutBox(cap.monitors)) catch null else null;
     return .{ .direct = .{ .region = region, .logical = l.rect, .wheel = wheel } };
 }

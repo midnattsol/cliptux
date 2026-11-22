@@ -33,7 +33,7 @@ pub fn active(s: *dbus.Connection) bool {
 /// applies() and active(), on a connection of its own.
 pub fn activeNow(gpa: std.mem.Allocator, env: Env) bool {
     if (!gnome.isGnome()) return false;
-    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return false;
+    var bus = dbus.Connection.connectSession(gpa, env.session.bus) catch return false;
     defer bus.deinit();
     return gnome.extensionActive(&bus);
 }

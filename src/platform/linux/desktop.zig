@@ -24,17 +24,18 @@ pub const Session = dbus.Connection;
 pub const Dialog = portal.Request;
 
 /// Where the session's services are, from the environment.
+pub const Addresses = @import("desktop/session_env.zig").Addresses;
 pub const addresses = @import("desktop/session_env.zig").addresses;
 
 /// Connect to the session, telling the portals who we are.
 pub fn connect(gpa: std.mem.Allocator, env: Env) !Session {
-    return portal.connectApp(gpa, env.bus_addr);
+    return portal.connectApp(gpa, env.session.bus);
 }
 
 /// Connect without telling the portals who we are (identify() does):
 /// for a quick question, or to ask the shell first.
 pub fn connectBrief(gpa: std.mem.Allocator, env: Env) !Session {
-    return dbus.Connection.connectSession(gpa, env.bus_addr);
+    return dbus.Connection.connectSession(gpa, env.session.bus);
 }
 
 /// Tell the portals who we are, before any portal call on `s`.

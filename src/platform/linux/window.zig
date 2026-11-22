@@ -5,7 +5,7 @@
 //!
 //! ## Single surface (the classic API)
 //!
-//!     var win = try Window.init(alloc, runtime_dir, display);
+//!     var win = try Window.init(alloc, env);   // or connect(alloc, runtime_dir, display)
 //!     try win.open("title", .{ .fullscreen = true });
 //!     const px = try win.backBuffer();   // win.width x win.height pixels
 //!     try win.present();
@@ -214,6 +214,7 @@ pub const Window = struct {
 
     // connection and lifecycle
     pub const init = registry.init;
+    pub const connect = registry.connect;
     pub const deinit = lifecycle.deinit;
     pub const hasLayerShell = registry.hasLayerShell;
     pub const open = lifecycle.open;
@@ -304,7 +305,7 @@ test "live: one surface per output" {
     const alloc = std.testing.allocator;
     const rt = std.mem.span(std.c.getenv("XDG_RUNTIME_DIR") orelse return error.SkipZigTest);
     const disp = std.mem.span(std.c.getenv("WAYLAND_DISPLAY") orelse return error.SkipZigTest);
-    var win = try Window.init(alloc, rt, disp);
+    var win = try Window.connect(alloc, rt, disp);
     defer win.deinit();
     var n_out: usize = 0;
     for (win.outputList()) |o| if (o.id != 0) {

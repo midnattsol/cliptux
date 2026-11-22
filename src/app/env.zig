@@ -4,9 +4,10 @@
 const std = @import("std");
 
 pub const Env = struct {
-    bus_addr: []const u8,
+    /// where the desktop session's services are: the backend's, opaque
+    /// here (api.desktop.addresses fills it)
+    session: @import("../platform/api.zig").desktop.Addresses,
     runtime_dir: []const u8,
-    wayland_display: []const u8,
     home: []const u8,
     /// the parent's complete environment, passed on to children unchanged
     envp: [*:null]const ?[*:0]const u8 = &empty_envp,

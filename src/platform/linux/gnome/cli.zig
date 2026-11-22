@@ -17,7 +17,7 @@ const ext_schema_id = extension.ext_schema_id;
 const out = std.debug.print;
 
 pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const []const u8) !void {
-    var bus = try dbus.Connection.connectSession(gpa, env.bus_addr);
+    var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer bus.deinit();
     if (std.mem.eql(u8, sub, "install")) {
         try runInstall(gpa, env, &bus, rest);

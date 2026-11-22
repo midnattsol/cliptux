@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     for (args[1..]) |a| try mimes.append(arena, a);
     if (mimes.items.len == 0) try mimes.appendSlice(arena, &.{ "image/png", "text/uri-list" });
 
-    var win = try window.Window.init(gpa, vars.get("XDG_RUNTIME_DIR") orelse return error.NoRuntimeDir, vars.get("WAYLAND_DISPLAY") orelse "wayland-0");
+    var win = try window.Window.connect(gpa, vars.get("XDG_RUNTIME_DIR") orelse return error.NoRuntimeDir, vars.get("WAYLAND_DISPLAY") orelse "wayland-0");
     defer win.deinit();
     win.accept_mimes = mimes.items;
     try win.open("drop target", .{ .fullscreen = false, .maximized = true, .width = 800, .height = 600 });

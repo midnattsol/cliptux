@@ -74,7 +74,7 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *const png.Image, what: []con
     text.init(gpa);
     defer text.deinit();
 
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     var pin: Pin = .{ .gpa = gpa, .win = &win, .img = img, .layer = win.hasLayerShell(), .born = sys.monoMs(), .at = at };
     defer gpa.free(pin.scaled);

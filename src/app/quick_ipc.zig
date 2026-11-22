@@ -8,9 +8,7 @@ const sys = @import("../platform/api.zig").sys;
 const Env = env_mod.Env;
 
 pub fn socketPath(buf: []u8, env: Env) ![]u8 {
-    const d = env.wayland_display;
-    const base = if (std.mem.lastIndexOfScalar(u8, d, '/')) |i| d[i + 1 ..] else d;
-    return std.fmt.bufPrint(buf, "{s}/shotlet-quick-{s}.sock", .{ env.runtime_dir, base });
+    return std.fmt.bufPrint(buf, "{s}/shotlet-quick-{s}.sock", .{ env.runtime_dir, env.session.tag() });
 }
 
 /// Hand an entry to a running quick-access process; false when none

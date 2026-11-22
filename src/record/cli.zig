@@ -103,7 +103,7 @@ pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
     };
     var ans: [64]u8 = undefined;
     if (a.command) |c| {
-        const r = ctlsock.send(env.runtime_dir, env.wayland_display, c, &ans) orelse {
+        const r = ctlsock.send(env.runtime_dir, env.session.tag(), c, &ans) orelse {
             std.debug.print("no recording under way\n", .{});
             return error.NotRecording;
         };
@@ -111,7 +111,7 @@ pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
         return;
     }
     // the same shortcut again: stop the recording under way
-    if (ctlsock.send(env.runtime_dir, env.wayland_display, "stop", &ans)) |r| {
+    if (ctlsock.send(env.runtime_dir, env.session.tag(), "stop", &ans)) |r| {
         std.log.info("record: stopped the recording under way ({s})", .{r});
         return;
     }

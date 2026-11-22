@@ -37,7 +37,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
         .gpa = gpa,
         .env = env,
         .cfg = config.load(gpa, env.home),
-        .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
+        .win = try window.Window.init(gpa, env),
     };
     defer p.deinit();
     p.root_len = (try history.historyRoot(&p.root_buf, env.home)).len;

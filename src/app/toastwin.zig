@@ -32,7 +32,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, title: []const u8, body: []const u8
     text.init(gpa);
     defer text.deinit();
     const th = prefsOf(gpa, env);
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     const w: u32 = card_w + 2 * pad;
     const h: u32 = card_h + 2 * pad;

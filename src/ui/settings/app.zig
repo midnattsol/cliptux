@@ -244,7 +244,7 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     defer if (bus) |*b| b.deinit();
     const st = initState(alloc, env, if (bus) |*b| b else null);
 
-    var win = try Window.init(alloc, env.runtime_dir, env.wayland_display);
+    var win = try Window.init(alloc, env);
     defer win.deinit();
     win.current_cursor = .arrow;
     const size = frame_mod.outer(720, 780);

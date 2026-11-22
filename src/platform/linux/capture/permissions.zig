@@ -22,7 +22,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, args: []const []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    var bus_state: ?dbus.Connection = dbus.Connection.connectSession(gpa, env.bus_addr) catch null;
+    var bus_state: ?dbus.Connection = dbus.Connection.connectSession(gpa, env.session.bus) catch null;
     defer if (bus_state) |*b| b.deinit();
     const bus: ?*dbus.Connection = if (bus_state) |*b| b else null;
     if (args.len > 0 and std.mem.eql(u8, args[0], "reset")) {

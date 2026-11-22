@@ -219,7 +219,7 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
         t.st.strip_h = s.height;
     }
     t.seek(range.start_ms);
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     const size = frame_mod.outer(draw.width, draw.height);
     try win.open("Trim recording", .{ .fullscreen = false, .transparent = true, .width = size[0], .height = size[1] });

@@ -22,7 +22,7 @@ pub const drop_mimes = [_][]const u8{ "text/uri-list", "image/png" };
 /// The clipboard's image/png (owned); error.NoImageOnClipboard when it
 /// holds something else or nothing.
 pub fn readPng(gpa: std.mem.Allocator, env: Env) ![]u8 {
-    var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
+    var win = try window.Window.init(gpa, env);
     defer win.deinit();
     win.accept_mimes = &image_mimes;
     try win.open("shotlet:clipboard", .{ .fullscreen = false, .transparent = true, .width = 1, .height = 1 });

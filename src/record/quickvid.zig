@@ -260,7 +260,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     var q: Quick = .{
         .gpa = gpa,
         .env = env,
-        .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
+        .win = try window.Window.init(gpa, env),
         .root = root,
         .id = id,
         .info = vi.info,
