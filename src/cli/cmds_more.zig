@@ -84,6 +84,7 @@ pub const list = [_]Command{
         .usage = &.{"pin [FILE]"},
         .description = "Shows the image at 1:1 in a frameless window: scroll (or - = 0) to zoom, drag to move, Esc to close.",
         .args = &.{.{ .name = "FILE", .kind = .file, .help = "The image to pin (PNG, JPEG, WebP); without it, the clipboard's image" }},
+        .options = &.{.{ .long = "at", .value = "X,Y", .vis = .hidden, .help = "Centre it there (logical pixels): where the capture was" }},
         .examples = &.{
             .{ .cmd = "pin", .what = "Pin the image in the clipboard" },
             .{ .cmd = "pin diagram.png", .what = "Pin a file" },

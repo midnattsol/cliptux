@@ -18,7 +18,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .record => try @import("../record/cli.zig").main(gpa, env, r),
         .edit => try runEdit(gpa, env, p.positionals),
         .pin => if (p.positionals.len > 0)
-            try @import("pin.zig").run(gpa, env, p.positionals[0])
+            try @import("pin.zig").run(gpa, env, p.positionals[0], if (p.value("at")) |a| @import("pin.zig").parseAt(a) else null)
         else
             try @import("clipimg.zig").pinClipboard(gpa, env),
         .history => try @import("history_ui.zig").run(gpa, env, smoke(p)),

@@ -54,7 +54,7 @@ pub fn pinClipboard(gpa: std.mem.Allocator, env: Env) !void {
         break :blk try imgload.decode(gpa, data);
     };
     defer img.deinit(gpa);
-    try pin.show(gpa, env, &img, "the clipboard");
+    try pin.show(gpa, env, &img, "the clipboard", null);
 }
 
 /// A drop on `win` (whose accept_mimes are drop_mimes) opens the image in
