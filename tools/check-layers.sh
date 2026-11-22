@@ -1,19 +1,22 @@
 #!/bin/sh
 # Fails when a file outside the Linux backend (src/platform/linux) reaches
-# into it: an @import of one of its files, or std.os.linux. The core goes
-# through src/platform/api.zig, the one file allowed to import the
-# backend (docs/PLATFORM.md). Files still being moved out are listed in
+# into it: an @import of one of its files, std.os.linux, or the raw
+# backend (api.backend). The core goes through src/platform/api.zig, the
+# one file allowed to import the backend; only the e2e drivers' module
+# root (src/testkit.zig, Linux tooling) takes api.backend.native
+# (docs/PLATFORM.md). Files still being moved out are listed in
 # tools/layers-allowlist.txt and may only leave it. Run from the
 # repository root (zig build check-layers does).
 set -eu
 
 backend=src/platform/linux/
 seam=src/platform/api.zig
+tools_root=src/testkit.zig
 allowlist=tools/layers-allowlist.txt
 
 # violations: "<file>: <what>" for every file outside the backend
 violations() {
-    find src -name '*.zig' ! -path "$backend*" | sort | xargs awk -v backend="$backend" -v seam="$seam" '
+    find src -name '*.zig' ! -path "$backend*" | sort | xargs awk -v backend="$backend" -v seam="$seam" -v tools_root="$tools_root" '
         # the directory part of a path and a normalized join
         function dirname(p) { sub(/\/[^\/]*$/, "", p); return p }
         function join(dir, rel,    n, parts, out, i, k, stack) {
@@ -32,6 +35,8 @@ violations() {
             line = $0
             sub(/\/\/.*/, "", line)
             if (line ~ /std\.os\.linux/) print FILENAME ": std.os.linux"
+            if (line ~ /(api\.zig"\)|api)\.backend([^A-Za-z_]|$)/ && FILENAME != tools_root && FILENAME != seam)
+                print FILENAME ": uses api.backend (the core goes through the seam)"
             while (match(line, /@import\("[^"]+\.zig"\)/)) {
                 rel = substr(line, RSTART + 9, RLENGTH - 11)
                 line = substr(line, RSTART + RLENGTH)
