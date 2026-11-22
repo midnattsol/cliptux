@@ -26,6 +26,7 @@ scenario_keyboard() {
     keyboard_shift
     keyboard_space
     keyboard_esc
+    keyboard_discard
     keyboard_save_fails
     keyboard_save
 }
@@ -127,6 +128,28 @@ keyboard_esc() {
     check "Esc with a tool and a selection keeps the editor" alive
     keys esc esc
     check "  ... further Esc presses quit" wait_exit 3
+    check "  ... with status 0" eq "$RC" 0
+}
+
+# Esc never drops annotations silently: the closing Esc only warns, the
+# next one (within 4 s) discards
+keyboard_discard() {
+    run_shotlet discard
+    wait_editor 5
+    drag 0 100 100 0 500 400
+    keys r
+    drag 0 150 150 0 300 300
+    local i
+    for i in 1 2 3 4 5; do
+        grep -q "unsaved annotations" "$SHOT_LOG" && break
+        keys esc
+        sleep 0.3
+    done
+    shot 0 discard
+    check "Esc with annotations warns instead of closing" grep -q "unsaved annotations" "$SHOT_LOG"
+    check "  ... and keeps the editor" alive
+    keys esc
+    check "  ... a second Esc discards and quits" wait_exit 3
     check "  ... with status 0" eq "$RC" 0
 }
 

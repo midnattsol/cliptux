@@ -17,6 +17,7 @@ const text_edit = @import("text_edit.zig");
 const history = @import("history.zig");
 const exporter = @import("export.zig");
 const hit = @import("hit.zig");
+const discard = @import("discard.zig");
 
 const Editor = editor.Editor;
 const Key = window.Key;
@@ -139,7 +140,7 @@ fn runBind(ed: *Editor, a: config.Action) !void {
 /// Keys with no modifier meaning of their own.
 fn plainKey(ed: *Editor, k: Key) !void {
     switch (k.code) {
-        window.KEY_ESC => if (!try history.cancelOne(ed)) commands.finish(ed, .cancel),
+        window.KEY_ESC => if (!try history.cancelOne(ed)) discard.close(ed),
         keys.KEY_TAB => ui.moveFocus(ed, if (k.shift) -1 else 1),
         window.KEY_ENTER, keys.KEY_KPENTER, window.KEY_SPACE => try activate(ed, k),
         window.KEY_DELETE, window.KEY_BACKSPACE => try selection.deleteSelected(ed),

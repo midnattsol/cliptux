@@ -10,8 +10,8 @@
 //!
 //! This file holds the Editor's state and small accessors; the behaviour
 //! lives in editor/: session (the event loop), events, pointer, drag,
-//! drawing, keys_input, text_edit, props, commands, selection, history,
-//! hit, caches, beauty_cache, render, export and script.
+//! drawing, keys_input, text_edit, props, commands, discard, selection,
+//! history, hit, caches, beauty_cache, render, export and script.
 
 const std = @import("std");
 const capture = @import("../app/capture.zig");
@@ -162,6 +162,9 @@ pub const Editor = struct {
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
     hint_seen: bool = false,
+    /// until then (monotonic ms) Esc discards unsaved annotations
+    /// (editor/discard.zig)
+    discard_until_ms: i64 = 0,
     script: types.Script = .{},
 
     /// where each captured monitor lies inside `img`; set by the caller

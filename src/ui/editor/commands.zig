@@ -14,6 +14,7 @@ const text_edit = @import("text_edit.zig");
 const history = @import("history.zig");
 const exporter = @import("export.zig");
 const hit = @import("hit.zig");
+const discard = @import("discard.zig");
 
 const Editor = editor.Editor;
 const Tool = editor.Tool;
@@ -88,7 +89,7 @@ fn menuButton(ed: *Editor, kind: ui.ButtonKind) void {
             finish(ed, .new_capture);
         },
         .help => ed.help_open = !ed.help_open,
-        .cancel => finish(ed, .cancel),
+        .cancel => discard.close(ed),
         else => unreachable,
     }
 }
