@@ -23,6 +23,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
             try @import("clipimg.zig").pinClipboard(gpa, env),
         .history => try @import("history_ui.zig").run(gpa, env, smoke(p)),
         .history_clear => try clearHistory(env),
+        .thumbnail => try @import("lastthumb.zig").run(gpa, env),
         .settings => try @import("../ui/settings.zig").run(gpa, env, smoke(p)),
         .daemon => try @import("daemon.zig").run(gpa, env, p.flag("foreground")),
         .gnome_integration, .gnome_status => try gnome.runCli(gpa, env, "status", &.{}),

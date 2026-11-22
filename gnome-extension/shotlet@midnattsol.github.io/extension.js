@@ -116,7 +116,8 @@ export default class ShotletExtension extends Extension {
             ...GNOME_KEYS.map(k => this._gnomeKeys.connect(`changed::${k}`, () => this._bindShortcut())),
         ];
         this._modes = new ModeShortcuts(this._settings, this._gnomeKeys, GNOME_KEYS,
-            normalizeAccel, (mode, delay, t0) => this._capture(t0, false, mode, delay));
+            normalizeAccel, (mode, delay, t0) => this._capture(t0, false, mode, delay),
+            () => this._shotletPath());
         this._bindShortcut();
         this._scroll = new ScrollSessions(s => this._checkCaller(s), () => this._captureDir(),
             () => this._windows.showing('scroll'));

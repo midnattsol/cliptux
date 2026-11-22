@@ -8,6 +8,7 @@
 //   window-shortcut      click a window (windowpick.js)
 //   scroll-shortcut      a region scrolled and stitched (scroll.js)
 //   timer-shortcut       area capture after timer-seconds
+//   thumbnail-shortcut   not a capture: the last thumbnail again
 //
 // Each is bound like capture-shortcut: left unbound while one of GNOME's
 // own screenshot shortcuts (or capture-shortcut) holds the same key. The
@@ -21,6 +22,7 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 
 export const MODES = ['area', 'fullscreen', 'screens', 'previous', 'window', 'scroll'];
 
@@ -32,17 +34,20 @@ const KEYS = {
     'window-shortcut': ['window', false],
     'scroll-shortcut': ['scroll', false],
     'timer-shortcut': ['area', true],
+    'thumbnail-shortcut': ['thumbnail', false],
 };
 
 export class ModeShortcuts {
     // capture(mode, delaySeconds, t0) starts a capture; normalize maps an
-    // accelerator to a comparable string
-    constructor(settings, gnomeKeys, gnomeKeyNames, normalize, capture) {
+    // accelerator to a comparable string; shotletPath() names the program
+    // `shotlet thumbnail` runs
+    constructor(settings, gnomeKeys, gnomeKeyNames, normalize, capture, shotletPath) {
         this._settings = settings;
         this._gnomeKeys = gnomeKeys;
         this._gnomeKeyNames = gnomeKeyNames;
         this._normalize = normalize;
         this._capture = capture;
+        this._shotletPath = shotletPath;
         this._bound = new Set();
         this._ids = Object.keys(KEYS).map(k =>
             settings.connect(`changed::${k}`, () => this.bind()));
@@ -73,6 +78,10 @@ export class ModeShortcuts {
                 Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
                 Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
                 () => {
+                    if (mode === 'thumbnail') {
+                        this._thumbnail();
+                        return;
+                    }
                     const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
                     const delay = timer ? this._settings.get_uint('timer-seconds') : 0;
                     this._capture(mode, delay, t0).catch(e =>
@@ -80,6 +89,20 @@ export class ModeShortcuts {
                 });
             if (action !== Meta.KeyBindingAction.NONE)
                 this._bound.add(key);
+        }
+    }
+
+    // `shotlet thumbnail`: the last capture's thumbnail again
+    _thumbnail() {
+        const exe = this._shotletPath();
+        if (!exe) {
+            console.warn('Shotlet: shotlet not found');
+            return;
+        }
+        try {
+            Util.trySpawn([exe, 'thumbnail']);
+        } catch (e) {
+            console.warn(`Shotlet: could not show the last thumbnail: ${e.message}`);
         }
     }
 

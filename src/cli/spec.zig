@@ -18,6 +18,7 @@ pub const Id = enum {
     pin,
     history,
     history_clear,
+    thumbnail,
     settings,
     daemon,
     gnome_integration,
