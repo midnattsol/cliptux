@@ -18,6 +18,8 @@ pub const realtimeSec = time.realtimeSec;
 pub const realtimeMs = time.realtimeMs;
 pub const getRandom = time.getRandom;
 pub const timeoutUntil = time.timeoutUntil;
+pub const monoNs = time.monoNs;
+pub const sleepMs = time.sleepMs;
 
 // open file descriptors
 pub const pollfd = io.pollfd;
@@ -44,6 +46,8 @@ pub const FileId = io.FileId;
 pub const fileId = io.fileId;
 pub const fdSize = io.fdSize;
 pub const isTerminal = io.isTerminal;
+pub const mapFile = io.mapFile;
+pub const unmapFile = io.unmapFile;
 
 // files by path
 pub const openRead = fs.openRead;
@@ -59,6 +63,8 @@ pub const unlink = fs.unlink;
 pub const rename = fs.rename;
 pub const mtimeSec = fs.mtimeSec;
 pub const fileSize = fs.fileSize;
+pub const fileMode = fs.fileMode;
+pub const symlink = fs.symlink;
 
 // directories
 pub const openDir = dir.openDir;
@@ -87,6 +93,7 @@ pub const fork = proc.fork;
 pub const setsid = proc.setsid;
 pub const chdirRoot = proc.chdirRoot;
 pub const exitProcess = proc.exitProcess;
+pub const processId = proc.processId;
 
 // Reach every submodule's tests (a `test {}` block would count as one).
 comptime {

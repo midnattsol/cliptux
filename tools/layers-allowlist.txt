@@ -1,7 +1,5 @@
 # Files outside src/platform/linux that still import it (see
 # tools/check-layers.sh). Only removals; never add one.
-src/app/config/write.zig
-src/app/config.zig
 src/app/dispatch.zig
 src/app/editfile.zig
 src/app/history_ui/panel.zig
@@ -21,9 +19,6 @@ src/app/shot.zig
 src/app/toastwin.zig
 src/encode/ffmpeg_proc.zig
 src/encode/proc.zig
-src/gfx/effects/blur.zig
-src/gfx/png/testing.zig
-src/gfx/ttf/mmap.zig
 src/main.zig
 src/record/cli.zig
 src/record/engine.zig
@@ -35,8 +30,6 @@ src/record/session.zig
 src/record/sync.zig
 src/record/tests.zig
 src/testkit.zig
-src/ui/countdown.zig
-src/ui/editor/session.zig
 src/ui/editor.zig
 src/ui/recui/control.zig
 src/ui/settings/actions.zig

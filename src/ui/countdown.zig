@@ -40,8 +40,7 @@ fn vanish(win: *window.Window) !void {
     try win.present();
     const deadline = sys.monoMs() + 300;
     while (win.frame_pending and sys.monoMs() < deadline) _ = try win.nextEventTimeout(20);
-    var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 50 * std.time.ns_per_ms };
-    _ = std.os.linux.nanosleep(&ts, null);
+    sys.sleepMs(50);
 }
 
 /// Count `seconds` down. True when it ran out (the card is invisible

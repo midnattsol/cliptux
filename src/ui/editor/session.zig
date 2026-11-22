@@ -3,6 +3,7 @@
 //! desktop's appearance while open.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const editor = @import("../editor.zig");
 const ui = @import("../editor_ui.zig");
 const theme_mod = @import("../theme.zig");
@@ -17,9 +18,7 @@ const fade = @import("fade.zig");
 const Editor = editor.Editor;
 
 pub fn nowMs() i64 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+    return sys.monoMs();
 }
 
 pub fn getenv(name: [*:0]const u8) ?[]const u8 {

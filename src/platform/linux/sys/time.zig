@@ -50,3 +50,19 @@ pub fn timeoutUntil(deadline_ms: ?i64) i32 {
     if (left <= 0) return 0;
     return @intCast(@min(left, std.math.maxInt(i32)));
 }
+
+/// Nanoseconds on the monotonic clock.
+pub fn monoNs() i64 {
+    const ts = clockNow(.MONOTONIC);
+    return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
+}
+
+/// Sleep for `ms` milliseconds (restarted when a signal cuts it short).
+pub fn sleepMs(ms: u64) void {
+    var ts: linux.timespec = .{ .sec = @intCast(ms / 1000), .nsec = @intCast((ms % 1000) * std.time.ns_per_ms) };
+    while (true) {
+        var rem: linux.timespec = undefined;
+        if (linux.errno(linux.nanosleep(&ts, &rem)) != .INTR) return;
+        ts = rem;
+    }
+}

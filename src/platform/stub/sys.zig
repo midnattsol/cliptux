@@ -55,6 +55,15 @@ pub fn realtimeMs() i64 {
 pub fn getRandom(buf: []u8) void {
     @memset(buf, 0);
 }
+pub fn monoNs() i64 {
+    return 0;
+}
+pub fn sleepMs(ms: u64) void {
+    _ = ms;
+}
+pub fn processId() u32 {
+    return 0;
+}
 pub fn timeoutUntil(deadline_ms: ?i64) i32 {
     _ = deadline_ms;
     return -1;
@@ -93,6 +102,16 @@ pub fn fsync(fd: fd_t) void {
 pub fn lockExclusive(fd: fd_t) Error!void {
     _ = fd;
     return error.SyscallFailed;
+}
+
+/// Map the whole file at `path` read-only; error.BadSize unless it holds
+/// `min`..`max` bytes.
+pub fn mapFile(path: []const u8, min: u64, max: u64) (Error || error{ BadSize, MmapFailed })![]const u8 {
+    _ = .{ path, min, max };
+    return error.NotFound;
+}
+pub fn unmapFile(d: []const u8) void {
+    _ = d;
 }
 
 // files by path
@@ -135,6 +154,14 @@ pub fn rename(old_path: []const u8, new_path: []const u8) Error!void {
 pub fn mtimeSec(path: []const u8) ?i64 {
     _ = path;
     return null;
+}
+pub fn fileMode(path: []const u8) ?u32 {
+    _ = path;
+    return null;
+}
+pub fn symlink(target: []const u8, path: []const u8) Error!void {
+    _ = .{ target, path };
+    return error.AccessDenied;
 }
 pub fn fileSize(path: []const u8) Error!u64 {
     _ = path;

@@ -2,6 +2,7 @@
 //! `softBlur` for looks. Pixels are 0xAARRGGBB, row-major.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const rect = @import("rect.zig");
 const Rect = rect.Rect;
 const clip = rect.clip;
@@ -178,7 +179,7 @@ var noise_key: u32 = 0;
 fn noiseKey() u32 {
     if (noise_key == 0) {
         var k: u32 = 0;
-        _ = std.os.linux.getrandom(std.mem.asBytes(&k), 4, 0);
+        sys.getRandom(std.mem.asBytes(&k));
         noise_key = k | 1;
     }
     return noise_key;

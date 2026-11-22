@@ -142,11 +142,7 @@ test "config save/load roundtrip" {
     // private to the user
     var path_buf: [600]u8 = undefined;
     const path = try configFile(dir, &path_buf);
-    var stx: std.os.linux.Statx = undefined;
-    var pz: [600:0]u8 = @splat(0);
-    @memcpy(pz[0..path.len], path);
-    _ = std.os.linux.statx(std.os.linux.AT.FDCWD, &pz, 0, .{ .MODE = true }, &stx);
-    try std.testing.expectEqual(@as(u16, 0o600), stx.mode & 0o777);
+    try std.testing.expectEqual(@as(?u32, 0o600), sys.fileMode(path));
 }
 
 test "saving merges: a stale snapshot never reverts other keys" {

@@ -118,3 +118,22 @@ pub fn fileSize(path: []const u8) !u64 {
     _ = try check(linux.statx(linux.AT.FDCWD, p.ptr, 0, .{ .SIZE = true }, &stx));
     return stx.size;
 }
+
+/// The permission bits of `path` (0o777 and the like); null when it
+/// cannot be read.
+pub fn fileMode(path: []const u8) ?u32 {
+    var buf: [common.path_max]u8 = undefined;
+    const p = pathZ(&buf, path) catch return null;
+    var stx: linux.Statx = undefined;
+    if (linux.errno(linux.statx(linux.AT.FDCWD, p.ptr, 0, .{ .MODE = true }, &stx)) != .SUCCESS) return null;
+    return stx.mode & 0o7777;
+}
+
+/// Create a symbolic link at `path` pointing to `target`.
+pub fn symlink(target: []const u8, path: []const u8) !void {
+    var tbuf: [common.path_max]u8 = undefined;
+    var pbuf: [common.path_max]u8 = undefined;
+    const t = try pathZ(&tbuf, target);
+    const p = try pathZ(&pbuf, path);
+    _ = try check(linux.symlinkat(t.ptr, linux.AT.FDCWD, p.ptr));
+}

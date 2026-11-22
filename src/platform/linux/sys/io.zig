@@ -134,3 +134,22 @@ pub fn isTerminal(fd: fd_t) bool {
     var t: linux.termios = undefined;
     return linux.errno(linux.tcgetattr(fd, &t)) == .SUCCESS;
 }
+
+/// Map the whole file at `path` read-only; error.BadSize unless it holds
+/// `min`..`max` bytes. Undo with unmapFile.
+pub fn mapFile(path: []const u8, min: u64, max: u64) ![]const u8 {
+    const fd = try @import("fs.zig").openRead(path);
+    defer close(fd);
+    const size = try fdSize(fd);
+    if (size < min or size > max) return error.BadSize;
+    const len: usize = @intCast(size);
+    const rc = linux.mmap(null, len, .{ .READ = true }, .{ .TYPE = .PRIVATE }, fd, 0);
+    if (linux.errno(rc) != .SUCCESS) return error.MmapFailed;
+    const ptr: [*]const u8 = @ptrFromInt(rc);
+    return ptr[0..len];
+}
+
+pub fn unmapFile(d: []const u8) void {
+    const p: [*]align(std.heap.page_size_min) const u8 = @alignCast(d.ptr);
+    _ = linux.munmap(p, d.len);
+}

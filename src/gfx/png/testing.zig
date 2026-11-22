@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const flate = std.compress.flate;
+const sys = @import("../../platform/api.zig").sys;
 const chunks = @import("chunks.zig");
 const dec = @import("decode.zig");
 const paeth = @import("filters.zig").paeth;
@@ -24,22 +25,9 @@ pub fn testImage(px: []u32, w: u32, seed: u64) void {
     }
 }
 
+/// A sample file of the system, whole (up to 4 MiB); error when absent.
 pub fn readTestFile(alloc: std.mem.Allocator, path: [:0]const u8) ![]u8 {
-    const linux = std.os.linux;
-    const rc = linux.openat(linux.AT.FDCWD, path, .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0);
-    if (linux.errno(rc) != .SUCCESS) return error.NotFound;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
-    var list: std.ArrayList(u8) = .empty;
-    errdefer list.deinit(alloc);
-    var buf: [16384]u8 = undefined;
-    while (list.items.len < 4 * 1024 * 1024) {
-        const n = linux.read(fd, &buf, buf.len);
-        if (linux.errno(n) != .SUCCESS) return error.ReadFailed;
-        if (n == 0) break;
-        try list.appendSlice(alloc, buf[0..n]);
-    }
-    return list.toOwnedSlice(alloc);
+    return sys.readFileAlloc(alloc, path, 4 * 1024 * 1024);
 }
 
 /// Decode must fail cleanly (never panic or over-allocate) on mutated input.

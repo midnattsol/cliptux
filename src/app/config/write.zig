@@ -58,7 +58,7 @@ fn createTemp(dir: []const u8, tmp_buf: []u8, tmp: *[]u8) !sys.fd_t {
     while (true) : (attempt += 1) {
         var rnd: [6]u8 = undefined;
         sys.getRandom(&rnd);
-        tmp.* = try std.fmt.bufPrint(tmp_buf, "{s}/.config.{d}.{x}.tmp", .{ dir, std.os.linux.getpid(), std.mem.readInt(u48, &rnd, .little) });
+        tmp.* = try std.fmt.bufPrint(tmp_buf, "{s}/.config.{d}.{x}.tmp", .{ dir, sys.processId(), std.mem.readInt(u48, &rnd, .little) });
         return sys.createExclusive(tmp.*, 0o600) catch |err| switch (err) {
             error.PathAlreadyExists => if (attempt < 8) continue else return err,
             else => return err,

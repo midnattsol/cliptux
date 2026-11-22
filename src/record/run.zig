@@ -141,8 +141,7 @@ fn waitAny(bus: *dbus.Connection, server: *ctlsock.Server, ctl: ?*control_mod.Co
 }
 
 fn sleepCountdown(seconds: u32) bool {
-    var ts: std.os.linux.timespec = .{ .sec = @intCast(seconds), .nsec = 0 };
-    _ = std.os.linux.nanosleep(&ts, null);
+    sys.sleepMs(@as(u64, seconds) * 1000);
     return true;
 }
 

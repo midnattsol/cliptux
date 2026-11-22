@@ -25,10 +25,7 @@ const source = @import("../../platform/linux/capture/scroll_source.zig");
 /// How long a natural stop's reason stays up before the editor opens.
 const done_hold_ms = 900;
 
-fn sleepMs(ms: u64) void {
-    var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = @intCast(ms * std.time.ns_per_ms) };
-    _ = std.os.linux.nanosleep(&ts, null);
-}
+const sleepMs = sys.sleepMs;
 
 /// What (re)opens the frame source.
 pub const Opener = struct {

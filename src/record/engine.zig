@@ -48,11 +48,7 @@ pub const Done = struct {
     src_h: u32,
 };
 
-fn monoNs() i64 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
-}
+const monoNs = sys.monoNs;
 
 const Tap = struct { engine: *Engine, which: usize };
 
@@ -333,8 +329,7 @@ pub const Engine = struct {
         defer self.gpa.free(buf);
         while (!self.stopping.load(.acquire)) {
             self.flushAudio(buf, self.media()) catch return;
-            var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 20 * std.time.ns_per_ms };
-            _ = std.os.linux.nanosleep(&ts, null);
+            sys.sleepMs(20);
         }
         if (self.abort.load(.acquire)) return;
         const end = self.end_ns orelse self.media();

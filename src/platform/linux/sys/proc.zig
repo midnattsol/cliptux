@@ -25,3 +25,8 @@ pub fn chdirRoot() void {
 pub fn exitProcess(code: u8) noreturn {
     linux.exit(code);
 }
+
+/// This process's id (for unique temporary names).
+pub fn processId() u32 {
+    return @intCast(linux.getpid());
+}

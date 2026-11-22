@@ -159,8 +159,8 @@ test "saved names never overwrite" {
 
     // a symlink in the way is not followed
     var link_buf: [512]u8 = undefined;
-    const link = try std.fmt.bufPrint(&link_buf, "{s}/l.png\x00", .{dir});
-    _ = std.os.linux.symlinkat("/nonexistent-target", std.os.linux.AT.FDCWD, @ptrCast(link.ptr));
+    const link = try std.fmt.bufPrint(&link_buf, "{s}/l.png", .{dir});
+    try sys.symlink("/nonexistent-target", link);
     const d = try writeUnique(gpa, dir, "l", ".png", "x");
     defer gpa.free(d);
     try std.testing.expect(std.mem.endsWith(u8, d, "/l-2.png"));
