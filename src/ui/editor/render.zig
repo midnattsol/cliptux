@@ -13,6 +13,7 @@ const ui = @import("../editor_ui.zig");
 const caches = @import("caches.zig");
 const beauty_cache = @import("beauty_cache.zig");
 const fade = @import("fade.zig");
+const winpick = @import("winpick.zig");
 
 const Editor = editor.Editor;
 const Canvas = render.Canvas;
@@ -124,9 +125,11 @@ fn composeRegion(ed: *Editor, px: []u32, region: Rect) void {
 /// pixel is buffer point `origin` (the backdrop of floating chrome).
 pub fn composeRegionTo(ed: *Editor, dst: []u32, stride: usize, origin: Point, region: Rect) void {
     const r = Rect.intersect(region, ed.screenRect()) orelse return;
+    // a window lit for a click, else the selection (or its frame)
+    const lit = winpick.lit(ed);
     const sel = ed.selBuf();
-    const beauty = ed.beautify.enabled and ed.pn().bcache_valid and sel != null;
-    const bright: ?Rect = if (beauty) ed.pn().bcache_rect else sel;
+    const beauty = lit == null and ed.beautify.enabled and ed.pn().bcache_valid and sel != null;
+    const bright: ?Rect = lit orelse if (beauty) ed.pn().bcache_rect else sel;
     var y = r.y;
     while (y < r.bottom()) : (y += 1) composeRow(ed, dst, stride, origin, r, y, bright, beauty);
     // the freehand stroke being drawn

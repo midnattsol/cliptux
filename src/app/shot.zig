@@ -25,6 +25,8 @@ const last_area = @import("modes/last_area.zig");
 const save = @import("shot/save.zig");
 const handoff = @import("shot/handoff.zig");
 const dialog = @import("shot/dialog.zig");
+const next = @import("shot/next.zig");
+const winrects = @import("winrects.zig");
 const screencast = @import("shot/screencast.zig").screencast;
 const window = @import("../ui/window.zig");
 const editor_mod = @import("../ui/editor.zig");
@@ -98,10 +100,15 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     defer cap.deinit(gpa);
     if (from.req.delay_s > 0) win.closeWindow();
     t.capture = nowMs();
-    const edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
+    var edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
         .done => return,
         .edit => |e| e,
     };
+    // where the windows were, for clicking one (an area to pick)
+    if (edit.modes) edit.windows = winrects.fetch(gpa, env, &conn, &cap, if (from.shell) |s| s.id else null);
+    defer gpa.free(edit.windows);
+    edit.from_shell = from.shell != null;
+    if (edit.modes) edit.window_ok = winrects.windowCapture(&conn);
 
     try openEditor(&win, &cap, perMonitor(&cap));
     t.open = nowMs();
@@ -188,6 +195,8 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
+    const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .conn = conn, .cfg = cfg, .win = win };
+    ed.capmode = .{ .on = edit.modes, .windows = edit.windows, .window_ok = edit.window_ok, .screen_in_place = edit.modes and mode_flow.screenOpensEditor(ctx) };
     defer ed.deinit();
     if (reopen) |r| try restoreReopened(gpa, &ed, r);
     while (true) {
@@ -199,11 +208,10 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
 
         const f: Finish = .{ .gpa = gpa, .env = env, .conn = conn, .cfg = cfg, .win = win, .ed = &ed, .replace = if (reopen) |r| r.kept else null };
         switch (result.action) {
-            .new_capture => {
-                // the More menu's other capture modes: a fresh shotlet
-                win.closeWindow();
-                keep_mod.spawnSelf(env, &.{ed.next_capture.ptr});
-            },
+            // the mode strip's other capture modes (shot/next.zig)
+            .new_capture => next.restart(ctx, &ed),
+            .screen => try next.screen(ctx, &ed, cap),
+            .record => try next.record(ctx, &ed, cap, edit.from_shell),
             .cancel, .copied => try f.closed(result.action == .copied),
             .save, .save_as => if (!try f.saved(result.action == .save, result.png_data.?)) {
                 // the file chooser (over the editor) was cancelled or the

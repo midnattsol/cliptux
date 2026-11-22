@@ -49,7 +49,7 @@ pub fn run(ed: *Editor) !editor.Result {
         if (scripted and !ed.needs_render) try script.step(ed);
     }
     if (getenv("SHOTLET_EDITOR_DUMP")) |prefix| exporter.dumpAtExit(ed, prefix);
-    if (ed.action == .cancel or ed.action == .copied) return .{ .action = ed.action };
+    if (!ed.action.exports()) return .{ .action = ed.action };
     return .{ .action = ed.action, .png_data = try exporter.exportPng(ed) };
 }
 

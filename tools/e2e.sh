@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
+scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
 
 # ---------------------------------------------------------------- inner side
 # (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:
@@ -42,6 +42,7 @@ prepare_scenario() {
 run_scenario() {
     case $scenario in
     tools) . "$ROOT/tools/e2e/tools.sh" ;; # the editor's extra tools
+    modes-strip) . "$ROOT/tools/e2e/modes.sh"; . "$ROOT/tools/e2e/strip.sh" ;; # the editor's mode strip
     modes-*) . "$ROOT/tools/e2e/modes.sh" ;; # the capture modes
     rec-*) . "$ROOT/tools/e2e/record.sh" ;; # screen recording
     *)

@@ -33,6 +33,11 @@
 // starts with the logical layout; it reads the files and deletes them at
 // once. Nothing is written anywhere else; leftovers older than a minute (a
 // Shotlet that failed to start) are deleted.
+//
+// Where the windows were in that same frame (their frames, never their
+// contents or titles) is kept for the shotlet started on it, which asks
+// once with CaptureWindows(ID) (Shotlet's callers only, like Capture())
+// so a click on a window can select it; forgotten after a minute.
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -43,7 +48,7 @@ import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {RECORDER_IFACE, Recorder} from './recorder.js';
 import {MODES, ModeShortcuts, countdown, modeArgs} from './modes.js';
-import {captureWindow, pickWindow} from './windowpick.js';
+import {captureWindow, pickWindow, windowRects} from './windowpick.js';
 import {ScrollSessions} from './scroll.js';
 import {APP_ID, CaptureError, fileId, monotonicMs, normalizeAccel, roleOf} from './util.js';
 import {ShotletWindows} from './windows.js';
@@ -80,6 +85,10 @@ const IFACE = `<node>
     </method>
     <method name="ScrollEnd">
       <arg type="s" name="session" direction="in"/>
+    </method>
+    <method name="CaptureWindows">
+      <arg type="s" name="capture" direction="in"/>
+      <arg type="ai" name="rects" direction="out"/>
     </method>
     <method name="Place">
       <arg type="s" name="title" direction="in"/>
@@ -147,6 +156,7 @@ export default class ShotletExtension extends Extension {
         this._gnomeKeys = null;
         this._windows.destroy();
         this._windows = null;
+        this._frozen = null;
         Gio.bus_unown_name(this._nameId);
         this._nameId = 0;
         this._dbus.unexport();
@@ -154,7 +164,7 @@ export default class ShotletExtension extends Extension {
     }
 
     get Version() {
-        return 3;
+        return 4;
     }
 
     get Shortcuts() {
@@ -250,6 +260,20 @@ export default class ShotletExtension extends Extension {
 
     async ScrollEndAsync([id], invocation) {
         await this._reply(invocation, null, () => this._scroll.end(invocation.get_sender(), id));
+    }
+
+    // CaptureWindows(id): where the windows were when capture `id` was
+    // taken, topmost first, as [x, y, width, height, ...] in logical
+    // pixels; empty for any other capture, or asked again, or stale.
+    async CaptureWindowsAsync([id], invocation) {
+        await this._reply(invocation, 'ai', async () => {
+            await this._checkCaller(invocation.get_sender());
+            const f = this._frozen;
+            if (!f || f.id !== id || monotonicMs() - f.at > STALE_MS)
+                return [];
+            this._frozen = null;
+            return f.rects;
+        });
     }
 
     async _reply(invocation, type, fn) {
@@ -390,6 +414,9 @@ export default class ShotletExtension extends Extension {
         // every area is painted now, in this one main loop iteration
         // (the same frame); the PNGs are written on worker threads
         const shots = plan.pieces.map((p, k) => this._shoot(p, dir, `shot-${id}-${k}.png`, files));
+        // the windows as they are in that frame (none behind the overview)
+        const rects = Main.overview.visible ? [] : windowRects(w => roleOf(w) !== null);
+        this._frozen = {id, rects, at: monotonicMs()};
         // the overview would hold the editor as one more window
         if (Main.overview.visible)
             Main.overview.hide();

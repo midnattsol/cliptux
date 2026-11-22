@@ -17,6 +17,7 @@ const commands = @import("commands.zig");
 const selection = @import("selection.zig");
 const text_edit = @import("text_edit.zig");
 const drawing = @import("drawing.zig");
+const winpick = @import("winpick.zig");
 
 const Editor = editor.Editor;
 const Point = shapes_mod.Point;
@@ -147,6 +148,7 @@ fn pressSelect(ed: *Editor, m: Point, ip: Point, double: bool) !void {
     }
     selection.deselectShape(ed);
     caches.selDirty(ed);
+    winpick.onPress(ed);
     const a = hit.clampImg(ed, ip);
     ed.doc.sel = .{ .x = a.x, .y = a.y, .w = 0, .h = 0 };
     ed.drag = .{ .selecting = a };

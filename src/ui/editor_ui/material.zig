@@ -36,7 +36,7 @@ pub const Backdrop = struct {
     }
 };
 
-pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice };
+pub const Slot = enum(u3) { bar, panel, popover, picker, help, notice, strip };
 pub const n_slots = @typeInfo(Slot).@"enum".field_names.len;
 
 /// What a floating surface with `sh` covers: itself plus its shadow.

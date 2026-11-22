@@ -1,5 +1,5 @@
 //! What the chrome's buttons do (toolbar, colour popover, More menu,
-//! beautify panel), also reached from keys and scripts, and opening and
+//! beautify panel, mode strip), also reached from keys and scripts, and opening and
 //! closing the popover and menu.
 
 const editor = @import("../editor.zig");
@@ -15,6 +15,7 @@ const history = @import("history.zig");
 const exporter = @import("export.zig");
 const hit = @import("hit.zig");
 const discard = @import("discard.zig");
+const capmode = @import("capmode.zig");
 
 const Editor = editor.Editor;
 const Tool = editor.Tool;
@@ -41,8 +42,9 @@ pub fn onButton(ed: *Editor, kind: ui.ButtonKind) !void {
         .redo => try history.redo(ed),
         .copy => try exporter.copyToClipboard(ed),
         .save => finish(ed, .save),
-        .save_as, .capture_window, .capture_scroll, .capture_timer, .help, .cancel => menuButton(ed, kind),
+        .save_as, .help, .cancel => menuButton(ed, kind),
         .ext => |e| try tools.onButton(ed, e),
+        .mode => |m| try capmode.pick(ed, m),
     }
 }
 
@@ -82,14 +84,6 @@ fn menuButton(ed: *Editor, kind: ui.ButtonKind) void {
     closePopover(ed);
     switch (kind) {
         .save_as => finish(ed, .save_as),
-        .capture_window, .capture_scroll, .capture_timer => {
-            ed.next_capture = switch (kind) {
-                .capture_window => "window",
-                .capture_scroll => "scroll",
-                else => "timer",
-            };
-            finish(ed, .new_capture);
-        },
         .help => ed.help_open = !ed.help_open,
         .cancel => discard.close(ed),
         else => unreachable,

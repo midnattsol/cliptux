@@ -11,7 +11,8 @@
 //! This file holds the Editor's state and small accessors; the behaviour
 //! lives in editor/: session (the event loop), events, pointer, drag,
 //! drawing, keys_input, text_edit, props, commands, discard, selection,
-//! history, hit, caches, beauty_cache, render, export and script.
+//! history, hit, caches, beauty_cache, render, export, script, capmode
+//! (the mode strip's modes) and winpick (clicking a window).
 
 const std = @import("std");
 const capture = @import("../app/capture.zig");
@@ -39,6 +40,7 @@ const render = @import("editor/render.zig");
 const exporter = @import("editor/export.zig");
 const fade = @import("editor/fade.zig");
 const dim = @import("editor/dim.zig");
+const capmode = @import("editor/capmode.zig");
 
 const Window = window.Window;
 const Point = shapes_mod.Point;
@@ -55,6 +57,7 @@ pub const Result = types.Result;
 pub const DragMode = types.DragMode;
 pub const max_panes = types.max_panes;
 pub const Pane = types.Pane;
+pub const CaptureMode = capmode.Mode;
 
 pub const Editor = struct {
     alloc: std.mem.Allocator,
@@ -167,6 +170,9 @@ pub const Editor = struct {
     tall_scroll: i32 = 0,
     /// the capture mode to start after .new_capture (a shotlet command)
     next_capture: [:0]const u8 = "",
+    /// the capture modes before a selection: the strip, clickable windows
+    /// (editor/capmode.zig, editor/winpick.zig)
+    capmode: capmode.State = .{},
     /// first run: show the "drag / Enter / ?" hint until the first action
     show_hint: bool = false,
     /// the hint was on screen this session (the caller remembers it)
@@ -291,4 +297,5 @@ pub const Editor = struct {
 comptime {
     _ = fade;
     _ = dim;
+    _ = capmode;
 }

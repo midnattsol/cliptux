@@ -43,6 +43,16 @@ pub const Edit = struct {
     sel: ?geom.Rect = null,
     /// the image has see-through pixels (a window): export them
     keep_alpha: bool = false,
+    /// an area to pick: the mode strip shows before a selection
+    modes: bool = false,
+    /// where the windows were at capture (image pixels, topmost first;
+    /// the caller's), to click one
+    windows: []const @import("../../ui/shapes.zig").Rect = &.{},
+    /// taken by the GNOME extension (a recording picked from the editor
+    /// gets its overlays)
+    from_shell: bool = false,
+    /// `shotlet window` can pick a window here
+    window_ok: bool = true,
 };
 
 pub const Outcome = union(enum) {
@@ -53,7 +63,7 @@ pub const Outcome = union(enum) {
 
 pub fn afterCapture(c: Ctx, cap: *capture.Capture, req: mode.Request) !Outcome {
     return switch (req.mode) {
-        .area => .{ .edit = .{} },
+        .area => .{ .edit = .{ .modes = true } },
         .previous => .{ .edit = .{ .sel = previous(c, cap) } },
         .fullscreen => instant(c, cap, geom.pixelRect(cap.monitors[geom.monitorAt(cap.monitors, req.pointer)]), false),
         .screens => instant(c, cap, fullRect(cap), false),
@@ -85,6 +95,18 @@ fn windowShot(c: Ctx, cap: *capture.Capture) !Outcome {
 
 fn beautify(cfg: *const config.Config) doc_mod.Beautify {
     return .{ .enabled = cfg.beautify_always, .bg = cfg.beautify_background, .padding = cfg.beautify_padding, .rounded = cfg.beautify_corners, .shadow = cfg.beautify_shadow };
+}
+
+/// The editor's Screen (its mode strip) when screen captures skip the
+/// editor: rectangle `r` of the capture delivered as after_fullscreen
+/// says.
+pub fn deliverScreen(c: Ctx, cap: *capture.Capture, r: geom.Rect) !void {
+    _ = try instant(c, cap, r, false);
+}
+
+/// A screen capture opens the editor (Screen then selects in place).
+pub fn screenOpensEditor(c: Ctx) bool {
+    return settings.load(c.gpa, c.env.home).after == .editor;
 }
 
 /// Screens and windows: no region to pick, so straight to what the

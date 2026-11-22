@@ -15,6 +15,7 @@ const caches = @import("caches.zig");
 const props = @import("props.zig");
 const selection = @import("selection.zig");
 const drawing = @import("drawing.zig");
+const winpick = @import("winpick.zig");
 
 const Editor = editor.Editor;
 const DragMode = editor.DragMode;
@@ -76,6 +77,7 @@ fn hover(ed: *Editor, m: Point) !void {
         ed.needs_render = true;
     }
     if (ui.loupeVisible(ed)) ed.needs_render = true;
+    winpick.hover(ed);
     tools.onHover(ed);
 }
 
@@ -88,6 +90,7 @@ fn dragSelecting(ed: *Editor, ip: Point) void {
     const cs = shapes_mod.dragCorners(ed.drag_anchor, q, ed.mod_shift, ed.mod_alt);
     ed.doc.sel = Rect.intersect(Rect.fromCorners(cs[0], cs[1]), ed.doc.imageRect()) orelse Rect.fromCorners(q, q);
     caches.selDirty(ed);
+    winpick.onDrag(ed);
     tools.afterSelDrag(ed);
 }
 
@@ -165,14 +168,14 @@ pub fn onRelease(ed: *Editor) !void {
 }
 
 /// A new selection is done. Too small to be one, it was a click: that
-/// picks the monitor under it when there are several.
+/// picks the window under it (when the desktop said where windows are),
+/// else the monitor under it when there are several.
 fn endSelecting(ed: *Editor) void {
     const s = ed.doc.sel.?.normalized();
-    const min = ed.pn().view.lenToImg(4.0);
     caches.selDirty(ed);
-    if (@as(f64, @floatFromInt(s.w)) < min or @as(f64, @floatFromInt(s.h)) < min) {
+    if (winpick.tiny(ed)) {
         ed.doc.sel = null;
-        if (ed.monitors.len > 1) {
+        if (!winpick.clickSelect(ed) and ed.monitors.len > 1) {
             const ip = ed.imgAt(ed.mouse);
             for (ed.monitors) |mon| {
                 const r = Rect{ .x = @intCast(mon.x), .y = @intCast(mon.y), .w = @intCast(mon.w), .h = @intCast(mon.h) };

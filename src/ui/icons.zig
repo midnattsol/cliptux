@@ -68,6 +68,9 @@ pub const Icon = enum {
     capture_window,
     capture_scroll,
     timer,
+    capture_area,
+    capture_screen,
+    record,
 };
 
 /// Path data, 24x24 units. The first block is the "Glass" mockup's set.
@@ -117,6 +120,10 @@ pub fn data(icon: Icon) []const u8 {
         .shield => "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6zM9 12l2 2 4-4",
         .capture_window => "M3 5h18v14H3zM3 9h18",
         .capture_scroll => "M7 3h10v18H7zM12 8v8M9 13l3 3 3-3",
+        .capture_area => "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
+        .capture_screen => "M3 4h18v12H3zM8 20h8M12 16v4",
+        // the ring of a record button (its dot is filled by the caller)
+        .record => "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17z",
         .timer => "M12 6c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8zM12 10v4l2.5 1.5M10 2h4",
     };
 }

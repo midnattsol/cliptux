@@ -1,6 +1,7 @@
 //! Key presses, in order of priority: help and the colour picker, the
 //! text being edited, the extra tools, fixed chords, the configurable
-//! binds (config.zig), popover navigation, then the plain keys.
+//! binds (config.zig), popover navigation, the capture modes' letters
+//! (before a selection), then the plain keys.
 
 const std = @import("std");
 const editor = @import("../editor.zig");
@@ -18,6 +19,7 @@ const history = @import("history.zig");
 const exporter = @import("export.zig");
 const hit = @import("hit.zig");
 const discard = @import("discard.zig");
+const capmode = @import("capmode.zig");
 
 const Editor = editor.Editor;
 const Key = window.Key;
@@ -49,6 +51,7 @@ pub fn onKey(ed: *Editor, k: Key) !void {
         keys.KEY_DOWN, keys.KEY_RIGHT => return ui.moveFocus(ed, 1),
         else => {},
     };
+    if (try capmode.onKey(ed, k)) return;
     try plainKey(ed, k);
 }
 

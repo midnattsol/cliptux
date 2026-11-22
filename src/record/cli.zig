@@ -147,6 +147,11 @@ pub fn fromShell(gpa: std.mem.Allocator, env: Env, args: shellcap.Args) !void {
     try pickOn(gpa, env, .{}, settings_mod.load(gpa, env.home), &cap, true);
 }
 
+/// The picker on a capture already taken (the editor's Record mode).
+pub fn pickOnCapture(gpa: std.mem.Allocator, env: Env, cap: *const capture.Capture, overlays: bool) !void {
+    try pickOn(gpa, env, .{}, settings_mod.load(gpa, env.home), cap, overlays);
+}
+
 fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings, cap: *const capture.Capture, overlays: bool) !void {
     var set = set0;
     text.init(gpa);

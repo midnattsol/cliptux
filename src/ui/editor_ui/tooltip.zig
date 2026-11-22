@@ -66,6 +66,7 @@ pub fn tooltipRect(self: *const Editor) ?Rect {
     const th = text_mod.height(fs) + self.sc(8);
     const pw = tw + self.sc(20);
     if (b.layer == .menu) return besideMenu(self, b, pw, th);
+    if (b.layer == .strip) return aboveStrip(self, b, pw, th);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
     const x = std.math.clamp(b.rect.x + @divTrunc(b.rect.w - pw, 2), 4, @max(4, w - pw - 4));
@@ -84,6 +85,13 @@ pub fn tooltipRect(self: *const Editor) ?Rect {
     if (y + th > h - 2 or y < 2) y = if (self.tb_below) top - th - self.sc(8) else bottom + self.sc(8);
     if (self.popover != .none and b.layer != .popover and Rect.intersect(.{ .x = x, .y = y, .w = pw, .h = th }, self.pop_rect) != null) return null;
     return .{ .x = x, .y = y, .w = pw, .h = th };
+}
+
+/// A strip button's tooltip: above the strip, which sits low.
+fn aboveStrip(self: *const Editor, b: Button, pw: i32, th: i32) Rect {
+    const w: i32 = @intCast(self.pn().width);
+    const x = std.math.clamp(b.rect.x + @divTrunc(b.rect.w - pw, 2), 4, @max(4, w - pw - 4));
+    return .{ .x = x, .y = @max(2, self.capmode.rect.y - th - self.sc(8)), .w = pw, .h = th };
 }
 
 /// A menu row's tooltip: level with the row, beside the menu (right, or

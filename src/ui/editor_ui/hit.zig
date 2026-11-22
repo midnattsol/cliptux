@@ -8,6 +8,7 @@ const editor_mod = @import("../editor.zig");
 const motion = @import("../motion.zig");
 const ff = @import("common.zig").ff;
 const pop_fade = @import("pop_fade.zig");
+const strip = @import("strip.zig");
 
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
@@ -52,6 +53,7 @@ pub fn onChrome(self: *const Editor, m: Point) bool {
     for ([_]Rect{ self.toolbar_rect, self.panel_rect, self.pop_rect }) |r| {
         if (!r.isEmpty() and r.contains(m.x, m.y)) return true;
     }
+    if (strip.contains(self, m.x, m.y)) return true;
     return self.picker.open and self.picker.rect.contains(m.x, m.y);
 }
 
@@ -73,6 +75,7 @@ pub fn sliderValue(self: *const Editor, m: Point) i32 {
 /// Are animations running that need more frames?
 pub fn animating(self: *const Editor) bool {
     const t = motion.now();
+    if (strip.busy(self) or (self.hov.busy(t) and !self.capmode.rect.isEmpty())) return true;
     if (self.toolbar_rect.isEmpty()) return false;
     return self.tb_x.busy(t) or self.tb_y.busy(t) or self.tb_alpha.busy(t) or self.act_x.busy(t) or
         self.act_y.busy(t) or self.hov.busy(t) or (self.popover != .none and self.pop_open.busy(t)) or pop_fade.busy(self);
