@@ -4,7 +4,7 @@
 //! (`<name>-trim.mp4`), never over one.
 
 const std = @import("std");
-const proc = @import("../encode/proc.zig");
+const proc = @import("../platform/api.zig").proc;
 const gif = @import("../encode/gif.zig");
 const gifdec = @import("../encode/gifdec.zig");
 const sys = @import("../platform/api.zig").sys;

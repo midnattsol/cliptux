@@ -8,7 +8,7 @@ test {
     _ = @import("../encode/yuv.zig");
     _ = @import("../encode/av.zig");
     _ = @import("../encode/av_mp4.zig");
-    _ = @import("../encode/proc.zig");
+    _ = @import("../platform/api.zig").proc;
     _ = @import("../encode/ffmpeg_proc.zig");
     _ = @import("../encode/sink.zig");
     _ = @import("timeline.zig");

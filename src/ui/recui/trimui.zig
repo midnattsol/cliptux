@@ -133,7 +133,7 @@ const Trim = struct {
 
 /// Cut, keep the result and show its thumbnail.
 pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, r: trim.Range) !void {
-    const envp: @import("../../encode/proc.zig").Envp = @ptrCast(env.envp);
+    const envp: @import("../../platform/api.zig").proc.Envp = @ptrCast(env.envp);
     const dst = try trim.outputPath(gpa, info.path);
     defer gpa.free(dst);
     trim.cut(gpa, envp, info.path, dst, r) catch |err| {
@@ -163,7 +163,7 @@ pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, 
     }
 }
 
-fn firstPicture(gpa: std.mem.Allocator, envp: @import("../../encode/proc.zig").Envp, path: []const u8, info: *const keepvid.Info) ![]u32 {
+fn firstPicture(gpa: std.mem.Allocator, envp: @import("../../platform/api.zig").proc.Envp, path: []const u8, info: *const keepvid.Info) ![]u32 {
     if (info.format == .mp4) return trim.frameAt(gpa, envp, path, 0, info.width, info.height);
     const data = try sys.readFileAlloc(gpa, path, 512 * 1024 * 1024);
     defer gpa.free(data);

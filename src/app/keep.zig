@@ -9,6 +9,7 @@ const annot = @import("annot.zig");
 const png = @import("../gfx/png.zig");
 const resample = @import("../gfx/resample.zig");
 const sys = @import("../platform/api.zig").sys;
+const proc = @import("../platform/api.zig").proc;
 const shapes = @import("../ui/shapes.zig");
 const doc_mod = @import("../ui/doc.zig");
 const Env = env_mod.Env;
@@ -178,26 +179,7 @@ pub fn spawnSelf(env: Env, args: []const [*:0]const u8) void {
 /// spawnSelf, handing the child `fd` (every other descriptor of ours
 /// closes on exec).
 pub fn spawnKeeping(env: Env, args: []const [*:0]const u8, fd: ?sys.fd_t) void {
-    const linux = std.os.linux;
-    var argv: [8:null]?[*:0]const u8 = @splat(null);
-    argv[0] = "shotlet";
-    for (args, 1..) |a, i| argv[i] = a;
-    const pid = linux.fork();
-    if (linux.errno(pid) != .SUCCESS) {
-        std.log.err("fork failed", .{});
-        return;
-    }
-    if (pid == 0) {
-        if (linux.fork() != 0) linux.exit(0);
-        _ = linux.setsid();
-        // the child's own descriptor table: the parent's copy still
-        // closes on exec
-        if (fd) |f| _ = linux.fcntl(f, linux.F.SETFD, 0);
-        _ = linux.execve("/proc/self/exe", &argv, env.envp);
-        linux.exit(127);
-    }
-    var status: i32 = 0;
-    _ = linux.wait4(@intCast(pid), &status, 0, null);
+    proc.spawnSelf(env.envp, args, fd);
 }
 
 /// Show the floating thumbnail for a kept capture. With `ready`, the

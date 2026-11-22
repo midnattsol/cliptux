@@ -3,7 +3,6 @@
 src/app/dispatch.zig
 src/app/editfile.zig
 src/app/history_ui/panel.zig
-src/app/keep.zig
 src/app/modes/cli.zig
 src/app/modes/flow.zig
 src/app/pin.zig
@@ -17,8 +16,6 @@ src/app/shot/dialog.zig
 src/app/shot/save.zig
 src/app/shot.zig
 src/app/toastwin.zig
-src/encode/ffmpeg_proc.zig
-src/encode/proc.zig
 src/main.zig
 src/record/cli.zig
 src/record/engine.zig

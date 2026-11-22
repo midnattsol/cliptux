@@ -1,8 +1,9 @@
-//! Child processes with pipes (the ffmpeg program): stdin, stdout and an
-//! extra input on fd 3, found on PATH, waited for with a deadline.
+//! Child processes: with pipes (the ffmpeg program: stdin, stdout and an
+//! extra input on fd 3, found on PATH, waited for with a deadline), and
+//! Shotlet itself started detached (the thumbnail, toasts, the editor).
 
 const std = @import("std");
-const sys = @import("../platform/api.zig").sys;
+const sys = @import("../api.zig").sys;
 const linux = std.os.linux;
 
 pub const Envp = [*:null]const ?[*:0]const u8;
@@ -129,6 +130,44 @@ fn childSetup(argz: [*:null]const ?[*:0]const u8, envp: Envp, pipes: Pipes, in_p
     while (fd < 1024) : (fd += 1) _ = linux.close(fd);
     _ = linux.execve(argz[0].?, argz, envp);
     linux.exit(127);
+}
+
+/// Run Shotlet itself with `args` (argv[1..]) detached: double fork,
+/// so it is never a zombie and outlives us, with `envp`. `keep`, when
+/// given, stays open in the child (every other descriptor of ours closes
+/// on exec).
+pub fn spawnSelf(envp: Envp, args: []const [*:0]const u8, keep: ?sys.fd_t) void {
+    var argv: [8:null]?[*:0]const u8 = @splat(null);
+    argv[0] = "shotlet";
+    for (args, 1..) |a, i| argv[i] = a;
+    const pid = linux.fork();
+    if (linux.errno(pid) != .SUCCESS) {
+        std.log.err("fork failed", .{});
+        return;
+    }
+    if (pid == 0) {
+        if (linux.fork() != 0) linux.exit(0);
+        _ = linux.setsid();
+        // the child's own descriptor table: the parent's copy still
+        // closes on exec
+        if (keep) |f| _ = linux.fcntl(f, linux.F.SETFD, 0);
+        _ = linux.execve("/proc/self/exe", &argv, envp);
+        linux.exit(127);
+    }
+    var status: i32 = 0;
+    _ = linux.wait4(@intCast(pid), &status, 0, null);
+}
+
+/// Devices ffmpeg may encode H.264 on in hardware (VA-API render nodes
+/// we can open), best first; `-vaapi_device` values.
+pub fn hwEncodeDevices(buf: *[2][:0]const u8) []const [:0]const u8 {
+    var n: usize = 0;
+    for ([_][:0]const u8{ "/dev/dri/renderD128", "/dev/dri/renderD129" }) |dev| {
+        if (linux.access(dev.ptr, linux.R_OK | linux.W_OK) != 0) continue;
+        buf[n] = dev;
+        n += 1;
+    }
+    return buf[0..n];
 }
 
 /// Run to completion, collecting stdout (at most `max` bytes).

@@ -5,7 +5,7 @@
 //! libraries cannot be loaded in process.
 
 const std = @import("std");
-const proc = @import("proc.zig");
+const proc = @import("../platform/api.zig").proc;
 const yuv = @import("yuv.zig");
 const sys = @import("../platform/api.zig").sys;
 
@@ -157,9 +157,8 @@ pub fn probeVaapi(gpa: std.mem.Allocator, envp: proc.Envp) ?[:0]const u8 {
     if (std.c.getenv("SHOTLET_NO_VAAPI") != null) return null;
     var exe_buf: [512]u8 = undefined;
     const exe = proc.which(&exe_buf, "ffmpeg") orelse return null;
-    const nodes = [_][:0]const u8{ "/dev/dri/renderD128", "/dev/dri/renderD129" };
-    for (nodes) |dev| {
-        if (std.os.linux.access(dev.ptr, std.os.linux.R_OK | std.os.linux.W_OK) != 0) continue;
+    var dev_buf: [2][:0]const u8 = undefined;
+    for (proc.hwEncodeDevices(&dev_buf)) |dev| {
         const r = proc.output(gpa, &.{ exe.ptr, "-hide_banner", "-nostdin", "-loglevel", "error", "-vaapi_device", dev.ptr, "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1", "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-f", "null", "-" }, envp, 4096, 5000) catch continue;
         gpa.free(r.out);
         if (r.status != null and r.status.? == 0) return dev;

@@ -6,6 +6,7 @@
 pub const sys = @import("sys.zig");
 pub const window = @import("window.zig");
 pub const libs = @import("libs.zig");
+pub const proc = @import("proc.zig");
 pub const fonts = @import("fonts.zig");
 /// Tesseract (portable code over api.libs; another backend may pick
 /// another engine)
@@ -15,6 +16,7 @@ pub const ocr = @import("../../ocr/tesseract.zig");
 comptime {
     _ = sys;
     _ = libs;
+    _ = proc;
     _ = window;
     _ = fonts;
     _ = ocr;

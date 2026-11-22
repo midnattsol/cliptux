@@ -4,7 +4,7 @@
 const std = @import("std");
 const complete = @import("complete.zig");
 const man = @import("man.zig");
-const proc = @import("../encode/proc.zig");
+const proc = @import("../platform/api.zig").proc;
 const sys = @import("../platform/api.zig").sys;
 const t = std.testing;
 
