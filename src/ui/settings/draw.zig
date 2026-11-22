@@ -1,6 +1,7 @@
 //! One frame of the Settings window: the current view's cards in a
 //! centred, scrolled column under the fixed header bar (view switcher and
-//! close button), the focus ring, the scrollbar and the window border.
+//! close button), the focus ring and the scrollbar, in the window's
+//! drawn frame (ui/frame.zig).
 
 const std = @import("std");
 const window = @import("../window.zig");
@@ -13,6 +14,7 @@ const model = @import("model.zig");
 const focus = @import("focus.zig");
 const w = @import("widgets.zig");
 const pages = @import("pages.zig");
+const frame = @import("../frame.zig");
 
 const Canvas = render.Canvas;
 const Window = window.Window;
@@ -21,11 +23,10 @@ const Region = model.Region;
 const State = model.State;
 
 /// Draw and present a frame; returns the content's height (unscrolled).
-pub fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, st: *const State, choosing: bool) !i32 {
-    const px = try win.backBuffer();
+pub fn draw(win: *Window, fr: *frame.Frame, cfg: *const config.Config, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, st: *const State, choosing: bool) !i32 {
     var ui = Ui{
         .win = win,
-        .c = Canvas.init(px, win.width, win.height),
+        .c = try fr.begin(alloc, win),
         .f = @as(f64, @floatFromInt(win.scale120)) / 120.0,
         .th = st.theme,
         .regions = regions,
@@ -33,13 +34,13 @@ pub fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Reg
         .mx = st.mouse_x,
         .my = st.mouse_y,
     };
-    @memset(px, st.theme.window_bg | 0xFF000000);
+    @memset(ui.c.px, st.theme.window_bg | 0xFF000000);
     regions.clearRetainingCapacity();
 
-    const width: i32 = @intCast(win.width);
+    const width: i32 = ui.c.w;
     // a centred column, at most 640 wide
     const col_w = @min(width - 2 * ui.sc(24), ui.sc(640));
-    const y0: i32 = model.headerHeight(win) + ui.sc(28) - st.scroll_y;
+    const y0: i32 = model.headerHeight(ui.f) + ui.sc(28) - st.scroll_y;
     const page: pages.Page = .{ .ui = &ui, .cx = @divTrunc(width - col_w, 2), .col_w = col_w, .cfg = cfg, .st = st, .choosing = choosing };
     const content_h = (try pages.drawView(page, y0)) + st.scroll_y;
 
@@ -48,10 +49,7 @@ pub fn draw(win: *Window, cfg: *const config.Config, regions: *std.ArrayList(Reg
     try drawHeader(&ui, st);
     drawFocus(&ui, st, true);
     drawScrollbar(&ui, content_h, st.scroll_y);
-    // hairline window border
-    ui.c.rectOutline(0, 0, width, @intCast(win.height), 1, st.theme.line | 0x0A000000);
-
-    try win.present();
+    try fr.present(win, st.theme.hairline);
     return content_h;
 }
 
@@ -64,11 +62,11 @@ fn drawFocus(ui: *Ui, st: *const State, header: bool) void {
 
 /// The scrollbar's knob, when the content overflows the window.
 fn drawScrollbar(ui: *Ui, content_h: i32, scroll_y: i32) void {
-    const vh: i32 = @intCast(ui.win.height);
+    const vh: i32 = ui.c.h;
     if (content_h <= vh) return;
-    const hh = model.headerHeight(ui.win);
+    const hh = model.headerHeight(ui.f);
     const track_w = ui.sc(6);
-    const tx = @as(i32, @intCast(ui.win.width)) - track_w - ui.sc(4);
+    const tx = ui.c.w - track_w - ui.sc(4);
     const frac = @as(f64, @floatFromInt(vh)) / @as(f64, @floatFromInt(content_h));
     const knob_h = @max(ui.sc(36), @as(i32, @intFromFloat(@as(f64, @floatFromInt(vh)) * frac)));
     const max_scroll = content_h - vh;
@@ -88,8 +86,8 @@ const tabs = [_]Tab{
 
 fn drawHeader(ui: *Ui, st: *const State) !void {
     const th = ui.th;
-    const width: i32 = @intCast(ui.win.width);
-    const hh = model.headerHeight(ui.win);
+    const width: i32 = ui.c.w;
+    const hh = model.headerHeight(ui.f);
     ui.c.fillRect(0, 0, width, hh, th.header_bg | 0xFF000000);
     ui.c.fillRect(0, hh - 1, width, 1, th.line);
     try drawViewSwitcher(ui, st, width, hh);

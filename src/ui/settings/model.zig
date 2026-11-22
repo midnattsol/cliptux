@@ -2,7 +2,6 @@
 //! can hit, their on-screen regions and the window's mutable UI state.
 
 const std = @import("std");
-const window = @import("../window.zig");
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const dbus = @import("../../platform/dbus.zig");
@@ -11,7 +10,6 @@ const gnome = @import("../../app/gnome.zig");
 const settings_modes = @import("../settings_modes.zig");
 const focus = @import("focus.zig");
 
-const Window = window.Window;
 const Theme = theme_mod.Theme;
 
 pub const View = enum { general, editor, shortcuts, recording };
@@ -77,8 +75,12 @@ pub fn gnomeState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*dbus.Connec
     };
 }
 
-pub fn headerHeight(win: *const Window) i32 {
-    return @intFromFloat(@round(52.0 * @as(f64, @floatFromInt(win.scale120)) / 120.0));
+/// What the content is drawn into: its height (buffer px, without the
+/// frame) and the display scale.
+pub const Viewport = struct { h: i32, f: f64 };
+
+pub fn headerHeight(f: f64) i32 {
+    return @intFromFloat(@round(52.0 * f));
 }
 
 /// Mutable UI state of the settings window.
@@ -112,33 +114,32 @@ pub const State = struct {
     history_clear: enum { idle, asking, cleared } = .idle,
     modes: settings_modes.State = .{},
 
-    pub fn scrollBy(self: *State, step: i32, win: *const Window) void {
-        const max_scroll = @max(0, self.content_h - @as(i32, @intCast(win.height)));
+    pub fn scrollBy(self: *State, step: i32, vp: Viewport) void {
+        const max_scroll = @max(0, self.content_h - vp.h);
         const new = std.math.clamp(self.scroll_y + step, 0, max_scroll);
         if (new != self.scroll_y) self.dirty = true;
         self.scroll_y = new;
     }
 
-    pub fn moveFocus(self: *State, regions: []const Region, win: *const Window, forward: bool) void {
+    pub fn moveFocus(self: *State, regions: []const Region, vp: Viewport, forward: bool) void {
         self.focus = focus.nextFocus(regions, self.focus, forward);
-        self.ensureVisible(regions, win);
+        self.ensureVisible(regions, vp);
         self.dirty = true;
     }
 
     /// Scroll so the focused control is not hidden under the header or
     /// below the bottom edge.
-    pub fn ensureVisible(self: *State, regions: []const Region, win: *const Window) void {
+    pub fn ensureVisible(self: *State, regions: []const Region, vp: Viewport) void {
         const hit = self.focus orelse return;
         const r = focus.findRegion(regions, hit) orelse return;
         if (focus.isHeader(hit)) return;
-        const f = @as(f64, @floatFromInt(win.scale120)) / 120.0;
-        const pad: i32 = @intFromFloat(@round(12.0 * f));
-        const top = headerHeight(win) + pad;
-        const bottom = @as(i32, @intCast(win.height)) - pad;
+        const pad: i32 = @intFromFloat(@round(12.0 * vp.f));
+        const top = headerHeight(vp.f) + pad;
+        const bottom = vp.h - pad;
         if (r.y < top) {
-            self.scrollBy(r.y - top, win);
+            self.scrollBy(r.y - top, vp);
         } else if (r.y + r.h > bottom) {
-            self.scrollBy(r.y + r.h - bottom, win);
+            self.scrollBy(r.y + r.h - bottom, vp);
         }
     }
 
@@ -159,13 +160,13 @@ pub const State = struct {
     }
 
     /// Scroll the focused control into view after a draw at a new size.
-    pub fn revealFocus(self: *State, regions: []const Region, win: *const Window) void {
+    pub fn revealFocus(self: *State, regions: []const Region, vp: Viewport) void {
         if (!self.reveal_focus) return;
         // positions are only known after a draw at the current size
         self.reveal_focus = false;
         const before = self.scroll_y;
-        self.scrollBy(0, win); // clamp to the new size
-        self.ensureVisible(regions, win);
+        self.scrollBy(0, vp); // clamp to the new size
+        self.ensureVisible(regions, vp);
         self.dirty = self.scroll_y != before or self.focus != null;
     }
 };

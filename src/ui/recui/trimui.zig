@@ -12,12 +12,12 @@ const keep = @import("../../app/keep.zig");
 const sys = @import("../../platform/sys.zig");
 const png = @import("../../gfx/png.zig");
 const text = @import("../../gfx/text.zig");
-const render = @import("../../gfx/render.zig");
 const window = @import("../window.zig");
 const keepvid = @import("../../record/keepvid.zig");
 const trim = @import("../../record/trim.zig");
 const strip_mod = @import("../../record/strip.zig");
 const draw = @import("trim_draw.zig");
+const frame_mod = @import("../frame.zig");
 const Env = env_mod.Env;
 
 const Trim = struct {
@@ -36,6 +36,9 @@ const Trim = struct {
     play_pos0: i64 = 0,
     pic_buf: []u32 = &.{},
     done: bool = false,
+    frame: frame_mod.Frame = .{},
+    /// a press on no control: move the window (it has no title bar)
+    wants_move: bool = false,
 
     /// The strip picture nearest to `ms`.
     fn pictureAt(self: *Trim, ms: i64) void {
@@ -63,7 +66,10 @@ const Trim = struct {
     }
 
     fn onPress(self: *Trim, x: i32, y: i32) void {
-        const p = draw.hit(x, y, &self.st) orelse return;
+        const p = draw.hit(x, y, &self.st) orelse {
+            self.wants_move = true;
+            return;
+        };
         switch (p) {
             .play => self.togglePlay(),
             .cancel => self.done = true,
@@ -193,6 +199,7 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     defer text.deinit();
     var t: Trim = .{ .gpa = gpa, .env = env, .root = root, .id = id, .info = info, .strip = null, .st = .{ .duration_ms = info.duration_ms, .start_ms = range.start_ms, .end_ms = range.end_ms, .pos_ms = range.start_ms } };
     defer gpa.free(t.pic_buf);
+    defer t.frame.deinit(gpa);
     var pbuf: [1200]u8 = undefined;
     if (sys.readFileAlloc(gpa, try history.entryPath(&pbuf, root, id, "strip.png"), 64 * 1024 * 1024)) |data| {
         defer gpa.free(data);
@@ -213,7 +220,8 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     t.seek(range.start_ms);
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
-    try win.open("Trim recording", .{ .fullscreen = false, .width = draw.width, .height = draw.height });
+    const size = frame_mod.outer(draw.width, draw.height);
+    try win.open("Trim recording", .{ .fullscreen = false, .transparent = true, .width = size[0], .height = size[1] });
     win.setCursor(.arrow) catch {};
     std.log.info("trim: {s} ({d} ms)", .{ info.path, info.duration_ms });
     var dirty = true;
@@ -230,16 +238,21 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
 
 fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
     const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
+    const F = frame_mod.Frame;
     switch (ev) {
         .close => t.done = true,
         .pointer_motion => |m| {
-            const x: i32 = @intFromFloat(m.x / k);
-            const y: i32 = @intFromFloat(m.y / k);
+            const x: i32 = @intFromFloat(F.toContent(win, m.x) / k);
+            const y: i32 = @intFromFloat(F.toContent(win, m.y) / k);
             t.onDrag(x);
             t.st.hover = if (t.dragging == null) draw.hit(x, y, &t.st) else t.dragging;
         },
         .pointer_button => |b| if (b.button == window.BTN_LEFT) {
-            if (b.pressed) t.onPress(@intFromFloat(b.x / k), @intFromFloat(b.y / k)) else t.dragging = null;
+            if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else t.dragging = null;
+            if (t.wants_move) {
+                t.wants_move = false;
+                try win.startMove();
+            }
         },
         .key => |key| if (key.pressed) switch (key.code) {
             window.KEY_ESC => t.done = true,
@@ -254,10 +267,9 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
 /// Draw a frame; false when the window was not ready for one.
 fn paint(t: *Trim, win: *window.Window) !bool {
     if (win.frame_pending or win.width == 0) return false;
-    const px = try win.backBuffer();
-    var cv = render.Canvas.init(px, win.width, win.height);
+    var cv = try t.frame.begin(t.gpa, win);
     draw.paint(t.gpa, &cv, @as(f64, @floatFromInt(win.scale120)) / 120.0, &t.st);
-    try win.present();
+    try t.frame.present(win, draw.edge);
     return true;
 }
 

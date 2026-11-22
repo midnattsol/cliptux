@@ -80,6 +80,8 @@ const bg: u32 = 0xFF1C1C1F;
 const fg: u32 = 0xFFF5F5F7;
 const muted: u32 = 0xFFA1A1AA;
 const handle: u32 = 0xFFFFCC00;
+/// the window's hairline edge (ui/frame.zig)
+pub const edge: u32 = 0x1FFFFFFF;
 
 pub fn paint(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State) void {
     @memset(cv.px, bg);

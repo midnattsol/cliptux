@@ -19,6 +19,7 @@ const model = @import("model.zig");
 const focus = @import("focus.zig");
 const actions = @import("actions.zig");
 const draw_mod = @import("draw.zig");
+const frame_mod = @import("../frame.zig");
 
 const Window = window.Window;
 const Region = model.Region;
@@ -41,6 +42,12 @@ pub const App = struct {
     bus: *?dbus.Connection,
     regions: std.ArrayList(Region) = .empty,
     folder_req: ?portal.Request = null,
+    frame: frame_mod.Frame = .{},
+
+    /// The content's height and scale, for scrolling.
+    fn viewport(self: *const App) model.Viewport {
+        return .{ .h = @intCast(self.frame.ch), .f = @as(f64, @floatFromInt(self.win.scale120)) / 120.0 };
+    }
 
     pub fn busPtr(self: *App) ?*dbus.Connection {
         return if (self.bus.*) |*b| b else null;
@@ -97,12 +104,12 @@ pub const App = struct {
             .pointer_axis => |a| {
                 var step: i32 = @intFromFloat(a.value * 12.0 * @as(f64, @floatFromInt(self.win.scale120)) / 120.0);
                 if (step == 0 and a.value != 0) step = if (a.value > 0) 1 else -1;
-                self.st.scrollBy(step, self.win);
+                self.st.scrollBy(step, self.viewport());
             },
-            .pointer_motion => |m| self.onMotion(@intFromFloat(m.x), @intFromFloat(m.y)),
+            .pointer_motion => |m| self.onMotion(@intFromFloat(frame_mod.Frame.toContent(self.win, m.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, m.y))),
             .pointer_button => |b| {
                 if (b.button != window.BTN_LEFT or !b.pressed) return .keep;
-                return self.onClick(@intFromFloat(b.x), @intFromFloat(b.y));
+                return self.onClick(@intFromFloat(frame_mod.Frame.toContent(self.win, b.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, b.y)));
             },
         }
         return .keep;
@@ -121,8 +128,8 @@ pub const App = struct {
         }
         switch (focus.keyCommand(k)) {
             .close => return .close,
-            .next => st.moveFocus(self.regions.items, self.win, true),
-            .prev => st.moveFocus(self.regions.items, self.win, false),
+            .next => st.moveFocus(self.regions.items, self.viewport(), true),
+            .prev => st.moveFocus(self.regions.items, self.viewport(), false),
             .activate => if (st.focus) |hit| {
                 if (k.repeat) return .keep;
                 if (actions.activate(self, hit)) return .quit;
@@ -174,7 +181,7 @@ pub const App = struct {
     }
 
     fn onClick(self: *App, px: i32, py: i32) !Next {
-        const hh = model.headerHeight(self.win);
+        const hh = model.headerHeight(self.viewport().f);
         for (self.regions.items) |r| {
             if (!r.contains(px, py)) continue;
             // content scrolled under the fixed header must not
@@ -197,10 +204,10 @@ pub const App = struct {
     fn redraw(self: *App) !void {
         const st = &self.st;
         if (!st.dirty or self.win.frame_pending or self.win.width == 0) return;
-        st.content_h = try draw_mod.draw(self.win, &self.cfg, &self.regions, self.alloc, st, self.folder_req != null);
+        st.content_h = try draw_mod.draw(self.win, &self.frame, &self.cfg, &self.regions, self.alloc, st, self.folder_req != null);
         st.dirty = false;
         st.applyPendingFocus(self.regions.items);
-        st.revealFocus(self.regions.items, self.win);
+        st.revealFocus(self.regions.items, self.viewport());
     }
 };
 
@@ -246,10 +253,12 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     var win = try Window.init(alloc, env.runtime_dir, env.wayland_display);
     defer win.deinit();
     win.current_cursor = .arrow;
-    try win.open("Shotlet settings", .{ .fullscreen = false, .width = 720, .height = 780 });
+    const size = frame_mod.outer(720, 780);
+    try win.open("Shotlet settings", .{ .fullscreen = false, .transparent = true, .width = size[0], .height = size[1] });
 
     var app: App = .{ .alloc = alloc, .env = env, .cfg = cfg, .st = st, .win = &win, .bus = &bus };
     defer app.regions.deinit(alloc);
+    defer app.frame.deinit(alloc);
     defer if (app.folder_req) |*r| r.deinit(alloc);
 
     while (true) {
