@@ -3,6 +3,7 @@
 //! drag a card's capture out into other apps.
 
 const std = @import("std");
+const transfer = @import("../../ui/transfer.zig");
 const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
@@ -157,7 +158,7 @@ pub fn startDrag(self: *Quick, i: usize) !void {
     errdefer self.gpa.free(data);
     var file_buf: [1200]u8 = undefined;
     const file = try dragFile(self, c, data, &file_buf);
-    const uri = try window.fileUriList(self.gpa, file);
+    const uri = try transfer.fileUriList(self.gpa, file);
     errdefer self.gpa.free(uri);
     // the icon: the card's picture, smaller, rounded and a bit see-through
     const k: i32 = @max(1, @as(i32, @intCast((self.win.scale120 + 119) / 120)));

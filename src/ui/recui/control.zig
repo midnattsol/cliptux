@@ -77,7 +77,7 @@ pub const Control = struct {
     }
 
     pub fn fd(self: *const Control) sys.fd_t {
-        return self.win.conn.fd;
+        return self.win.pollFd();
     }
 
     pub fn waitMs(self: *const Control) i32 {

@@ -24,19 +24,7 @@ const max_surfaces = window.max_surfaces;
 /// A wlr-layer-shell placement (see OpenOptions.layer).
 pub const Layer = window.Layer;
 
-pub const OpenOptions = struct {
-    fullscreen: bool = true,
-    /// ask to be maximized (the work area: panels stay visible)
-    maximized: bool = false,
-    /// fallback size when the compositor lets the client decide
-    width: u32 = 800,
-    height: u32 = 500,
-    /// premultiplied ARGB buffers: see-through where alpha < 255
-    transparent: bool = false,
-    /// a wlr-layer-shell surface when the compositor offers one;
-    /// ignored otherwise (an xdg toplevel as the rest describes)
-    layer: ?Layer = null,
-};
+pub const OpenOptions = window.OpenOptions;
 
 /// Create the toplevel; returns after the first configure, with buffers
 /// allocated (a .resize event will be queued).

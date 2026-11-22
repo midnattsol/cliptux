@@ -8,6 +8,7 @@
 //! stays until closed: a recording is not glanced at like a screenshot.
 
 const std = @import("std");
+const transfer = @import("../ui/transfer.zig");
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const history = @import("../app/history.zig");
@@ -176,7 +177,7 @@ const Quick = struct {
 
     fn startDrag(self: *Quick) !void {
         self.pressed = null;
-        const uri = try window.fileUriList(self.gpa, self.info.path);
+        const uri = try transfer.fileUriList(self.gpa, self.info.path);
         errdefer self.gpa.free(uri);
         var pbuf: [1200]u8 = undefined;
         const poster = try sys.readFileAlloc(self.gpa, try history.entryPath(&pbuf, self.root, self.id, "thumb.png"), 64 * 1024 * 1024);
@@ -271,8 +272,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     try q.open();
     std.log.info("quick video: showing {s} ({d} ms)", .{ id, vi.info.duration_ms });
     while (!q.done) {
-        try q.win.conn.flush();
-        var fds = [_]sys.pollfd{.{ .fd = q.win.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
+        try q.win.flush();
+        var fds = [_]sys.pollfd{.{ .fd = q.win.pollFd(), .events = sys.POLL.IN, .revents = 0 }};
         _ = try sys.poll(&fds, q.win.pollTimeoutMs(if (q.hover != null or q.fade_from != 0 or sys.monoMs() - q.born < fade_in_ms) 16 else 200));
         while (try q.win.nextEventTimeout(0)) |ev| q.onEvent(ev);
         q.checkDrag();

@@ -5,6 +5,7 @@ const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
 const launch = @import("ui/tools/launch.zig");
 const desktop = @import("platform/api.zig").desktop;
+const proc = @import("platform/api.zig").proc;
 
 const is_debug = @import("builtin").mode == .debug;
 
@@ -42,7 +43,7 @@ fn readEnv(arena: std.mem.Allocator, init: std.process.Init) !Env {
         .runtime_dir = runtime_dir,
         .wayland_display = addr.display,
         .home = env_mod.absolute(vars.get("HOME")) orelse return error.NoHome,
-        .envp = init.minimal.environ.block.slice.ptr,
+        .envp = proc.processEnv(init.minimal.environ),
         .tz = vars.get("TZ"),
     };
 }

@@ -106,6 +106,21 @@ pub const Layer = struct {
     pub const Keyboard = enum(u32) { none = 0, exclusive = 1, on_demand = 2 };
 };
 
+/// How Window.open makes a surface.
+pub const OpenOptions = struct {
+    fullscreen: bool = true,
+    /// ask to be maximized (the work area: panels stay visible)
+    maximized: bool = false,
+    /// fallback size when the platform lets the client decide
+    width: u32 = 800,
+    height: u32 = 500,
+    /// premultiplied ARGB buffers: see-through where alpha < 255
+    transparent: bool = false,
+    /// a floating surface where the platform has them; ignored
+    /// otherwise (an ordinary window as the rest describes)
+    layer: ?Layer = null,
+};
+
 /// Progress of a drag out of one of our surfaces (Window.startDrag).
 pub const DragState = enum {
     none,

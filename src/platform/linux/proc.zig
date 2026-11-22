@@ -61,6 +61,12 @@ pub const Child = struct {
     }
 };
 
+/// The environment handed to children: the process's own (`environ`:
+/// std.process.Init.minimal.environ).
+pub fn processEnv(environ: anytype) Envp {
+    return environ.block.slice.ptr;
+}
+
 /// The program's absolute path on PATH (into buf), or null.
 pub fn which(buf: []u8, name: []const u8) ?[:0]const u8 {
     const path = if (std.c.getenv("PATH")) |p| std.mem.span(p) else "/usr/local/bin:/usr/bin:/bin";

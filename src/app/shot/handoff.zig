@@ -77,7 +77,7 @@ fn waitReady(win: *window.Window, ready: sys.fd_t) void {
     while (sys.monoMs() < deadline) {
         var fds = [_]sys.pollfd{
             .{ .fd = ready, .events = sys.POLL.IN, .revents = 0 },
-            .{ .fd = win.conn.fd, .events = sys.POLL.IN, .revents = 0 },
+            .{ .fd = win.pollFd(), .events = sys.POLL.IN, .revents = 0 },
         };
         _ = sys.poll(&fds, @intCast(@max(1, deadline - sys.monoMs()))) catch return;
         if (fds[0].revents != 0) return;

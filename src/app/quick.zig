@@ -110,9 +110,9 @@ fn setup(q: *Quick) void {
 /// the last card is gone.
 fn loop(q: *Quick) !void {
     while (q.cards.items.len > 0) {
-        try q.win.conn.flush();
+        try q.win.flush();
         var fds = [_]sys.pollfd{
-            .{ .fd = q.win.conn.fd, .events = sys.POLL.IN, .revents = 0 },
+            .{ .fd = q.win.pollFd(), .events = sys.POLL.IN, .revents = 0 },
             .{ .fd = q.listen_fd, .events = sys.POLL.IN, .revents = 0 },
         };
         const nfds: usize = if (q.listen_fd >= 0) 2 else 1;

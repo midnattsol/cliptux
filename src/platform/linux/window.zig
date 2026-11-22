@@ -71,6 +71,7 @@
 const std = @import("std");
 const wl = @import("wayland.zig");
 const render = @import("../../gfx/render.zig");
+const sys = @import("sys.zig");
 const keyboard = @import("keyboard.zig");
 const registry = @import("window/registry.zig");
 const output = @import("window/output.zig");
@@ -135,6 +136,7 @@ pub const max_surfaces = types.max_surfaces;
 pub const max_outputs = types.max_outputs;
 pub const Rect = types.Rect;
 pub const Layer = types.Layer;
+pub const OpenOptions = types.OpenOptions;
 pub const Cursor = types.Cursor;
 pub const Dropped = types.Dropped;
 pub const DragState = types.DragState;
@@ -235,6 +237,22 @@ pub const Window = struct {
     pub const closeWindow = lifecycle.closeWindow;
     pub const surfaceList = surface.surfaceList;
     pub const outputList = output.outputList;
+
+    /// Flush requests to the compositor.
+    pub fn flush(w: *Window) !void {
+        try w.conn.flush();
+    }
+
+    /// The name of key `code` in the layout (for shortcuts in Settings);
+    /// `fallback` when it has none.
+    pub fn keyName(w: *Window, code: u32, buf: []u8, fallback: []const u8) []const u8 {
+        return w.kb.keyName(code, buf, fallback);
+    }
+
+    /// The descriptor to poll for the window's events.
+    pub fn pollFd(w: *const Window) sys.fd_t {
+        return w.conn.fd;
+    }
 
     // drawing
     pub const backBuffer = buffers.backBuffer;

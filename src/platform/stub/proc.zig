@@ -37,6 +37,14 @@ pub const Child = struct {
     }
 };
 
+/// The environment handed to children: the process's own (`environ`:
+/// std.process.Init.minimal.environ).
+pub fn processEnv(environ: anytype) Envp {
+    _ = environ;
+    return &empty;
+}
+const empty = [_:null]?[*:0]const u8{};
+
 /// The program's absolute path on PATH (into buf), or null.
 pub fn which(buf: []u8, name: []const u8) ?[:0]const u8 {
     _ = .{ buf, name };
