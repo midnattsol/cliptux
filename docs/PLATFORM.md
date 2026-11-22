@@ -11,8 +11,9 @@ seams between the two and how a backend is chosen.
 src/platform/api.zig    the seam: picks the backend at compile time,
                         checks it against the contract, re-exports it
 src/platform/api/       the seams' platform-neutral types (input events,
-                        key codes, floating-surface placement, appearance,
-                        capture paths, recording frames...): plain data
+                        keys and buttons, floating-surface placement,
+                        appearance, capture paths, recording frames...):
+                        plain data the core defines
 src/platform/stub/      the contract: every declaration the core may use,
                         with its type and no behaviour; compiled by
                         `zig build check-portable`, never shipped
@@ -28,7 +29,9 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
 `api.backend`. Two build steps hold the line, both run by `zig build test`:
 
 - `zig build check-layers` (tools/check-layers.sh) fails on any of those
-  outside `src/platform/linux`. Its allowlist (tools/layers-allowlist.txt)
+  outside `src/platform/linux`, and on code there (not comments) that
+  names Wayland or D-Bus, X keysyms or evdev codes (`KEY_*`, `BTN_*`),
+  or holds a GTK accelerator (`<Super>`). Its allowlist (tools/layers-allowlist.txt)
   is empty and may only stay so. The e2e drivers' module root
   (`src/testkit.zig`, Linux tooling) is the one file that takes the Linux
   plumbing, through `api.backend.native`.
@@ -70,9 +73,9 @@ Each is `api.<name>`; the stub file of the same name lists it in full.
 
 | Seam | The core gets | Linux |
 | --- | --- | --- |
-| `window` | `Window`: one surface or one per output (`open`, `openOutputs`, `openOnOutputAt`), back buffers and `present*`, events (`nextEvent*`, `pollTimeoutMs`, `pollFd`, `flush`), cursors, input method (`setTextInput`, `preedit`), roles (move, maximize, minimize, input region, geometry, title, floating-surface placement and keyboard), `parentHandle` for dialogs, `keyName`; clipboard (`setClipboard*`, `claimClipboardSource`, `serveClipboard`, `clipboardText`, `clipboardAccepted`) and drag and drop (`startDrag`, `accept_mimes`/`dropped`); `Surface`, `Output`. Types in `api/window.zig`: keys as evdev code + X keysym + UTF-8 | `linux/window/` on the raw Wayland client, `linux/keyboard/` (libxkbcommon) |
-| `desktop` | `Session` (`connect`, `connectBrief`, `identify`, `addresses`), appearance (`readAppearance`, `watchAppearance`, `pump`), file dialogs (`askSavePath`, `chooseFolder`, `dialogChoice`), `notify`, `revealFile`, `pollFd`/`hasPending`, the tray `daemon` | D-Bus session bus, Settings/FileChooser portals, Notifications, FileManager1, StatusNotifierItem |
-| `shell` | the shell integration: `applies`, `active`, `activeNow`, `state`, `install`, `captureInfo`, `note`, `requestCapture`, `loadHanded`, `place`, `finishPendingSetup`, `runCli`, the capture modes' global shortcuts (`shortcutStore`, `getShortcut`, `setShortcut`, `setTimerSeconds`) | the Shotlet GNOME Shell extension (`linux/gnome/`) |
+| `window` | `Window`: one surface or one per output (`open`, `openOutputs`, `openOnOutputAt`), back buffers and `present*`, events (`nextEvent*`, `pollTimeoutMs`, `pollFd`, `flush`), cursors, input method (`setTextInput`, `preedit`), roles (move, maximize, minimize, input region, geometry, title, floating-surface placement and keyboard), `parentHandle` for dialogs, `keyName`; clipboard (`setClipboard*`, `claimClipboardSource`, `serveClipboard`, `clipboardText`, `clipboardAccepted`) and drag and drop (`startDrag`, `accept_mimes`/`dropped`); `Surface`, `Output`. Types in `api/window.zig` and `api/keys.zig`: a key as `KeyCode` (the physical key) + the layout's character + UTF-8, `Button` | `linux/window/` on the raw Wayland client, `linux/keyboard/` (libxkbcommon; `evdev.zig` and `keysymChar` translate) |
+| `desktop` | `Addresses` (where the session's services are, opaque: `Env.session`, `tag()`) and `addresses`, `Session` (`connect`, `connectBrief`, `identify`), appearance (`readAppearance`, `watchAppearance`, `pump`), file dialogs (`askSavePath`, `chooseFolder`, `dialogChoice`), `notify`, `revealFile`, `pollFd`/`hasPending`, the tray `daemon` | D-Bus session bus, Settings/FileChooser portals, Notifications, FileManager1, StatusNotifierItem |
+| `shell` | the shell integration: `applies`, `active`, `activeNow`, `state`, `words` (how Settings names it), `install`, `captureInfo`, `note`, `requestCapture`, `loadHanded`, `place`, `finishPendingSetup`, `runCli`, the capture modes' global shortcuts by name, in `app/accel.zig`'s notation (`shortcutStore`, `getShortcut`, `setShortcut`, `setTimerSeconds`) | the Shotlet GNOME Shell extension (`linux/gnome/`; GTK's accelerators in `gnome/gtk_accel.zig`) |
 | `capture` | `screens` (every monitor frozen, asking where needed), `warmup`, `windows`/`canCaptureWindow`/`captureWindow`, `ScrollSource`/`openScroll`, the capture `Path` (`remember`, `lastPath`), `resetPermissions`/`resetSummary`, `permissionsCli` | `linux/capture/` (direct, ScreenCast + PipeWire, Screenshot portal, first-run window, permission store), `linux/kde/`, `linux/wlroots/` |
 | `record` | `open` a `Source` for an area (its `Stream`: `addVideo`, `addAudio`, `failed`, `videoFrames`, `close`), `shellHasControls`, `pickInShell`, `watchStop`, `pollStop`; frame types in `api/record.zig` | the extension's recorder or a ScreenCast session, PipeWire streams |
 | `sys` | clocks, sleep, futex, randomness, files, directories, descriptors, pipes, `poll`, local sockets, mapped files, `isTerminal`, `processId` (POSIX-shaped: a port maps handles onto small integers) | raw syscalls (`linux/sys/`) |
@@ -91,11 +94,35 @@ scroll stitching, the recording engine (timeline, frames, sound mixing),
 and the capture flow around them (`app/shot.zig` asks the shell, then
 `capture.screens`).
 
-Still Linux-flavoured in the core, by choice: `Env.bus_addr` and
-`Env.wayland_display` are opaque session addresses the backend fills
-(`desktop.addresses`); keys are evdev codes and X keysyms; accelerators
-use GTK's notation (`<Ctrl>Print`, `app/accel.zig`); the Settings window's
-words about the integration name GNOME.
+What the core says in its own terms, and each backend translates:
+
+- **Keys.** `api/keys.zig`'s `KeyCode` names a physical key by its place
+  on a US keyboard (`.q` is the key left of W on any layout); a key event
+  also carries `char`, the character it stands for in the active layout
+  (Shift and Caps Lock applied, not Ctrl), and the text it types. Letter
+  shortcuts that follow the layout (Settings' Q, the scrolling capture's
+  C, global shortcuts) use `char`; the editor's binds and the mode
+  strip's letters use the physical key. Linux maps evdev codes in
+  `linux/keyboard/evdev.zig` and keysyms in `keysymChar`.
+- **Shortcuts.** `app/accel.zig`: "Shift+Super+S" (modifiers Ctrl, Shift,
+  Alt, Super, then `KeyCode.name`). The shell seam takes and gives that
+  notation; GNOME's settings keep GTK's ("<Shift><Super>s"), converted in
+  `linux/gnome/gtk_accel.zig`. The editor's binds are written as
+  `shortcut_<action>=Ctrl+F`; a config file's older
+  `bind_<action>=ctrl+33` (evdev numbers, `app/config/legacy_keys.zig`)
+  still loads and is rewritten at the next save.
+- **The session.** `Env.session` is the backend's `desktop.Addresses`
+  (Linux: the D-Bus session bus and the Wayland display), handed back
+  through `Env` (`Window.init(gpa, env)`); per-session sockets use its
+  `tag()`.
+- **The integration's name.** `shell.words()`: what Settings calls the
+  integration, what gets installed, the command that manages it, the
+  desktop's screenshot key and where to bind a key to a command.
+
+Still Linux-flavoured in the core: the `gnome-integration` command and
+its help (`cli/cmds_more.zig`, dispatched to `shell.runCli`), and a few
+messages outside the Settings window (the thumbnail's hint, the
+recording picker's tooltips, log lines) that name GNOME.
 
 ## Where things moved
 
