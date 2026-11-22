@@ -122,7 +122,7 @@ fn displayAccel(buf: []u8, accel: []const u8) []const u8 {
 pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
     switch (h) {
         .after => {
-            st.s.after = @fromBackingInt(@intCast((@backingInt(st.s.after) + 1) % 3));
+            st.s.after = st.s.after.next();
             msettings.setAfter(alloc, env.home, st.s.after) catch |err| std.log.warn("could not save: {t}", .{err});
         },
         .timer => {

@@ -5,7 +5,7 @@
 #
 #   modes-screen  Ctrl+Print (the monitor under the pointer), Ctrl+Shift+
 #                 Print (all screens), Shift+Super+Print (the previous
-#                 area); after_fullscreen copy, thumbnail and editor
+#                 area); after_fullscreen copy, thumbnail, editor, save
 #   modes-timer   `shotlet timer 3`: the shell's countdown, not captured
 #   modes-window  Super+Print, click a window: exactly the window, its
 #                 corners transparent; with the shadow around it
@@ -34,6 +34,14 @@ clip_size() { clip_png "$OUT/$1.png" && png_size "$OUT/$1.png"; }
 wait_clip() {
     local i
     for i in $(seq 1 $(($2 * 4))); do clip_png "$OUT/$1.png" && return 0; sleep 0.25; done
+    return 1
+}
+saved_in_history() { # a history entry says it was saved to ~/Pictures
+    local i
+    for i in $(seq 1 20); do
+        grep -lq "saved=$HOME/Pictures/shotlet-" "$XDG_STATE_HOME"/shotlet/history/*/meta 2>/dev/null && return 0
+        sleep 0.25
+    done
     return 1
 }
 clear_clip() { timeout 5 wl-copy -- "nothing" & sleep 0.5; }
@@ -107,6 +115,14 @@ modes-screen)
     drv key ctrl+print
     check "after_fullscreen=thumbnail shows the floating thumbnail" shell_wait 10 "quick access: showing" 1
     check "  ... and keeps the capture in the history" eval 'ls "$XDG_STATE_HOME"/shotlet/history/*/image.png >/dev/null 2>&1'
+    check "  ... and copies it, like an area copied in the editor" eval 'wait_clip thumb 10 && eq "$(png_size "$OUT/thumb.png")" 1600x900'
+    clear_clip
+    sleep 1.1
+    # after a screen capture: saved, like Save in the editor
+    mode_cfg save
+    drv key ctrl+print
+    check "after_fullscreen=save writes the monitor to ~/Pictures" eval 'for i in $(seq 1 40); do f=$(ls "$HOME"/Pictures/shotlet-*.png 2>/dev/null | head -1); [ -n "$f" ] && break; sleep 0.25; done; eq "$(png_size "$f")" 1600x900'
+    check "  ... remembering where in the history" saved_in_history
     ;;
 modes-timer)
     modes_start Meta-0

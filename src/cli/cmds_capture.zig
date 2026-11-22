@@ -63,7 +63,7 @@ pub const list = [_]Command{
         },
     },
     mode(.fullscreen, "Capture the screen under the pointer", "Captures the monitor under the pointer (the first one where that is unknown) and does " ++
-        "what after_fullscreen says in the settings: the thumbnail, copy, or the editor."),
+        "what after_fullscreen says in the settings: copy and show the thumbnail, copy, save, or the editor."),
     mode(.screens, "Capture all screens", "Captures every monitor as one image, laid out as on the desktop."),
     mode(.previous, "Capture the last area again", "Opens the editor with the area copied or saved last time selected again " ++
         "(remembered per monitor layout)."),

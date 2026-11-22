@@ -146,9 +146,12 @@ timed capture too.
 
 - **Screen, all screens, window** skip the region selection and do what
   `after_fullscreen` says (Settings › General › Capture modes): `thumbnail`
-  (the default: the floating thumbnail and the history), `copy`, or
-  `editor` (with that screen selected). The screen is the one under the
-  pointer on GNOME; elsewhere the first one.
+  (the default: copied, with the floating thumbnail), `copy` (copied; the
+  thumbnail if `quick_access` is on), `save` (written to the screenshots
+  folder, also copied with `copy_on_save`) or `editor` (with that screen
+  selected). Like an area copied or saved in the editor, it always lands
+  on the clipboard or in a file, and in the history. The screen is the
+  one under the pointer on GNOME; elsewhere the first one.
 - **Previous area** opens the editor with the last selection you copied or
   saved already selected. It is remembered per monitor layout
   (`$XDG_STATE_HOME/shotlet/last-area`), so it never lands on a different

@@ -1,9 +1,10 @@
 //! Settings of the capture modes, in the same file as the rest
 //! (app/config.zig; written with config.update, which merges keys):
 //!
-//!     after_fullscreen=thumbnail   editor | thumbnail | copy: what a
-//!                                  screen, all-screens or window capture
-//!                                  does once taken
+//!     after_fullscreen=thumbnail   editor | thumbnail | copy | save:
+//!                                  what a screen, all-screens or window
+//!                                  capture does once taken (see
+//!                                  delivery: never nothing, like an area)
 //!     timer_seconds=5              the self-timer: 3, 5 or 10
 //!     window_shadow=true           window captures get a soft shadow
 //!     scroll_max_height=20000      scrolling captures stop there (px)
@@ -19,15 +20,42 @@ pub const After = enum {
     editor,
     thumbnail,
     copy,
+    save,
 
     pub fn label(self: After) []const u8 {
         return switch (self) {
             .editor => "Open the editor",
-            .thumbnail => "Show the thumbnail",
+            .thumbnail => "Copy, show the thumbnail",
             .copy => "Copy to the clipboard",
+            .save => "Save to the folder",
         };
     }
+
+    /// The next choice, for the Settings button that cycles them.
+    pub fn next(self: After) After {
+        const n = @typeInfo(After).@"enum".field_names.len;
+        return @fromBackingInt(@intCast((@as(usize, @backingInt(self)) + 1) % n));
+    }
 };
+
+/// What a capture taken without the editor does: like an area copied or
+/// saved in the editor, it always lands somewhere (the clipboard or a
+/// file), and in the history; the thumbnail follows quick_access unless
+/// it was asked for.
+pub const Delivery = struct {
+    save: bool = false,
+    copy: bool = false,
+    thumbnail: bool = false,
+};
+
+pub fn delivery(after: After, cfg: *const config.Config) Delivery {
+    return switch (after) {
+        .editor => .{},
+        .thumbnail => .{ .copy = true, .thumbnail = true },
+        .copy => .{ .copy = true, .thumbnail = cfg.quick_access },
+        .save => .{ .save = true, .copy = cfg.copy_on_save, .thumbnail = cfg.quick_access },
+    };
+}
 
 pub const Settings = struct {
     after: After = .thumbnail,
@@ -81,6 +109,18 @@ pub fn setAfter(gpa: std.mem.Allocator, home: []const u8, a: After) !void {
 pub fn setTimer(gpa: std.mem.Allocator, home: []const u8, s: u8) !void {
     var buf: [4]u8 = undefined;
     try config.update(gpa, home, &.{.{ .key = "timer_seconds", .value = try std.fmt.bufPrint(&buf, "{d}", .{s}) }});
+}
+
+test "a capture without the editor is always copied or saved" {
+    var cfg: config.Config = .{};
+    cfg.quick_access = false;
+    try std.testing.expectEqual(Delivery{ .copy = true, .thumbnail = true }, delivery(.thumbnail, &cfg));
+    try std.testing.expectEqual(Delivery{ .copy = true }, delivery(.copy, &cfg));
+    try std.testing.expectEqual(Delivery{ .save = true }, delivery(.save, &cfg));
+    cfg.quick_access = true;
+    cfg.copy_on_save = true;
+    try std.testing.expectEqual(Delivery{ .save = true, .copy = true, .thumbnail = true }, delivery(.save, &cfg));
+    try std.testing.expectEqual(After.editor, After.save.next());
 }
 
 test "mode settings parse with defaults for the rest" {

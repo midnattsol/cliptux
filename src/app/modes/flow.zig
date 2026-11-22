@@ -5,8 +5,9 @@
 //! - previous: the editor with the last selection of this monitor layout;
 //! - fullscreen (the monitor under the pointer), screens (all of them) and
 //!   window: what `after_fullscreen` says: the editor with it selected,
-//!   the floating thumbnail, or the clipboard (and the thumbnail when
-//!   quick access is on), with no editor;
+//!   or with no editor copied (with the floating thumbnail), copied or
+//!   saved (with the thumbnail when quick access is on): never only
+//!   kept in the history (settings.delivery);
 //! - scroll: a region is picked, scrolled and stitched, and the tall
 //!   result opens in the editor.
 
@@ -16,6 +17,7 @@ const config = @import("../config.zig");
 const dbus = @import("../../platform/dbus.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
+const save = @import("../shot/save.zig");
 const png = @import("../../gfx/png.zig");
 const doc_mod = @import("../../ui/doc.zig");
 const window = @import("../../ui/window.zig");
@@ -98,22 +100,40 @@ fn instant(c: Ctx, cap: *capture.Capture, r: geom.Rect, alpha: bool) !Outcome {
     const see_through = alpha or (b.enabled and b.background().transparent());
     const data = try png.encodeWith(c.gpa, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
     errdefer c.gpa.free(data);
-    try deliver(c, cap, r, data, s.after);
+    try deliver(c, cap, r, data, settings.delivery(s.after, c.cfg));
     return .done;
 }
 
-/// Keep `data` (owned) for the thumbnail and the history; copy it when
-/// asked to, then serve the clipboard.
-fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, after: settings.After) !void {
+/// Save `data` (owned) when asked to, keep it for the thumbnail and the
+/// history, then copy it and serve the clipboard when asked to.
+fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, d: settings.Delivery) !void {
+    const path: ?[]u8 = if (d.save) saveFile(c, data) else null;
+    defer if (path) |p| c.gpa.free(p);
     var doc = doc_mod.Document.init(c.gpa, cap.image.width, cap.image.height);
     defer doc.deinit();
     doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
-    const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc });
-    if (after == .thumbnail or c.cfg.quick_access) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k);
-    if (after != .copy) {
+    const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc, .saved = path orelse "" });
+    if (d.thumbnail) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k);
+    // a save that failed still copies: the capture lands somewhere
+    if (!d.copy and path != null) {
         c.gpa.free(data);
         return;
     }
+    try copy(c, data);
+}
+
+/// Into the screenshots folder; null (logged) when it could not be written.
+fn saveFile(c: Ctx, data: []const u8) ?[]u8 {
+    const path = save.savePng(c.gpa, c.env, c.cfg, data) catch |err| {
+        std.log.warn("could not save the capture ({t}); copying it instead", .{err});
+        return null;
+    };
+    std.log.info("capture saved to {s}", .{path});
+    return path;
+}
+
+/// Put `data` (owned) on the clipboard and serve it.
+fn copy(c: Ctx, data: []u8) !void {
     clip.copyPng(c.win, data) catch |err| {
         c.gpa.free(data);
         std.log.warn("could not copy the capture: {t}", .{err});
