@@ -48,7 +48,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     try open(&p);
     p.startOcr();
     const end = if (smoke_ms > 0) sys.monoMs() + smoke_ms else 0;
-    while (true) {
+    events: while (true) {
         if (end != 0 and sys.monoMs() > end) break;
         try p.render();
         const ev = (try p.win.nextEventTimeout(250)) orelse {
@@ -57,7 +57,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
             continue;
         };
         if (!try p.onEvent(ev)) break;
-        while (try p.win.nextEventTimeout(0)) |e2| if (!try p.onEvent(e2)) break;
+        // the rest of the batch: a close in it (the second of two quick
+        // Escs) closes the panel too
+        while (try p.win.nextEventTimeout(0)) |e2| if (!try p.onEvent(e2)) break :events;
         clipimg.takeDrop(gpa, env, &p.win);
         p.pollOcr();
     }
