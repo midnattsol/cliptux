@@ -38,6 +38,7 @@ pub const Label = buttons.Label;
 pub const tool_list = buttons.tool_list;
 pub const buttonName = buttons.buttonName;
 pub const nameLayer = buttons.nameLayer;
+pub const disabledWhy = buttons.disabledWhy;
 
 pub const Backdrop = material.Backdrop;
 pub const Slot = material.Slot;
@@ -58,6 +59,7 @@ pub const hoverAmount = hit.hoverAmount;
 
 pub const collectOverlays = overlays.collectOverlays;
 pub const drawChrome = draw_chrome.drawChrome;
+pub const drawPill = draw_chrome.drawPill;
 pub const hoverHandle = selection.hoverHandle;
 pub const drawSelectionChrome = selection.drawSelectionChrome;
 pub const focusRing = draw_toolbar.focusRing;

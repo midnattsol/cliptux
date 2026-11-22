@@ -86,7 +86,7 @@ pub const Quick = struct {
     dirty: bool = true,
     dragging: ?usize = null,
     /// the desktop's accent, for keyboard focus rings
-    accent: u32 = fui.accent,
+    accent: u32 = theme.accentFill(theme.default_accent),
     /// told once the first frame is committed (see quick.run)
     ready_fd: sys.fd_t = -1,
 

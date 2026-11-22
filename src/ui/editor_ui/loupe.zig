@@ -7,6 +7,7 @@ const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
+const draw_chrome = @import("draw_chrome.zig");
 const ff = @import("common.zig").ff;
 
 const Canvas = render.Canvas;
@@ -116,6 +117,9 @@ fn drawGrid(self: *const Editor, canvas: *Canvas, r: Rect, cell: i32) void {
     canvas.rectOutline(c0x - 1, c0y - 1, cell + 2, cell + 2, 1, 0xFFFFFFFF);
 }
 
+/// The label's text: medium weight, figures that do not jiggle.
+const label_style = text_mod.Style.medium.num();
+
 /// Coordinates, or the selection size while dragging.
 fn labelText(self: *const Editor, buf: []u8) []const u8 {
     const iw: i32 = @intCast(self.img.width);
@@ -132,7 +136,7 @@ fn labelText(self: *const Editor, buf: []u8) []const u8 {
 /// The label's pill, centred below the magnified pixels of `r`.
 fn labelRect(self: *const Editor, r: Rect, label: []const u8) Rect {
     const fs = theme.font_small * self.uf();
-    const lw = text_mod.width(fs, label) + self.sc(20);
+    const lw = text_mod.widthStyled(fs, label_style, label) + self.sc(20);
     return .{ .x = r.x + @divTrunc(r.w - lw, 2), .y = r.y + r.w + self.sc(6), .w = lw, .h = text_mod.height(fs) + self.sc(8) };
 }
 
@@ -142,6 +146,6 @@ fn drawLabel(self: *const Editor, canvas: *Canvas, r: Rect) void {
     const label = labelText(self, &buf);
     const lr = labelRect(self, r, label);
     const fs = theme.font_small * self.uf();
-    canvas.fillRoundRectAA(lr.x, lr.y, lr.w, lr.h, 7 * self.uf(), self.theme.pill_bg);
-    text_mod.draw(canvas, r.x + @divTrunc(r.w - text_mod.width(fs, label), 2), lr.y + self.sc(4), fs, self.theme.pill_fg, label);
+    draw_chrome.drawPill(self, canvas, lr, 7 * self.uf());
+    text_mod.drawStyled(canvas, r.x + @divTrunc(r.w - text_mod.widthStyled(fs, label_style, label), 2), lr.y + self.sc(4), fs, self.theme.pill_fg, label_style, label);
 }

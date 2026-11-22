@@ -70,10 +70,16 @@ pub fn label(ed: *const Editor, e: Ext, kb: []u8) ui.Label {
         }, "" },
         .picked => |i| return .{ .name = "Use this colour", .key = if (i < ed.tools.history.len) color.hex(kb, ed.tools.history.items[i]) else "" },
     };
-    // without libtesseract these say what they need
-    if ((e == .copy_text or e == .redact_sensitive) and !@import("ocr_job.zig").available()) return .{ .name = n, .key = "needs Tesseract" };
     const key = if (actionOf(e)) |a| config.bindName(ed.binds[@backingInt(a)], kb) else fixed;
     return .{ .name = n, .key = if (std.mem.eql(u8, key, "unset")) "" else key };
+}
+
+/// Why an extra tool's control cannot be used, or null when it can.
+pub fn disabledWhy(e: Ext) ?[]const u8 {
+    return switch (e) {
+        .copy_text, .redact_sensitive => if (@import("ocr_job.zig").available()) null else "Needs Tesseract (not installed)",
+        else => null,
+    };
 }
 
 pub fn icon(e: Ext) ?Icon {

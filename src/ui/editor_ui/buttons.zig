@@ -1,5 +1,6 @@
 //! The chrome's controls: button kinds and layers, their script names,
-//! tooltip and menu labels, icons, and whether each shows as active.
+//! tooltip and menu labels, icons, and whether each shows as active or
+//! disabled.
 
 const std = @import("std");
 const config = @import("../../app/config.zig");
@@ -215,6 +216,23 @@ pub fn buttonActive(self: *const Editor, kind: ButtonKind) bool {
         .ext => |e| tui.active(self, e),
         else => false,
     };
+}
+
+/// Why a control cannot be used right now, or null when it can. A
+/// disabled control shows dimmed, ignores clicks and keys, and its
+/// tooltip says why.
+pub fn disabledWhy(self: *const Editor, kind: ButtonKind) ?[]const u8 {
+    return switch (kind) {
+        .undo => if (canUndo(self)) null else "Nothing to undo",
+        .redo => if (self.doc.redo_stack.items.len > 0) null else "Nothing to redo",
+        .ext => |e| tui.disabledWhy(e),
+        else => null,
+    };
+}
+
+/// History to undo, or an edit in progress that undo would end.
+fn canUndo(self: *const Editor) bool {
+    return self.doc.undo_stack.items.len > 0 or self.text != null or self.drag != .none or self.lifted != null;
 }
 
 pub fn toolIcon(self: *const Editor, t: Tool) Icon {

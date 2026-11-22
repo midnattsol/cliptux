@@ -211,7 +211,7 @@ fn paintItem(cv: *render.Canvas, k: f64, st: *const State, item: Item, r: Rect) 
     const th = st.th;
     const hover: f64 = if (st.hover == item) 1 else 0;
     if (item == .record) {
-        const red = theme.mix(th.destructive, if (th.dark) 0xFFFFFFFF else 0xFF000000, 0.12 * hover);
+        const red = theme.mix(theme.destructive_fill, theme.destructive_fill_hover, hover);
         barkit.primary(cv, r, k, red, th.on_accent, .dot, "Record");
         return;
     }

@@ -163,15 +163,15 @@ hidpi_scenario() {
     check "selection maps 1:1 to physical pixels" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 1200x600
     check "buffer covers the panel exactly" eq "$(png_size "$OUT/hidpi-frame.png")" 2560x1440
     check "the 1x monitor keeps a 1x buffer" eq "$(png_size "$OUT/hidpi-frame-1.png")" 1280x720
-    # the toolbar's Copy button (the accent-coloured one, wider than
-    # the active tool's) copies on click
+    # the toolbar's Copy button (the accent-filled one, wider than the
+    # active tool's) copies on click
     run_shotlet close
     wait_editor 5
     drag 0 300 300 0 1500 900
     sleep 0.3
     shot 0 toolbar
     cx=
-    drv find 0 "$accent" 24 40 && read -r cx cy _ <<<"$VAL"
+    drv find 0 "$accent_fill" 24 40 && read -r cx cy _ <<<"$VAL"
     check "toolbar Copy button found" test -n "$cx"
     click 0 "$cx" "$cy"
     sleep 1

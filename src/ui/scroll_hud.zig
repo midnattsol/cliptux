@@ -10,6 +10,7 @@ const wl = @import("../platform/wayland.zig");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const fui = @import("floatui.zig");
+const theme = @import("theme.zig");
 const window = @import("window.zig");
 const Rect = @import("../app/modes/geom.zig").Rect;
 
@@ -18,6 +19,8 @@ pub const title = "shotlet:scroll";
 pub const width = 232;
 pub const height = 376;
 const pad = 14;
+/// the Stop button: the default accent, dark enough for its white label
+const stop_fill = theme.accentFill(theme.default_accent);
 const radius = 18;
 const preview_h = 220;
 
@@ -78,12 +81,12 @@ pub const Hud = struct {
         var cv = render.Canvas.init(card, bw, bh);
         const x0 = self.sc(pad);
         const fs = 13 * self.k();
-        text.drawStyled(&cv, x0, self.sc(pad), fs, 0xFFF5F5F7, .bold, "Scrolling capture");
+        text.drawStyled(&cv, x0, self.sc(pad), fs, 0xFFF5F5F7, .semibold, "Scrolling capture");
         text.draw(&cv, x0, self.sc(pad + 20), 12 * self.k(), 0xFFA1A1A8, self.status);
         const pv: Rect = .{ .x = x0, .y = self.sc(pad + 44), .w = @as(i32, @intCast(bw)) - 2 * x0, .h = self.sc(preview_h) };
         cv.fillRect(pv.x, pv.y, pv.w, pv.h, 0xFF141416);
         if (src) |s| drawPreview(&cv, pv, s);
-        text.draw(&cv, x0, pv.y + pv.h + self.sc(8), 12 * self.k(), 0xFFA1A1A8, self.detail);
+        text.drawStyled(&cv, x0, pv.y + pv.h + self.sc(8), 12 * self.k(), 0xFFA1A1A8, text.Style.regular.num(), self.detail);
         self.drawStop(&cv);
         const px = try self.win.backBuffer();
         @memset(px, 0);
@@ -95,8 +98,8 @@ pub const Hud = struct {
     fn drawStop(self: *Hud, cv: *render.Canvas) void {
         const h = self.sc(32);
         const r: Rect = .{ .x = self.sc(pad), .y = cv.h - self.sc(pad) - h, .w = cv.w - 2 * self.sc(pad), .h = h };
-        cv.fillRoundRectAA(r.x, r.y, r.w, r.h, @floatFromInt(@divTrunc(h, 2)), if (self.hover_stop) 0xFF3D95FF else fui.accent);
-        fui.textCentered(cv, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, 13 * self.k(), 0xFFFFFFFF, .bold, "Stop");
+        cv.fillRoundRectAA(r.x, r.y, r.w, r.h, @floatFromInt(@divTrunc(h, 2)), if (self.hover_stop) theme.mix(stop_fill, 0xFF000000, 0.12) else stop_fill);
+        fui.textCentered(cv, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, 13 * self.k(), 0xFFFFFFFF, .semibold, "Stop");
         self.stop_r = r;
     }
 

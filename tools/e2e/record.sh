@@ -122,7 +122,7 @@ rec-pick)
     slow_drag 0 300 200 500 350 700 500
     sleep 0.5
     shot 0 picker
-    check "  ... with the record bar under the area" eval 'drv find 0 ff453a 24 60 0 500 1600 900'
+    check "  ... with the record bar under the area" eval 'drv find 0 d70015 24 60 0 500 1600 900'
     read -r bx by _ <<<"$VAL"
     click 0 "$bx" "$by"
     check "Record starts the countdown" shell_wait 10 "record: recording" 1

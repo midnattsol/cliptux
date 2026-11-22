@@ -21,8 +21,6 @@ const Rect = shapes_mod.Rect;
 const Shape = shapes_mod.Shape;
 
 /// What composeRegionTo darkens outside the selection to.
-const dim_keep: u32 = 255 - (editor.dim_color >> 24);
-
 /// Is some pane due for a frame and free to take one?
 pub fn renderReady(ed: *Editor) bool {
     if (ed.needs_render) {
@@ -182,7 +180,7 @@ fn composeLiveStroke(ed: *Editor, dst: []u32, stride: usize, origin: Point, lr: 
     const col = if (s.tool == .highlight) (s.color & 0x00FFFFFF) | 0x66000000 else s.color;
     const ca: u32 = col >> 24;
     var dimmed: [1]u32 = undefined;
-    caches.dimRow(&.{col}, &dimmed, dim_keep);
+    caches.dimRow(&.{col}, &dimmed, ed.dim_keep);
     var y = lr.y;
     while (y < lr.bottom()) : (y += 1) {
         var x = lr.x;
@@ -241,7 +239,7 @@ fn drawLiveShapes(ed: *Editor, canvas: *Canvas) void {
         for (canvas.px[off..][0..w], before[row * w ..][0..w], 0..) |*px, old, col| {
             if (px.* == old) continue;
             if (sel.contains(lb.x + @as(i32, @intCast(col)), y)) continue;
-            caches.dimRow(&.{px.*}, px[0..1], dim_keep);
+            caches.dimRow(&.{px.*}, px[0..1], ed.dim_keep);
         }
     }
 }

@@ -101,7 +101,7 @@ fn drawViewSwitcher(ui: *Ui, st: *const State, width: i32, hh: i32) !void {
     var widths: [tabs.len]i32 = undefined;
     var total: i32 = -gap;
     for (tabs, 0..) |t, i| {
-        widths[i] = ui.sc(14) + ui.sc(16) + ui.sc(8) + ui.width(14, .bold, t[1]) + ui.sc(14);
+        widths[i] = ui.sc(14) + ui.sc(16) + ui.sc(8) + ui.width(14, .semibold, t[1]) + ui.sc(14);
         total += widths[i] + gap;
     }
     var x = @divTrunc(width - total, 2);
@@ -120,7 +120,7 @@ fn drawTab(ui: *Ui, t: Tab, sel: bool, x: i32, ty: i32, tw: i32, th_h: i32) !voi
     } else if (hov) ui.c.fillRoundRectAA(x, ty, tw, th_h, 8 * ui.f, theme_mod.fade(th.view_sel, 0.6));
     const is = ui.sc(16);
     icons.drawStroke(&ui.c, t[2], x + ui.sc(14), ty + @divTrunc(th_h - is, 2), is, 2, th.text);
-    ui.label(x + ui.sc(14) + is + ui.sc(8), ty, th_h, 14, th.text, .bold, t[1]);
+    ui.label(x + ui.sc(14) + is + ui.sc(8), ty, th_h, 14, th.text, .semibold, t[1]);
     try ui.add(.{ .x = x, .y = ty, .w = tw, .h = th_h, .hit = .{ .view = t[0] }, .radius = 8 });
 }
 

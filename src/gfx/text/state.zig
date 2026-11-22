@@ -1,6 +1,6 @@
-//! Font state: the loaded faces, the style faces (regular, bold, mono)
-//! and the per-codepoint fallback chain; plus the process-wide instance
-//! and its lifecycle.
+//! Font state: the loaded faces, the style faces (regular, medium,
+//! semibold, bold, mono) and the per-codepoint fallback chain; plus the
+//! process-wide instance and its lifecycle.
 
 const std = @import("std");
 const ttf = @import("../ttf.zig");
@@ -8,8 +8,36 @@ const fontdb = @import("../fontdb.zig");
 const bidi = @import("../bidi.zig");
 const layout = @import("layout.zig");
 const wrap_lines = @import("wrap_lines.zig");
+const tabular = @import("tabular.zig");
 
-pub const Style = enum { regular, bold, mono };
+/// The faces text is drawn in. Medium and semibold are real faces when
+/// the system font family has them; else medium draws regular and
+/// semibold draws bold.
+pub const Face = enum(u3) { regular, medium, semibold, bold, mono };
+
+/// How text is drawn: a face, and optionally tabular figures (digits of
+/// one width, for numbers that change: sizes, timers, counters).
+pub const Style = packed struct(u8) {
+    face: Face = .regular,
+    tabular: bool = false,
+    _pad: u4 = 0,
+
+    pub const regular: Style = .{};
+    pub const medium: Style = .{ .face = .medium };
+    pub const semibold: Style = .{ .face = .semibold };
+    pub const bold: Style = .{ .face = .bold };
+    pub const mono: Style = .{ .face = .mono };
+
+    /// This style with tabular figures.
+    pub fn num(self: Style) Style {
+        var s = self;
+        s.tabular = true;
+        return s;
+    }
+};
+
+/// The faces loaded on first use (all but regular), in Face order.
+const lazy_faces = [_]Face{ .medium, .semibold, .bold, .mono };
 
 const max_fonts = 24;
 const max_failed = 32;
@@ -19,6 +47,8 @@ const Slot = struct {
     font: ttf.Font,
     path: []u8,
     index: u32,
+    /// tabular digit glyphs, worked out on first use
+    digits: ?tabular.Digits = null,
 };
 
 pub const State = struct {
@@ -27,12 +57,10 @@ pub const State = struct {
     slots: [max_fonts]Slot = undefined,
     n: usize = 0,
     regular: u8 = no_font,
-    bold: u8 = no_font,
-    mono: u8 = no_font,
-    bold_tried: bool = false,
-    mono_tried: bool = false,
-    /// bold style drawn by smearing the regular face horizontally
-    faux_bold: bool = false,
+    /// slots of the lazy faces (lazy_faces order); no_font: not loaded
+    /// or missing, see styleSlot
+    lazy: [lazy_faces.len]u8 = @splat(no_font),
+    tried: [lazy_faces.len]bool = @splat(false),
     next_fallback: usize = 0,
     /// codepoint -> slot holding it (no_font: nothing has it)
     cp_cache: std.AutoHashMapUnmanaged(u21, u8) = .empty,
@@ -102,28 +130,51 @@ pub const State = struct {
         return no_font;
     }
 
-    /// Slot drawing `style`; bold and mono faces load on first use.
+    /// Slot drawing `style`; every face but regular loads on first use.
+    /// A missing medium draws regular; a missing semibold draws bold; a
+    /// missing bold draws a smeared regular (see `fauxBold`).
     pub fn styleSlot(self: *State, style: Style) u8 {
-        switch (style) {
-            .regular => return self.regular,
-            .bold => {
-                if (!self.bold_tried) {
-                    self.bold_tried = true;
-                    self.bold = self.loadQuery(.sans_bold);
-                    // fontconfig answers with the regular face when no bold exists
-                    self.faux_bold = self.bold == no_font or self.bold == self.regular;
-                    if (self.faux_bold) self.bold = no_font;
-                }
-                return if (self.bold != no_font) self.bold else self.regular;
-            },
-            .mono => {
-                if (!self.mono_tried) {
-                    self.mono_tried = true;
-                    self.mono = self.loadQuery(.mono);
-                }
-                return if (self.mono != no_font) self.mono else self.regular;
-            },
+        return switch (style.face) {
+            .regular => self.regular,
+            .medium => self.lazySlot(.medium) orelse self.regular,
+            .semibold => self.lazySlot(.semibold) orelse self.styleSlot(.bold),
+            .bold => self.lazySlot(.bold) orelse self.regular,
+            .mono => self.lazySlot(.mono) orelse self.regular,
+        };
+    }
+
+    /// Whether `style` is drawn as a synthesized bold.
+    pub fn fauxBold(self: *State, style: Style) bool {
+        return switch (style.face) {
+            .bold => self.lazySlot(.bold) == null,
+            .semibold => self.lazySlot(.semibold) == null and self.lazySlot(.bold) == null,
+            else => false,
+        };
+    }
+
+    /// The slot of a face loaded on first use; null when the system has
+    /// no such face (fontconfig answers a missing weight with the regular
+    /// face: that counts as missing too).
+    fn lazySlot(self: *State, face: Face) ?u8 {
+        const i = std.mem.indexOfScalar(Face, &lazy_faces, face).?;
+        if (!self.tried[i]) {
+            self.tried[i] = true;
+            const slot = self.loadQuery(switch (face) {
+                .medium => .sans_medium,
+                .semibold => .sans_semibold,
+                .mono => .mono,
+                else => .sans_bold,
+            });
+            self.lazy[i] = if (slot == self.regular) no_font else slot;
         }
+        return if (self.lazy[i] == no_font) null else self.lazy[i];
+    }
+
+    /// The tabular digits of the font in `slot`.
+    pub fn digits(self: *State, slot: u8) *const tabular.Digits {
+        const s = &self.slots[slot];
+        if (s.digits == null) s.digits = tabular.compute(self.alloc, &s.font);
+        return &s.digits.?;
     }
 
     /// Slot and glyph index used to draw `cp` in `style`.
@@ -236,4 +287,19 @@ test "fallback chain covers characters the UI font lacks" {
     const slot, const gid = st.resolve(.regular, kanji);
     if (slot == st.regular) return; // no CJK font on this system
     try std.testing.expect(gid != 0);
+}
+
+test "every face resolves to a loaded slot; medium never smears" {
+    const alloc = std.testing.allocator;
+    init(alloc);
+    defer deinit();
+    const st = if (state) |*p| p else return; // no fonts installed
+    inline for (@typeInfo(Face).@"enum".field_names) |name| {
+        const style: Style = .{ .face = @field(Face, name) };
+        try std.testing.expect(st.styleSlot(style) < st.n);
+        try std.testing.expect(st.styleSlot(style.num()) == st.styleSlot(style));
+    }
+    try std.testing.expect(!st.fauxBold(.medium));
+    // a missing semibold borrows bold, real or synthesized
+    if (st.styleSlot(.semibold) == st.styleSlot(.bold)) try std.testing.expectEqual(st.fauxBold(.bold), st.fauxBold(.semibold));
 }

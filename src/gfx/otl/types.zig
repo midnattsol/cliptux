@@ -24,6 +24,9 @@ pub const Script = enum {
     syrc,
     nko,
     hebr,
+    /// for optional features of Latin text (tabular figures); the runs
+    /// shaped by otl.shape are never Latin
+    latn,
 
     pub fn tag(self: Script) [4]u8 {
         return switch (self) {
@@ -31,11 +34,15 @@ pub const Script = enum {
             .syrc => "syrc".*,
             .nko => "nko ".*,
             .hebr => "hebr".*,
+            .latn => "latn".*,
         };
     }
 
     pub fn joins(self: Script) bool {
-        return self != .hebr;
+        return switch (self) {
+            .arab, .syrc, .nko => true,
+            .hebr, .latn => false,
+        };
     }
 };
 

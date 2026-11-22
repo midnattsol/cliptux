@@ -16,6 +16,7 @@ const caret = @import("text/caret.zig");
 const wrap_lines = @import("text/wrap_lines.zig");
 
 pub const Style = state.Style;
+pub const Face = state.Face;
 pub const init = state.init;
 pub const initWith = state.initWith;
 pub const deinit = state.deinit;
@@ -52,6 +53,7 @@ test {
     _ = state;
     _ = layout;
     _ = @import("text/shape.zig");
+    _ = @import("text/tabular.zig");
     _ = draw_mod;
     _ = measure;
     _ = caret;

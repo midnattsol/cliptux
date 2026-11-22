@@ -93,9 +93,9 @@ fn draw(win: *window.Window, prefs: theme.Prefs, title: []const u8, body: []cons
     const ss = 12.0 * k;
     var buf: [256]u8 = undefined;
     const line = fui.ellipsize(&buf, ss, body, @as(i32, @intCast(cw)) - tx - sc(16, k));
-    const top: i32 = @divTrunc(@as(i32, @intCast(ch)) - text.heightStyled(fs, .bold) - (if (body.len > 0) text.height(ss) else 0), 2);
-    text.drawStyled(&c, tx, top, fs, th.fg, .bold, title);
-    if (body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .bold), ss, th.muted, line);
+    const top: i32 = @divTrunc(@as(i32, @intCast(ch)) - text.heightStyled(fs, .semibold) - (if (body.len > 0) text.height(ss) else 0), 2);
+    text.drawStyled(&c, tx, top, fs, th.fg, .semibold, title);
+    if (body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .semibold), ss, th.muted, line);
     fui.placeCard(px, win.width, win.height, card, cw, ch, sc(pad, k), sc(pad, k), @intCast(sc(14, k)), @intCast(sc(10, k)));
     fui.premultiply(px, win.width, win.height, .{ .x = 0, .y = 0, .w = @intCast(win.width), .h = @intCast(win.height) });
     try win.present();

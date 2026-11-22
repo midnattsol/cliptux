@@ -9,6 +9,7 @@ const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
 const buttons = @import("buttons.zig");
+const draw_chrome = @import("draw_chrome.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -20,16 +21,22 @@ fn tooltipButton(self: *const Editor) ?Button {
     if (self.focus) |fi| {
         if (fi < self.buttons.items.len) {
             const b = self.buttons.items[fi];
-            if (b.layer != .menu) return b;
+            if (hasTip(self, b)) return b;
         }
     }
     if (self.mouse_pane == self.tb_pane and self.hover_btn >= 0 and self.hover_btn < self.buttons.items.len) {
         if (motion.now() - self.hover_since_ms < theme.tooltip_delay) return null;
         const b = self.buttons.items[@intCast(self.hover_btn)];
-        if (b.layer == .menu or b.kind == .seg or b.kind == .thickness) return null;
+        if (!hasTip(self, b) or b.kind == .seg or b.kind == .thickness) return null;
         return b;
     }
     return null;
+}
+
+/// Menu rows say what they are themselves: only a disabled one has a
+/// tooltip, saying why.
+fn hasTip(self: *const Editor, b: Button) bool {
+    return b.layer != .menu or buttons.disabledWhy(self, b.kind) != null;
 }
 
 /// When the pending tooltip is due (0: none pending).
@@ -37,21 +44,30 @@ pub fn tooltipDueMs(self: *const Editor) i64 {
     if (self.hover_btn < 0 or self.hover_btn >= self.buttons.items.len or self.drag != .none) return 0;
     if (self.tip_drawn_for == self.hover_since_ms or self.mouse_pane != self.tb_pane) return 0;
     const b = self.buttons.items[@intCast(self.hover_btn)];
-    if (b.layer == .menu or b.kind == .seg or b.kind == .thickness) return 0;
+    if (!hasTip(self, b) or b.kind == .seg or b.kind == .thickness) return 0;
     return self.hover_since_ms + theme.tooltip_delay;
+}
+
+/// A control's tooltip: its name and shortcut, or for a disabled one its
+/// name and why it cannot be used.
+fn tipLabel(self: *const Editor, kind: buttons.ButtonKind, kb: []u8) buttons.Label {
+    const l = buttons.buttonLabel(self, kind, kb);
+    const why = buttons.disabledWhy(self, kind) orelse return l;
+    return .{ .name = l.name, .key = why };
 }
 
 pub fn tooltipRect(self: *const Editor) ?Rect {
     const b = tooltipButton(self) orelse return null;
     var kb: [32]u8 = undefined;
-    const l = buttons.buttonLabel(self, b.kind, &kb);
+    const l = tipLabel(self, b.kind, &kb);
     const fs = theme.font_small * self.uf();
     var tw = text_mod.width(fs, l.name);
     if (l.key.len > 0) tw += self.sc(8) + text_mod.width(fs, l.key);
     const th = text_mod.height(fs) + self.sc(8);
+    const pw = tw + self.sc(20);
+    if (b.layer == .menu) return besideMenu(self, b, pw, th);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
-    const pw = tw + self.sc(20);
     const x = std.math.clamp(b.rect.x + @divTrunc(b.rect.w - pw, 2), 4, @max(4, w - pw - 4));
     // away from the selection: outside the toolbar, beyond the popover
     var top = b.rect.y;
@@ -70,18 +86,30 @@ pub fn tooltipRect(self: *const Editor) ?Rect {
     return .{ .x = x, .y = y, .w = pw, .h = th };
 }
 
+/// A menu row's tooltip: level with the row, beside the menu (right, or
+/// left when there is no room).
+fn besideMenu(self: *const Editor, b: Button, pw: i32, th: i32) Rect {
+    const w: i32 = @intCast(self.pn().width);
+    const h: i32 = @intCast(self.pn().height);
+    const m = self.pop_rect;
+    var x = m.right() + self.sc(8);
+    if (x + pw > w - 4) x = @max(4, m.x - pw - self.sc(8));
+    const y = std.math.clamp(b.rect.y + @divTrunc(b.rect.h - th, 2), 4, @max(4, h - th - 4));
+    return .{ .x = x, .y = y, .w = pw, .h = th };
+}
+
 pub fn drawTooltip(self: *Editor, canvas: *Canvas) void {
     const b = tooltipButton(self) orelse return;
     self.tip_drawn_for = self.hover_since_ms;
     const r = tooltipRect(self) orelse return;
     var kb: [32]u8 = undefined;
-    const l = buttons.buttonLabel(self, b.kind, &kb);
+    const l = tipLabel(self, b.kind, &kb);
     const f = self.uf();
     const th = self.theme;
     const fs = theme.font_small * f;
     canvas.fillRoundRectAA(r.x, r.y + self.sc(2), r.w, r.h, 7.0 * f, 0x1F000000);
-    canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.pill_bg);
+    draw_chrome.drawPill(self, canvas, r, 7.0 * f);
     const ty = r.y + @divTrunc(r.h - text_mod.height(fs), 2);
     text_mod.draw(canvas, r.x + self.sc(10), ty, fs, th.pill_fg, l.name);
-    if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(fs, l.key), ty, fs, 0x99EBEBF5, l.key);
+    if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(fs, l.key), ty, fs, th.pill_muted, l.key);
 }

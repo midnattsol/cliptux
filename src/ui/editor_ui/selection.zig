@@ -15,6 +15,9 @@ const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
 const handlePoints = shapes_mod.handlePoints;
 
+/// The size pill's text: medium weight, figures that do not jiggle.
+const dims_style = text_mod.Style.medium.num();
+
 fn dimsLabel(self: *const Editor, buf: []u8) []const u8 {
     const s = self.doc.sel.?.normalized();
     const x = if (text_mod.available()) "\u{00D7}" else "x";
@@ -30,7 +33,7 @@ pub fn dimsPillRect(self: *const Editor, s: Rect) Rect {
     const label = dimsLabel(self, &buf);
     const w: i32 = @intCast(self.pn().width);
     const fs = theme.font_small * self.uf();
-    const tw = text_mod.width(fs, label);
+    const tw = text_mod.widthStyled(fs, dims_style, label);
     const ph = text_mod.height(fs) + self.sc(8);
     const pw = tw + self.sc(20);
     const fr = self.frameRect(s);
@@ -83,6 +86,9 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
     const f = self.uf();
     const th = self.theme;
     if (self.selBuf()) |s| {
+        // two tones: the light line shows on dark captures, the dark one
+        // around it on light ones
+        canvas.rectOutline(s.x - 2, s.y - 2, s.w + 4, s.h + 4, 1, th.sel_edge_outer);
         canvas.rectOutline(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 1, th.sel_edge);
         if (self.tool == .select and self.drag == .none and self.selected == null and self.tools.mode == .none) {
             for (handlePoints(s), 0..) |p, i| {
@@ -96,15 +102,15 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
             var buf: [64]u8 = undefined;
             const label = dimsLabel(self, &buf);
             const r = dimsPillRect(self, s);
-            canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.pill_bg);
-            text_mod.draw(canvas, r.x + self.sc(10), r.y + self.sc(4), theme.font_small * f, th.pill_fg, label);
+            draw_chrome.drawPill(self, canvas, r, 7.0 * f);
+            text_mod.drawStyled(canvas, r.x + self.sc(10), r.y + self.sc(4), theme.font_small * f, th.pill_fg, dims_style, label);
         }
     }
     if (self.show_hint) {
         // first run only: a quiet pill, gone at the first click or key
         self.hint_seen = true;
         const r = hintRect(self);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, ff(r.h) / 2.0, th.pill_bg);
+        draw_chrome.drawPill(self, canvas, r, ff(r.h) / 2.0);
         text_mod.draw(canvas, r.x + self.sc(16), r.y + self.sc(7), theme.font_label * f, th.pill_fg, hintText());
     }
 }

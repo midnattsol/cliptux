@@ -117,7 +117,8 @@ fn drawSizeSlider(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) vo
     text_mod.draw(canvas, pr.x + pad, ly, fs, th.muted, "Size");
     var buf: [16]u8 = undefined;
     const v = std.fmt.bufPrint(&buf, "{d} px", .{self.thickness}) catch "?";
-    text_mod.draw(canvas, pr.right() - pad - text_mod.width(fs, v), ly, fs, th.muted, v);
+    const num = text_mod.Style.regular.num();
+    text_mod.drawStyled(canvas, pr.right() - pad - text_mod.widthStyled(fs, num, v), ly, fs, th.muted, num, v);
     const knob = 9.0 * f;
     const t = ff(self.thickness - 1) / 31.0;
     const track_h = self.sc(4);
@@ -196,10 +197,15 @@ fn drawMenuContent(self: *Editor, canvas: *Canvas) void {
         if (b.kind == .cancel) {
             canvas.fillRect(r.x + self.sc(10), r.y - self.sc(5), r.w - self.sc(20), 1, th.hairline);
         }
-        const hot = (self.hover_btn >= 0 and @as(usize, @intCast(self.hover_btn)) == bi) or self.focus == bi;
-        if (hot) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.accent);
-        const fg = if (hot) th.on_accent else th.fg;
-        const sub = if (hot) theme.withAlpha(th.on_accent, 0xBF) else th.muted;
+        const under = (self.hover_btn >= 0 and @as(usize, @intCast(self.hover_btn)) == bi) or self.focus == bi;
+        const enabled = buttons.disabledWhy(self, b.kind) == null;
+        // a disabled row only shows where the keyboard focus is
+        const hot = under and enabled;
+        if (hot) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.accent_fill);
+        if (under and !enabled and self.focus == bi) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.hover);
+        const fade = if (enabled) 1 else theme.disabled_alpha;
+        const fg = theme.fade(if (hot) th.on_accent else th.fg, fade);
+        const sub = theme.fade(if (hot) theme.withAlpha(th.on_accent, 0xBF) else th.muted, fade);
         const is = self.sc(16);
         const checked = b.kind == .beautify and self.beautify.enabled;
         const icon: Icon = if (checked) .check else buttons.kindIcon(self, b.kind) orelse .more;

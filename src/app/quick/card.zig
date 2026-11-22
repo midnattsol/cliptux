@@ -65,7 +65,7 @@ fn drawHint(self: *Quick, px: []u32, bw: u32, bh: u32) void {
     var cv = Canvas.init(buf, w, h);
     const hovered = if (self.hover) |hv| hv.control == .hint else false;
     text.draw(&cv, sc(10, k), sc(5, k), 12 * k, 0xFFD0D0D6, self.hint_text);
-    text.drawStyled(&cv, sc(10, k), sc(21, k), 12 * k, if (hovered) 0xFF64B0FF else 0xFF409CFF, .bold, self.hint_link);
+    text.drawStyled(&cv, sc(10, k), sc(21, k), 12 * k, if (hovered) 0xFF64B0FF else 0xFF409CFF, .semibold, self.hint_link);
     fui.placeCard(px, bw, bh, buf, w, h, r.x, r.y, @intCast(sc(10, k)), @intCast(sc(8, k)));
 }
 
@@ -130,12 +130,12 @@ fn drawStatus(cv: *Canvas, c: *const Card, k: f64) void {
     const max_w = sc(card_w - 16 - 24, k) - icon_w;
     const shown = fui.ellipsize(&cut, fs, label, max_w);
     const h = sc(24, k);
-    const w = text.widthStyled(fs, .bold, shown) + icon_w + sc(22, k);
+    const w = text.widthStyled(fs, .semibold, shown) + icon_w + sc(22, k);
     const x = sc(8, k);
     const y = @as(i32, @intCast(cv.h)) - h - sc(8, k);
     cv.fillRoundRectAA(x, y, w, h, @as(f64, @floatFromInt(h)) / 2, 0xB8000000);
     fui.icon(cv, .check, @as(f64, @floatFromInt(x + sc(9, k))) + @as(f64, @floatFromInt(icon_w)) / 2, @as(f64, @floatFromInt(y)) + @as(f64, @floatFromInt(h)) / 2, 14 * k, fui.white);
-    text.drawStyled(cv, x + sc(13, k) + icon_w, y + @divTrunc(h - text.heightStyled(fs, .bold), 2), fs, fui.white, .bold, shown);
+    text.drawStyled(cv, x + sc(13, k) + icon_w, y + @divTrunc(h - text.heightStyled(fs, .semibold), 2), fs, fui.white, .semibold, shown);
 }
 
 /// The card's picture, scaled once per size.
@@ -187,17 +187,17 @@ fn drawPills(self: *const Quick, cv: *Canvas, acts: [2]layout.Action, fo: ?Contr
         const primary = ctl == .primary;
         const bg = if (primary) self.accent else if (hv == ctl) fui.pill_hover else fui.pill;
         cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (primary and hv == ctl) effects.over(bg, 0x24FFFFFF) else bg);
-        fui.textCentered(cv, rr, @as(f64, if (a == .show_in_files) 12 else 13) * k, if (primary) fui.white else fui.pill_text, .bold, a.label());
+        fui.textCentered(cv, rr, @as(f64, if (a == .show_in_files) 12 else 13) * k, if (primary) fui.white else fui.pill_text, .semibold, a.label());
         if (fo == ctl) shapes.roundRectRing(cv, .{ .x = rr.x - sc(2, k), .y = rr.y - sc(2, k), .w = rr.w + sc(4, k), .h = rr.h + sc(4, k) }, 10 * k, 2 * k, self.accent);
     }
 }
 
 fn drawNotice(cv: *Canvas, s: []const u8, r: Rect, k: f64) void {
-    const tw = text.widthStyled(13 * k, .bold, s) + sc(28, k);
+    const tw = text.widthStyled(13 * k, .semibold, s) + sc(28, k);
     const nh = sc(30, k);
     const nr: Rect = .{ .x = @divTrunc(r.w - tw, 2), .y = @divTrunc(r.h - nh, 2), .w = tw, .h = nh };
     cv.fillRoundRectAA(nr.x, nr.y, nr.w, nr.h, 15 * k, 0xE6000000);
-    fui.textCentered(cv, nr, 13 * k, fui.white, .bold, s);
+    fui.textCentered(cv, nr, 13 * k, fui.white, .semibold, s);
 }
 
 /// The card's opacity: fading in, fading out, or half while dragged.

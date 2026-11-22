@@ -20,8 +20,10 @@ pub const Rect = effects.Rect;
 
 /// Palette of the floating UI (dark glass, as on macOS)
 pub const veil: u32 = 0x6B000000;
-pub const btn_round: u32 = 0x33FFFFFF;
-pub const btn_round_hover: u32 = 0x55FFFFFF;
+/// round buttons over a picture: dark discs, so their white icons read
+/// on any capture (7:1 over white under the veil; 9.9:1 hovered)
+pub const btn_round: u32 = 0x66000000;
+pub const btn_round_hover: u32 = 0x8C000000;
 pub const pill: u32 = 0xEBFFFFFF;
 pub const pill_hover: u32 = 0xFFFFFFFF;
 pub const pill_text: u32 = 0xFF1D1D1F;

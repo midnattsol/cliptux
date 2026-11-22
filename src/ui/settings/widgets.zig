@@ -68,12 +68,12 @@ fn chipFill(th: Theme, hov: bool) u32 {
 
 pub fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const u8) !i32 {
     const h = ui.sc(20);
-    ui.label(x + ui.sc(2), y, h, 14, ui.th.text, .bold, title);
+    ui.label(x + ui.sc(2), y, h, 14, ui.th.text, .semibold, title);
     if (link) |l| {
         const lw = ui.width(13, .regular, l);
         const lx = x + w - lw - ui.sc(2);
         const hov = ui.hovered(lx - ui.sc(4), y, lw + ui.sc(8), h);
-        ui.label(lx, y, h, 13, if (hov) ui.th.accent_hover else ui.th.accent, .regular, l);
+        ui.label(lx, y, h, 13, if (hov) theme_mod.mix(ui.th.accent_text, ui.th.text, 0.3) else ui.th.accent_text, .regular, l);
         try ui.add(.{ .x = lx - ui.sc(4), .y = y, .w = lw + ui.sc(8), .h = h, .hit = .reset_binds, .radius = 4 });
     }
     return y + h + ui.sc(10);
@@ -147,7 +147,7 @@ fn elideLeft(ui: *const Ui, style: text.Style, s: []const u8, max_w: i32, buf: [
 /// A chip button on the right of row `r`.
 pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
     const th = ui.th;
-    const style: text.Style = if (bold) .bold else .regular;
+    const style: text.Style = if (bold) .semibold else .regular;
     const is = ui.sc(16);
     var buf: [300]u8 = undefined;
     const shown = elideLeft(ui, style, label_s, @divTrunc(r.w, 2), &buf);
@@ -231,22 +231,22 @@ pub fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {
     if ((color & 0xFFFFFF) == 0xFFFFFF or (color & 0xFFFFFF) == 0x1C1C1E) ui.c.ringAA(@as(f64, @floatFromInt(x + ui.sc(16))), cy, dot, 1.0, 0x66808080);
     var buf: [8]u8 = undefined;
     const label = std.fmt.bufPrint(&buf, "{d}", .{value}) catch "?";
-    ui.label(x + ui.sc(32), by, bs, 15, ui.th.text, .regular, label);
+    ui.label(x + ui.sc(32), by, bs, 15, ui.th.text, text.Style.regular.num(), label);
 }
 
 /// - value + on the right of row `r`.
 pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
     const bs = ui.sc(34);
-    const val_w = @max(ui.sc(64), ui.width(15, .regular, value) + ui.sc(20));
+    const val_w = @max(ui.sc(64), ui.width(15, text.Style.regular.num(), value) + ui.sc(20));
     const x = r.x + r.w - ui.sc(16) - 2 * bs - val_w;
     const by = r.y + @divTrunc(r.h - bs, 2);
     try stepButtons(ui, x, by, bs, val_w, minus, plus);
-    const tw = ui.width(15, .regular, value);
-    ui.label(x + bs + @divTrunc(val_w - tw, 2), by, bs, 15, ui.th.text, .regular, value);
+    const tw = ui.width(15, text.Style.regular.num(), value);
+    ui.label(x + bs + @divTrunc(val_w - tw, 2), by, bs, 15, ui.th.text, text.Style.regular.num(), value);
 }
 
 fn capWidth(ui: *const Ui, k: []const u8) i32 {
-    return @max(ui.sc(22), ui.width(13, .bold, k) + ui.sc(16));
+    return @max(ui.sc(22), ui.width(13, .semibold, k) + ui.sc(16));
 }
 
 /// Key caps right-aligned in row `r`; returns their left edge.
@@ -267,8 +267,8 @@ pub fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, accent: ?u32) i32 {
             ui.c.fillRoundRectAA(x, y, cw, ch, 6 * ui.f, th.line);
             ui.c.fillRoundRectAA(x, y, cw, ch - @max(1, ui.sc(1)), 6 * ui.f, th.chip);
         }
-        const tw = ui.width(13, .bold, k);
-        ui.label(x + @divTrunc(cw - tw, 2), y, ch, 13, if (accent != null) th.on_accent else th.text, .bold, k);
+        const tw = ui.width(13, .semibold, k);
+        ui.label(x + @divTrunc(cw - tw, 2), y, ch, 13, if (accent != null) th.on_accent else th.text, .semibold, k);
         x += cw + gap;
     }
     return left;
@@ -298,7 +298,7 @@ pub fn shortcutRow(ui: *Ui, card: *Card, title: []const u8, win: *Window, bind: 
     }
     rowTitle(ui, r, title, null);
     if (recording) {
-        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent);
+        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent_fill);
     } else if (bind.code == 0) {
         const s = "Not set";
         ui.label(r.x + r.w - ui.sc(16) - ui.width(13, .regular, s), r.y, r.h, 13, th.text_muted, .regular, s);

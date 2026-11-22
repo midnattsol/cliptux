@@ -21,6 +21,7 @@ const Tool = editor.Tool;
 
 pub fn onButton(ed: *Editor, kind: ui.ButtonKind) !void {
     ed.needs_render = true;
+    if (ui.disabledWhy(ed, kind) != null) return;
     switch (kind) {
         .tool => |t| try pickTool(ed, t),
         .colors => togglePopover(ed, .colors),

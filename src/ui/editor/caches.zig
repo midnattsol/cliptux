@@ -126,7 +126,7 @@ pub fn scrollTall(ed: *Editor, notches: i32) !void {
 pub fn refreshView(ed: *Editor, b: Rect) void {
     const r = Rect.intersect(b, ed.screenRect()) orelse return;
     view_mod.resample(ed.layer, ed.img.width, ed.img.height, ed.pn().view, ed.pn().viewc, ed.pn().width, ed.pn().height, r);
-    const keep: u32 = 255 - (editor.dim_color >> 24);
+    const keep = ed.dim_keep;
     const w: usize = ed.pn().width;
     var y: usize = @intCast(r.y);
     while (y < @as(usize, @intCast(r.bottom()))) : (y += 1) {

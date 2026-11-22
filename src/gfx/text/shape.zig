@@ -8,6 +8,7 @@ const ttf = @import("../ttf.zig");
 const utf8 = @import("../utf8.zig");
 const bidi = @import("../bidi.zig");
 const otl = @import("../otl.zig");
+const tabular = @import("tabular.zig");
 const state_mod = @import("state.zig");
 const layout_mod = @import("layout.zig");
 
@@ -55,7 +56,7 @@ pub fn shapePara(st: *State, size_px: f64, style: Style, s: []const u8, dir: bid
     try prepareDrawn(st, has.arabic);
     try assignSlots(st, style, has.complex);
     _ = st.styleSlot(style);
-    const smear: f64 = if (style == .bold and st.faux_bold) @floatFromInt(state_mod.fauxBoldOffset(size_px)) else 0;
+    const smear: f64 = if (st.fauxBold(style)) @floatFromInt(state_mod.fauxBoldOffset(size_px)) else 0;
     sc.lg.clearRetainingCapacity();
     try sc.lg.ensureTotalCapacity(st.alloc, sc.cps.items.len);
     try appendGlyphs(st, size_px, style, smear);
@@ -191,9 +192,19 @@ fn appendSimpleRun(st: *State, size_px: f64, style: Style, smear: f64, i: usize,
             if (st.slots[g.slot].font.rasterize(g.gid, size_px)) |gl| {
                 g.adv = gl.advance + smear;
             } else |_| {}
+            if (style.tabular) tabularDigit(st, &g, size_px, smear);
         }
         sc.lg.appendAssumeCapacity(g);
     }
+}
+
+/// A digit drawn as its font's tabular figure: one advance for all ten.
+fn tabularDigit(st: *State, g: *LGlyph, size_px: f64, smear: f64) void {
+    const d = tabular.digitOf(g.cp) orelse return;
+    const p = st.digits(g.slot).place(&st.slots[g.slot].font, d, size_px) orelse return;
+    g.gid = p.gid;
+    g.adv = p.adv + smear;
+    g.dx = p.dx;
 }
 
 /// Script of the shaping run character `i` belongs to: its own, or for a

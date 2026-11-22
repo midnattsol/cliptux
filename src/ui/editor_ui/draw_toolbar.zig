@@ -73,30 +73,32 @@ fn drawActiveFill(self: *const Editor, canvas: *Canvas, now: i64) void {
         if (b.kind == .tool and buttons.toolButtonActive(self, b.kind.tool)) {
             const ax = tb.x + @as(i32, @intFromFloat(@round(self.act_x.at(now))));
             const ay = tb.y + @as(i32, @intFromFloat(@round(self.act_y.at(now))));
-            canvas.fillRoundRectAA(ax, ay, b.rect.w, b.rect.h, theme.button_radius * self.uf(), self.theme.accent);
+            canvas.fillRoundRectAA(ax, ay, b.rect.w, b.rect.h, theme.button_radius * self.uf(), self.theme.accent_fill);
         }
     }
 }
 
 fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) void {
     const th = self.theme;
-    const hv = hit.hoverAmount(self, bi);
+    const enabled = buttons.disabledWhy(self, b.kind) == null;
+    const hv = if (enabled) hit.hoverAmount(self, bi) else 0;
     const f = self.uf();
     const r = b.rect;
     switch (b.kind) {
-        .copy => barkit.primary(canvas, r, f, theme.mix(th.accent, th.accent_hover, hv), th.on_accent, .{ .icon = .copy }, "Copy"),
+        .copy => barkit.primary(canvas, r, f, theme.mix(th.accent_fill, th.accent_fill_hover, hv), th.on_accent, .{ .icon = .copy }, "Copy"),
         .colors => drawColorsButton(self, canvas, r, if (buttons.buttonActive(self, b.kind)) 1 else hv),
         .background => {
             barkit.fill(canvas, r, f, th, .plain, hv);
             drawBackgroundSwatch(self, canvas, r.expand(-self.sc(8)));
         },
         else => if (primaryOf(b.kind)) |l| {
-            barkit.primary(canvas, r, f, theme.mix(th.accent, th.accent_hover, hv), th.on_accent, .{ .icon = l.icon }, l.text);
+            barkit.primary(canvas, r, f, theme.mix(th.accent_fill, th.accent_fill_hover, hv), th.on_accent, .{ .icon = l.icon }, l.text);
         } else {
             const look = lookOf(self, b.kind);
             // the active tool's fill slides on its own (drawActiveFill)
             if (!(look == .selected and b.kind == .tool)) barkit.fill(canvas, r, f, th, look, hv);
-            const fg = barkit.ink(th, look, false);
+            const ink = barkit.ink(th, look, false);
+            const fg = if (enabled) ink else theme.fade(ink, theme.disabled_alpha);
             if (buttons.kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
         },
     }

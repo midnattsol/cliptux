@@ -109,7 +109,7 @@ fn paintCountdown(cv: *render.Canvas, k: f64, st: *const State) void {
     const fs = 22 * k;
     const digit = std.fmt.bufPrint(&buf, "{d}", .{st.count}) catch "";
     const cy = @divTrunc(cv.h, 2);
-    text.drawStyled(cv, sc(18, k), cy - @divTrunc(text.heightStyled(fs, .bold), 2), fs, red, .bold, digit);
+    text.drawStyled(cv, sc(18, k), cy - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, red, text.Style.semibold.num(), digit);
     const label = if (st.hover == .skip) "Start now" else "Recording starts\u{2026}";
     const ls = 13 * k;
     text.draw(cv, sc(46, k), cy - @divTrunc(text.height(ls), 2), ls, if (st.hover == .skip) fg else muted, label);
@@ -124,7 +124,7 @@ fn paintRecording(cv: *render.Canvas, k: f64, st: *const State) void {
     var buf: [32]u8 = undefined;
     const fs = 15 * k;
     const t = formatTime(&buf, st.elapsed_ms);
-    text.drawStyled(cv, sc(32, k), @as(i32, @intFromFloat(cy)) - @divTrunc(text.heightStyled(fs, .bold), 2), fs, if (st.paused) muted else fg, .bold, t);
+    text.drawStyled(cv, sc(32, k), @as(i32, @intFromFloat(cy)) - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, if (st.paused) muted else fg, text.Style.semibold.num(), t);
     const sep_x = sc(buttonRect(.pause).x - 6, k);
     cv.fillRect(sep_x, sc(12, k), @max(1, sc(1, k)), sc(pill_h - 24, k), 0xFF3A3A40);
     paintPause(cv, k, st);

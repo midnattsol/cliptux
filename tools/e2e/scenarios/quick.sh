@@ -239,7 +239,7 @@ history_panel() {
     pkill -f "shotlet quick" 2>/dev/null
     SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
     check "Recent captures lists both" wait_log 5 "history: 2 captures"
-    check "  ... without a search field when Tesseract is missing" wait_log 5 "text search off|text search on"
+    check "  ... search on, or shown disabled without Tesseract" wait_log 5 "text search off|text search on"
     sleep 1
     shot 0 panel
     keys tab

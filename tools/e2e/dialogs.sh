@@ -2,6 +2,9 @@
 
 # --- portal dialogs (xdg-desktop-portal-gnome), found by colour
 accent=3584e4 # Adwaita's accent: default buttons, checkboxes
+# the editor's fills under white text: that accent darkened for contrast
+# (theme.accentFill)
+accent_fill=2f76cb
 # wait_button MON [SECONDS]: wait for an accent-coloured button (at
 # least 40 px wide) on MON; its centre lands in BX, BY
 wait_button() {
@@ -18,8 +21,8 @@ wait_button() {
     echo "  no dialog button on monitor $1" >&2
     return 1
 }
-# wait_chooser MON: the editor's Copy button wears the accent too, so
-# first let the editor close, then wait for the dialog's button
+# wait_chooser MON: the editor's Copy button wears a shade of the accent,
+# so first let the editor close, then wait for the dialog's button
 wait_chooser() {
     local i
     for i in $(seq 1 25); do

@@ -36,7 +36,7 @@ pub const Look = enum {
 pub fn fill(cv: *Canvas, r: Rect, f: f64, th: Theme, look: Look, hover: f64) void {
     const rad = theme.button_radius * f;
     switch (look) {
-        .selected => cv.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.accent),
+        .selected => cv.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.accent_fill),
         .pressed, .toggled => cv.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, th.pressed),
         .plain => {},
     }
@@ -48,7 +48,7 @@ pub fn ink(th: Theme, look: Look, disabled: bool) u32 {
     if (disabled) return th.muted;
     return switch (look) {
         .selected => th.on_accent,
-        .toggled => th.accent,
+        .toggled => th.accent_text,
         .plain, .pressed => th.fg,
     };
 }
@@ -64,7 +64,7 @@ const lead_px = 16;
 
 /// The width of a prominent button with `label`.
 pub fn primaryWidth(f: f64, label: []const u8) i32 {
-    return sc(10 + lead_px + 6, f) + text.widthStyled(theme.font_label * f, .bold, label) + sc(14, f);
+    return sc(10 + lead_px + 6, f) + text.widthStyled(theme.font_label * f, .semibold, label) + sc(14, f);
 }
 
 /// The prominent button: `bg` filled, `lead` and a bold `label` in `fg`.
@@ -80,7 +80,7 @@ pub fn primary(cv: *Canvas, r: Rect, f: f64, bg: u32, fg: u32, lead: Lead, label
         },
     }
     const fs = theme.font_label * f;
-    text.drawStyled(cv, lx + is + sc(6, f), r.y + @divTrunc(r.h - text.heightStyled(fs, .bold), 2), fs, fg, .bold, label);
+    text.drawStyled(cv, lx + is + sc(6, f), r.y + @divTrunc(r.h - text.heightStyled(fs, .semibold), 2), fs, fg, .semibold, label);
 }
 
 /// A group separator 1 px wide at x, from y, `h` tall.
@@ -96,6 +96,6 @@ test "a prominent button fits its label and the inks read on their fills" {
     const th = Theme.get(false, null);
     try std.testing.expect(primaryWidth(1, "Record") > primaryWidth(1, "Crop"));
     try std.testing.expectEqual(th.on_accent, ink(th, .selected, false));
-    try std.testing.expectEqual(th.accent, ink(th, .toggled, false));
+    try std.testing.expectEqual(th.accent_text, ink(th, .toggled, false));
     try std.testing.expectEqual(th.muted, ink(th, .toggled, true));
 }

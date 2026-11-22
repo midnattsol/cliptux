@@ -10,6 +10,7 @@ const text = @import("../../gfx/text.zig");
 const effects = @import("../../gfx/effects.zig");
 const shapes = @import("../../ui/shapes.zig");
 const fui = @import("../../ui/floatui.zig");
+const theme = @import("../../ui/theme.zig");
 const layout = @import("layout.zig");
 const panel_mod = @import("panel.zig");
 
@@ -47,7 +48,7 @@ pub fn render(self: *Panel) !void {
     var cv = Canvas.init(panel, pw, ph);
 
     drawHeader(self, &cv, kk);
-    if (self.searchable) drawSearch(self, &cv, kk);
+    drawSearch(self, &cv, kk);
     try drawGrid(self, panel, pw, ph, kk);
     if (self.selected) |si| {
         drawActions(self, &cv, &self.items.items[si], kk);
@@ -65,7 +66,7 @@ pub fn render(self: *Panel) !void {
 /// Title and the close button.
 fn drawHeader(self: *const Panel, cv: *Canvas, kk: f64) void {
     const th = self.theme;
-    text.drawStyled(cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .bold, "Recent captures");
+    text.drawStyled(cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .semibold, "Recent captures");
     const xr = self.closeRect();
     const xcx = (@as(f64, @floatFromInt(xr.x)) + 11) * kk;
     const xcy = (@as(f64, @floatFromInt(xr.y)) + 11) * kk;
@@ -73,14 +74,19 @@ fn drawHeader(self: *const Panel, cv: *Canvas, kk: f64) void {
     fui.icon(cv, .close, xcx, xcy, 14 * kk, th.muted);
 }
 
+/// The search field; without Tesseract it shows dimmed, takes no typing
+/// and says why.
 fn drawSearch(self: *const Panel, cv: *Canvas, kk: f64) void {
     const th = self.theme;
     const y = s(self.searchTop(), kk);
-    cv.fillRoundRectAA(s(inset, kk), y, s(panel_w - 2 * inset, kk), s(field_h, kk), 8 * kk, th.field);
-    fui.icon(cv, .search, @as(f64, @floatFromInt(inset + 17)) * kk, @as(f64, @floatFromInt(y)) + 16 * kk, 14 * kk, th.muted);
+    const k: f64 = if (self.searchable) 1 else theme.disabled_alpha;
+    cv.fillRoundRectAA(s(inset, kk), y, s(panel_w - 2 * inset, kk), s(field_h, kk), 8 * kk, theme.fade(th.field, k));
+    fui.icon(cv, .search, @as(f64, @floatFromInt(inset + 17)) * kk, @as(f64, @floatFromInt(y)) + 16 * kk, 14 * kk, theme.fade(th.muted, k));
     const ty = y + @divTrunc(s(field_h, kk) - text.height(13 * kk), 2);
     if (self.search.items.len == 0) {
-        text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.muted, "Search text in captures");
+        const hint = if (self.searchable) "Search text in captures" else "Search needs Tesseract (not installed)";
+        // the reason stays legible: it is all the field has to say
+        text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.muted, hint);
     } else {
         text.draw(cv, s(inset + 32, kk), ty, 13 * kk, th.fg, self.search.items);
     }
@@ -195,7 +201,7 @@ fn drawClear(self: *const Panel, cv: *Canvas, kk: f64) void {
     footerLine(self, cv, kk);
     const r = sr(self.clearRect(), kk);
     if (self.hover_clear) cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 7 * kk, th.hover);
-    fui.textCentered(cv, r, 12 * kk, if (self.hover_clear) destructive else th.muted, .regular, "Clear history\u{2026}");
+    fui.textCentered(cv, r, 12 * kk, if (self.hover_clear) theme.legible(0xFFFF453A, th.panel, theme.aa_text) else th.muted, .regular, "Clear history\u{2026}");
 }
 
 /// "Clear N captures?" with Cancel and a destructive Clear.
@@ -207,24 +213,20 @@ fn drawConfirm(self: *const Panel, cv: *Canvas, kk: f64) void {
     var buf: [48]u8 = undefined;
     const n = self.items.items.len;
     const q = std.fmt.bufPrint(&buf, "Clear {d} capture{s}?", .{ n, if (n == 1) "" else "s" }) catch "Clear all?";
-    text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .bold, q);
+    text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .semibold, q);
     cv.fillRoundRectAA(cancel.x, cancel.y, cancel.w, cancel.h, 7 * kk, if (self.hover_confirm == .cancel) th.hover else th.field);
     fui.textCentered(cv, cancel, 12 * kk, th.fg, .regular, "Cancel");
-    const red = if (self.hover_confirm == .clear) destructive_hover else destructive;
+    const red = if (self.hover_confirm == .clear) theme.destructive_fill_hover else theme.destructive_fill;
     cv.fillRoundRectAA(clear.x, clear.y, clear.w, clear.h, 7 * kk, red);
-    fui.textCentered(cv, clear, 12 * kk, fui.white, .bold, "Clear");
+    fui.textCentered(cv, clear, 12 * kk, fui.white, .semibold, "Clear");
 }
 
-/// The system red of destructive buttons, and pressed-looking on hover.
-const destructive: u32 = 0xFFFF453A;
-const destructive_hover: u32 = 0xFFD93A30;
-
 fn drawNotice(self: *const Panel, cv: *Canvas, pw: u32, ph: u32, kk: f64) void {
-    const nw = text.widthStyled(13 * kk, .bold, self.notice) + s(28, kk);
+    const nw = text.widthStyled(13 * kk, .semibold, self.notice) + s(28, kk);
     const nh = s(30, kk);
     const nr: Rect = .{ .x = @divTrunc(@as(i32, @intCast(pw)) - nw, 2), .y = @as(i32, @intCast(ph)) - nh - s(actions_h + 12, kk), .w = nw, .h = nh };
     cv.fillRoundRectAA(nr.x, nr.y, nr.w, nr.h, 15 * kk, 0xE6000000);
-    fui.textCentered(cv, nr, 13 * kk, fui.white, .bold, self.notice);
+    fui.textCentered(cv, nr, 13 * kk, fui.white, .semibold, self.notice);
 }
 
 /// blitRounded onto an opaque buffer, clipped (rows may fall outside).

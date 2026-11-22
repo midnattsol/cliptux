@@ -89,13 +89,13 @@ fn badge(cv: *render.Canvas, k: f64, v: *const View) void {
     const t = control_draw.formatTime(&tb, v.duration_ms + 500);
     const s = if (v.gif) std.fmt.bufPrint(&buf, "GIF \u{00B7} {s}", .{t}) catch t else t;
     const fs = 11.5 * k;
-    const w = text.widthStyled(fs, .bold, s) + sc(14, k) + sc(14, k);
+    const w = text.widthStyled(fs, .semibold, s) + sc(14, k) + sc(14, k);
     const h = sc(22, k);
     const x = cv.w - w - sc(8, k);
     const y = if (v.hovered) sc(8 + 26 + 6, k) else cv.h - h - sc(8, k);
     cv.fillRoundRectAA(x, y, w, h, 11 * k, 0xCC000000);
     glyphs.draw(cv, .play, x + sc(5, k), y + @divTrunc(h - sc(12, k), 2), sc(12, k), 0xFFFFFFFF);
-    text.drawStyled(cv, x + sc(19, k), y + @divTrunc(h - text.heightStyled(fs, .bold), 2), fs, 0xFFFFFFFF, .bold, s);
+    text.drawStyled(cv, x + sc(19, k), y + @divTrunc(h - text.heightStyled(fs, .semibold), 2), fs, 0xFFFFFFFF, .semibold, s);
 }
 
 fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
@@ -111,16 +111,16 @@ fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
         const r = controlRect(c);
         const rr: Rect = .{ .x = sc(r.x, k), .y = sc(r.y, k), .w = sc(r.w, k), .h = sc(r.h, k) };
         cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (v.hover == c) fui.pill_hover else fui.pill);
-        fui.textCentered(cv, rr, 13 * k, fui.pill_text, .bold, if (c == .copy) "Copy" else "Save as\u{2026}");
+        fui.textCentered(cv, rr, 13 * k, fui.pill_text, .semibold, if (c == .copy) "Copy" else "Save as\u{2026}");
     }
 }
 
 fn notice(cv: *render.Canvas, k: f64, s: []const u8) void {
-    const tw = text.widthStyled(13 * k, .bold, s) + sc(28, k);
+    const tw = text.widthStyled(13 * k, .semibold, s) + sc(28, k);
     const nh = sc(30, k);
     const nr: Rect = .{ .x = @divTrunc(cv.w - tw, 2), .y = @divTrunc(cv.h - nh, 2), .w = tw, .h = nh };
     cv.fillRoundRectAA(nr.x, nr.y, nr.w, nr.h, 15 * k, 0xE6000000);
-    fui.textCentered(cv, nr, 13 * k, fui.white, .bold, s);
+    fui.textCentered(cv, nr, 13 * k, fui.white, .semibold, s);
 }
 
 test "card controls hit" {
