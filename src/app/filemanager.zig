@@ -3,7 +3,7 @@
 //! the file selected.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const transfer = @import("../ui/transfer.zig");
 
 /// Ask the file manager to show `path`. Fire and forget: only a failure

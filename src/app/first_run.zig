@@ -2,12 +2,12 @@
 //! focused app for consent, so Shotlet asks from a small window of its own.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const portal = @import("../platform/portal.zig");
-const sys = @import("../platform/sys.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const portal = @import("../platform/linux/portal.zig");
+const sys = @import("../platform/linux/sys.zig");
 const Env = @import("env.zig").Env;
 
-const window = @import("../ui/window.zig");
+const window = @import("../platform/linux/window.zig");
 const render = @import("../gfx/render.zig");
 
 /// First-run consent: open a small focused window, re-request the screenshot

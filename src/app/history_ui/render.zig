@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const clock = @import("../clock.zig");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const text = @import("../../gfx/text.zig");
 const effects = @import("../../gfx/effects.zig");
 const shapes = @import("../../ui/shapes.zig");

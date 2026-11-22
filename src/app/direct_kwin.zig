@@ -3,8 +3,8 @@
 //! refusal reasons, and the image KWin writes into a pipe.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const sys = @import("../platform/sys.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const sys = @import("../platform/linux/sys.zig");
 const direct = @import("direct.zig");
 const Frame = direct.Frame;
 

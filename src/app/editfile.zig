@@ -6,13 +6,13 @@ const env_mod = @import("env.zig");
 const config = @import("config.zig");
 const capture = @import("capture.zig");
 const shot = @import("shot.zig");
-const portal = @import("../platform/portal.zig");
+const portal = @import("../platform/linux/portal.zig");
 const imgload = @import("../gfx/imgload.zig");
 const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
-    const window = @import("../ui/window.zig");
+    const window = @import("../platform/linux/window.zig");
     var img = imgload.loadFile(gpa, path) catch |err| {
         std.log.err("edit: cannot open {s}: {t}", .{ path, err });
         return err;

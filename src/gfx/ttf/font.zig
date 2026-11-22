@@ -2,7 +2,7 @@
 //! of rasterized glyphs.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const cff_mod = @import("../cff.zig");
 const otl = @import("../otl.zig");
 const bytes = @import("bytes.zig");

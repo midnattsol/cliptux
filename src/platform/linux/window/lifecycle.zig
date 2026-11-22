@@ -1,7 +1,7 @@
 //! Opening the window's surfaces (one, or one per output), waiting for
 //! their first configure, closing them and tearing everything down.
 
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const output = @import("output.zig");

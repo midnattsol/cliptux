@@ -191,7 +191,7 @@ fn setInt(ctx: *Ctx, name: [*:0]const u8, value: i64) !void {
 
 test "libav writes a playable MP4 when the libraries are there" {
     if (!av.available()) return error.SkipZigTest;
-    const sys = @import("../platform/sys.zig");
+    const sys = @import("../platform/linux/sys.zig");
     const gpa = std.testing.allocator;
     const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-av");
     defer gpa.free(dir);

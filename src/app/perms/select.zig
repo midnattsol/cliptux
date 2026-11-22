@@ -4,7 +4,7 @@
 //! is never Shotlet's.
 
 const std = @import("std");
-const permstore = @import("../../platform/permstore.zig");
+const permstore = @import("../../platform/linux/permstore.zig");
 const app_id = @import("../../app_id.zig").app_id;
 
 pub const Origin = enum { current, older };

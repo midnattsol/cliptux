@@ -6,8 +6,8 @@
 //! the session. Without either, the person scrolls by hand.
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
-const sys = @import("../../platform/sys.zig");
+const wl = @import("../../platform/linux/wayland.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const geom = @import("../modes/geom.zig");
 
 const vp_mgr = struct {

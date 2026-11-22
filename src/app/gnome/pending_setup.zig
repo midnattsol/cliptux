@@ -7,7 +7,7 @@
 //! answer, once.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env_mod = @import("../env.zig");
 const Env = env_mod.Env;
 

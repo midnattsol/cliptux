@@ -8,14 +8,14 @@
 //!   it. Elsewhere, the commands to bind in the desktop's settings.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const env_mod = @import("../app/env.zig");
 const gnome = @import("../app/gnome.zig");
 const gsettings = @import("../app/gsettings.zig");
 const mode = @import("../app/modes/mode.zig");
 const msettings = @import("../app/modes/settings.zig");
 const S = @import("settings.zig");
-const window = @import("window.zig");
+const window = @import("../platform/linux/window.zig");
 
 pub const Hit = union(enum) {
     after,

@@ -15,14 +15,14 @@
 //! screen. With layer shell it is an overlay in the top-right corner.
 
 const std = @import("std");
-const wl = @import("../platform/wayland.zig");
-const sys = @import("../platform/sys.zig");
+const wl = @import("../platform/linux/wayland.zig");
+const sys = @import("../platform/linux/sys.zig");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const effects = @import("../gfx/effects.zig");
 const fui = @import("floatui.zig");
 const theme = @import("theme.zig");
-const window = @import("window.zig");
+const window = @import("../platform/linux/window.zig");
 const Rect = @import("../app/modes/geom.zig").Rect;
 
 pub const title = "shotlet:scroll";

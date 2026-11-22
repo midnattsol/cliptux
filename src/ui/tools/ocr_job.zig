@@ -4,7 +4,7 @@
 //! closes. Without libtesseract both say how to install it.
 
 const std = @import("std");
-const ocr = @import("../../platform/ocr.zig");
+const ocr = @import("../../platform/linux/tesseract.zig");
 const page_mod = @import("../../ocr/page.zig");
 const reflow = @import("../../ocr/reflow.zig");
 const shapes = @import("../shapes.zig");

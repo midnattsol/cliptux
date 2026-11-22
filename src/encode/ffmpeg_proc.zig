@@ -7,7 +7,7 @@
 const std = @import("std");
 const proc = @import("proc.zig");
 const yuv = @import("yuv.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 
 pub const Quality = @import("av_mp4.zig").Quality;
 

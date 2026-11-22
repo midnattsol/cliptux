@@ -4,8 +4,8 @@
 //! new extensions at login), or active.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
-const sys = @import("../../platform/sys.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const Env = @import("../env.zig").Env;
 const extension = @import("extension.zig");
 const shell_settings = @import("shell_settings.zig");

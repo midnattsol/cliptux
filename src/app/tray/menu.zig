@@ -2,7 +2,7 @@
 //! a flat list of items whose clicks become MenuActions.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const MenuAction = @import("../tray.zig").MenuAction;
 
 pub const path = "/MenuBar";

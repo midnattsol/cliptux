@@ -4,9 +4,9 @@
 //! so the consent is asked once.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const portal = @import("../platform/portal.zig");
-const sys = @import("../platform/sys.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const portal = @import("../platform/linux/portal.zig");
+const sys = @import("../platform/linux/sys.zig");
 
 const iface = "org.freedesktop.portal.ScreenCast";
 

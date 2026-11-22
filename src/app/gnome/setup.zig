@@ -4,7 +4,7 @@
 //! stderr; a line about the outcome is kept for the Settings window.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const gsettings = @import("../gsettings.zig");
 const Env = @import("../env.zig").Env;
 const extension = @import("extension.zig");

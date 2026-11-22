@@ -14,7 +14,7 @@
 const std = @import("std");
 const config = @import("../app/config.zig");
 const env_mod = @import("../app/env.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const sink = @import("../encode/sink.zig");
 const quantize = @import("../encode/quantize.zig");
 

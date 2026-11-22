@@ -13,8 +13,8 @@
 
 const std = @import("std");
 const capture = @import("capture.zig");
-const dbus = @import("../platform/dbus.zig");
-const sys = @import("../platform/sys.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const sys = @import("../platform/linux/sys.zig");
 const gnome = @import("gnome.zig");
 const geom = @import("modes/geom.zig");
 const env_mod = @import("env.zig");

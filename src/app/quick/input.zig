@@ -3,8 +3,8 @@
 //! card's life (fade in, stay, fade out).
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const window = @import("../../ui/window.zig");
+const sys = @import("../../platform/linux/sys.zig");
+const window = @import("../../platform/linux/window.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 

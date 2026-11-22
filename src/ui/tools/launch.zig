@@ -11,7 +11,7 @@ pub var text_capture = false;
 pub var select_all = false;
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 
 /// With the GNOME integration the shell takes the screenshot and starts a
 /// new shotlet on it: a text capture leaves a note for that one.

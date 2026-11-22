@@ -2,7 +2,7 @@
 //! and malformed values never fail; they keep the default.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const binds = @import("../binds.zig");
 const model = @import("model.zig");
 const location = @import("location.zig");

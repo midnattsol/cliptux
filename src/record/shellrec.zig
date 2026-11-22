@@ -5,7 +5,7 @@
 //! top bar's stop button and the record shortcut.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const region = @import("region.zig");
 
 const bus_name = "dev.shotlet.Shell1";

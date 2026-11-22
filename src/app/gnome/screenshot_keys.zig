@@ -3,7 +3,7 @@
 //! ~/.config/shotlet/gnome-moved-keys) and giving it back exactly.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env_mod = @import("../env.zig");
 const gsettings = @import("../gsettings.zig");
 const custom = @import("custom.zig");

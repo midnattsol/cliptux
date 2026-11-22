@@ -3,8 +3,8 @@
 //! scale and frame events of each surface's objects.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const buffers = @import("buffers.zig");
 const scale = @import("scale.zig");
@@ -157,7 +157,7 @@ fn createToplevel(w: *Window, s: *Surface, title: []const u8, opts: OpenOptions,
     try c.request(w.globals.wm_base, wl.xdg_wm_base.get_xdg_surface, &.{ .{ .new_id = s.xdg_surf }, .{ .object = s.wl_surface } });
     s.toplevel = c.newId();
     try c.request(s.xdg_surf, wl.xdg_surface.get_toplevel, &.{.{ .new_id = s.toplevel }});
-    try c.request(s.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = @import("../../app_id.zig").app_id }});
+    try c.request(s.toplevel, wl.xdg_toplevel.set_app_id, &.{.{ .string = @import("../../../app_id.zig").app_id }});
     try c.request(s.toplevel, wl.xdg_toplevel.set_title, &.{.{ .string = title }});
     if (opts.fullscreen) {
         try c.request(s.toplevel, wl.xdg_toplevel.set_fullscreen, &.{.{ .object = output_id }});

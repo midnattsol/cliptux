@@ -7,12 +7,12 @@
 
 const std = @import("std");
 const env_mod = @import("env.zig");
-const sys = @import("../platform/sys.zig");
-const wl = @import("../platform/wayland.zig");
-const portal = @import("../platform/portal.zig");
+const sys = @import("../platform/linux/sys.zig");
+const wl = @import("../platform/linux/wayland.zig");
+const portal = @import("../platform/linux/portal.zig");
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
-const window = @import("../ui/window.zig");
+const window = @import("../platform/linux/window.zig");
 const fui = @import("../ui/floatui.zig");
 const theme = @import("../ui/theme.zig");
 const icons = @import("../ui/icons.zig");

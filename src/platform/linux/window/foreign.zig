@@ -3,7 +3,7 @@
 //! portal's file chooser ("wayland:HANDLE" as its parent_window).
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const events = @import("events.zig");
 

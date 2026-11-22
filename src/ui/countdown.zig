@@ -6,12 +6,12 @@
 //! the compositor to show that, so it is never in the picture.
 
 const std = @import("std");
-const wl = @import("../platform/wayland.zig");
-const sys = @import("../platform/sys.zig");
+const wl = @import("../platform/linux/wayland.zig");
+const sys = @import("../platform/linux/sys.zig");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const fui = @import("floatui.zig");
-const window = @import("window.zig");
+const window = @import("../platform/linux/window.zig");
 
 const size = 132;
 

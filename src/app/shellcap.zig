@@ -16,7 +16,7 @@
 const std = @import("std");
 const capture = @import("capture.zig");
 const png = @import("../gfx/png.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 
 pub const max_monitors = 16;
 

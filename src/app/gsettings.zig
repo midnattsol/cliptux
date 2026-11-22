@@ -4,7 +4,7 @@
 //! text is parsed and written here for strings and string arrays only.
 
 const std = @import("std");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const Env = @import("env.zig").Env;
 
 /// Run `gsettings [--schemadir DIR] ARGS...`; its stdout (owned), or an

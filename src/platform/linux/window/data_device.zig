@@ -3,10 +3,10 @@
 //! taking drops onto our surfaces (Window.accept_mimes).
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
-const transfer = @import("../transfer.zig");
+const transfer = @import("../../../ui/transfer.zig");
 
 const Window = window.Window;
 

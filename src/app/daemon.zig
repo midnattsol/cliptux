@@ -4,9 +4,9 @@
 //! io.github.midnattsol.Shotlet (its app id).
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const portal = @import("../platform/portal.zig");
-const sys = @import("../platform/sys.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const portal = @import("../platform/linux/portal.zig");
+const sys = @import("../platform/linux/sys.zig");
 const env_mod = @import("env.zig");
 const gnome = @import("gnome.zig");
 const Env = env_mod.Env;

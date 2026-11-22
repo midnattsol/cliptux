@@ -6,8 +6,8 @@
 //! ours) knows, so nobody else on the bus can pass windows off as KWin's.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
-const sys = @import("../../platform/sys.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env_mod = @import("../env.zig");
 
 const iface = "dev.shotlet.WinRects";

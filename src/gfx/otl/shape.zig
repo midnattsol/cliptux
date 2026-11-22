@@ -318,7 +318,7 @@ test "one optional feature, from the default script, on a hand-built GSUB" {
 
 test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
     const alloc = std.testing.allocator;
-    const sys = @import("../../platform/sys.zig");
+    const sys = @import("../../platform/linux/sys.zig");
     const bidi = @import("../bidi.zig");
     const seeds = [_]struct { path: []const u8, iters: usize }{
         .{ .path = "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", .iters = 300 },

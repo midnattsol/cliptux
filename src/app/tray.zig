@@ -3,7 +3,7 @@
 //! menu object lives in tray/menu.zig.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const render = @import("../gfx/render.zig");
 
 const sni_path = "/StatusNotifierItem";
@@ -326,7 +326,7 @@ fn testCall(path: []const u8, iface: []const u8, member: []const u8, body: []con
 
 test "tray answers with the declared types, and errors for unknown objects" {
     const alloc = std.testing.allocator;
-    const fds = try @import("../platform/sys.zig").socketPair();
+    const fds = try @import("../platform/linux/sys.zig").socketPair();
     var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
     defer host.deinit();
     var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
@@ -396,7 +396,7 @@ test "tray answers with the declared types, and errors for unknown objects" {
 
 test "menu items map to their actions, Recent captures included" {
     const alloc = std.testing.allocator;
-    const fds = try @import("../platform/sys.zig").socketPair();
+    const fds = try @import("../platform/linux/sys.zig").socketPair();
     var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
     defer host.deinit();
     var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };

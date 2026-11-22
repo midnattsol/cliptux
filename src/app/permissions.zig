@@ -6,7 +6,7 @@
 //! the next login. Reset is perms/reset.zig.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const Env = @import("env.zig").Env;
 const config = @import("config.zig");
 const gnome = @import("gnome.zig");

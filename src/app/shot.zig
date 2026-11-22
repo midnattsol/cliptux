@@ -8,11 +8,11 @@ const capture = @import("capture.zig");
 const direct = @import("direct.zig");
 const capture_path = @import("capture_path.zig");
 const config = @import("config.zig");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const env_mod = @import("env.zig");
-const portal = @import("../platform/portal.zig");
+const portal = @import("../platform/linux/portal.zig");
 const png = @import("../gfx/png.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const keep_mod = @import("keep.zig");
 const history = @import("history.zig");
 const annot = @import("annot.zig");
@@ -28,7 +28,7 @@ const dialog = @import("shot/dialog.zig");
 const next = @import("shot/next.zig");
 const winrects = @import("winrects.zig");
 const screencast = @import("shot/screencast.zig").screencast;
-const window = @import("../ui/window.zig");
+const window = @import("../platform/linux/window.zig");
 const editor_mod = @import("../ui/editor.zig");
 const Env = env_mod.Env;
 
@@ -42,7 +42,7 @@ comptime {
 }
 
 fn warmupPw() void {
-    _ = @import("../platform/pw.zig").available();
+    _ = @import("../platform/linux/pw.zig").available();
 }
 
 pub fn nowMs() i64 {
@@ -376,7 +376,7 @@ pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
     if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
         if (tryDirect(gpa, env, conn)) |cap| return cap;
     }
-    if (@import("../platform/pw.zig").available()) {
+    if (@import("../platform/linux/pw.zig").available()) {
         switch (screencast(gpa, env, conn, cfg)) {
             .granted => |cap| {
                 std.log.info("capture path: portal (ScreenCast)", .{});

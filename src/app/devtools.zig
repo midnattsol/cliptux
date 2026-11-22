@@ -2,13 +2,13 @@
 //! test-window, test-capture, test-grab, test-font, test-decode.
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const portal = @import("../platform/portal.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const portal = @import("../platform/linux/portal.zig");
 const png = @import("../gfx/png.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const Env = @import("env.zig").Env;
 const nowMs = @import("shot.zig").nowMs;
-const pw = @import("../platform/pw.zig");
+const pw = @import("../platform/linux/pw.zig");
 const capture = @import("capture.zig");
 const stitchStreams = @import("shot/screencast.zig").stitchStreams;
 const text = @import("../gfx/text.zig");
@@ -31,7 +31,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]
 
 /// `test-window`: fullscreen gradient for ~3s, Esc to close.
 fn testWindow(gpa: std.mem.Allocator, env: Env) !void {
-    const window = @import("../ui/window.zig");
+    const window = @import("../platform/linux/window.zig");
     var win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display);
     defer win.deinit();
     try win.open("Shotlet test", .{});

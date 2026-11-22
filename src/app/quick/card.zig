@@ -3,7 +3,7 @@
 //! shadow, faded as a whole; and the GNOME hint above the stack.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const text = @import("../../gfx/text.zig");
 const shapes = @import("../../ui/shapes.zig");
 const fui = @import("../../ui/floatui.zig");

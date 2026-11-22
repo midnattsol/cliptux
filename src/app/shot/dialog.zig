@@ -5,11 +5,11 @@
 
 const std = @import("std");
 const config = @import("../config.zig");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
-const portal = @import("../../platform/portal.zig");
-const sys = @import("../../platform/sys.zig");
-const window = @import("../../ui/window.zig");
+const portal = @import("../../platform/linux/portal.zig");
+const sys = @import("../../platform/linux/sys.zig");
+const window = @import("../../platform/linux/window.zig");
 const save = @import("save.zig");
 
 const Env = env_mod.Env;

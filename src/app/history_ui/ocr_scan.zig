@@ -3,8 +3,8 @@
 
 const std = @import("std");
 const history = @import("../history.zig");
-const ocr = @import("../../platform/ocr.zig");
-const sys = @import("../../platform/sys.zig");
+const ocr = @import("../../platform/linux/tesseract.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const png = @import("../../gfx/png.zig");
 const Panel = @import("panel.zig").Panel;
 

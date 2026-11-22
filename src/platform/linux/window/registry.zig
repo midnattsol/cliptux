@@ -2,7 +2,7 @@
 //! registry announces, global removal and the seat's input devices.
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const output = @import("output.zig");

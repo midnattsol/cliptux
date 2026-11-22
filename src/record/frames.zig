@@ -7,7 +7,7 @@
 const std = @import("std");
 const sync = @import("sync.zig");
 const region = @import("region.zig");
-const pwstream = @import("../platform/pwstream.zig");
+const pwstream = @import("../platform/linux/pwstream.zig");
 
 pub const Latest = struct {
     gpa: std.mem.Allocator,

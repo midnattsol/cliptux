@@ -3,14 +3,14 @@
 //! input, and redrawing when something changed.
 
 const std = @import("std");
-const window = @import("../window.zig");
+const window = @import("../../platform/linux/window.zig");
 const config = @import("../../app/config.zig");
 const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
-const dbus = @import("../../platform/dbus.zig");
-const portal = @import("../../platform/portal.zig");
-const sys = @import("../../platform/sys.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const portal = @import("../../platform/linux/portal.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env_mod = @import("../../app/env.zig");
 const gnome = @import("../../app/gnome.zig");
 const capture_path = @import("../../app/capture_path.zig");

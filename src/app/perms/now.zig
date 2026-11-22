@@ -4,7 +4,7 @@
 //! the screen-sharing portal.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const Env = @import("../env.zig").Env;
 const gnome = @import("../gnome.zig");
 const direct = @import("../direct.zig");

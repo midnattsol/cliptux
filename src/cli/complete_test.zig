@@ -5,7 +5,7 @@ const std = @import("std");
 const complete = @import("complete.zig");
 const man = @import("man.zig");
 const proc = @import("../encode/proc.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const t = std.testing;
 
 fn render(shell: ?complete.Shell) ![]u8 {

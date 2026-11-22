@@ -9,7 +9,7 @@ const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
 const settings = @import("settings.zig");
 const window_direct = @import("window_direct.zig");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 
 /// The GNOME extension is here to pick windows.
 fn gnomeExtension(gpa: std.mem.Allocator, env: env_mod.Env) bool {

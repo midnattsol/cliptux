@@ -3,7 +3,7 @@
 //! integration, the compositor directly (app/direct.zig), or a portal.
 
 const std = @import("std");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const env_mod = @import("env.zig");
 
 pub const Path = enum {

@@ -11,7 +11,7 @@
 const std = @import("std");
 const capture = @import("../capture.zig");
 const env = @import("../env.zig");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const Rect = @import("geom.zig").Rect;
 
 const max_layouts = 8;

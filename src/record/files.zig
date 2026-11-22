@@ -3,10 +3,10 @@
 
 const std = @import("std");
 const env_mod = @import("../app/env.zig");
-const portal = @import("../platform/portal.zig");
-const dbus = @import("../platform/dbus.zig");
-const sys = @import("../platform/sys.zig");
-const window = @import("../ui/window.zig");
+const portal = @import("../platform/linux/portal.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const sys = @import("../platform/linux/sys.zig");
+const window = @import("../platform/linux/window.zig");
 const settings_mod = @import("settings.zig");
 
 /// Larger files go on the clipboard as a file reference only.

@@ -2,7 +2,7 @@
 //! (fractional-scale-v1 with a viewport, or an integer buffer scale).
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const buffers = @import("buffers.zig");
 const surface = @import("surface.zig");

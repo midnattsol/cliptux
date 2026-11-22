@@ -5,9 +5,9 @@
 //! clipboard, like the editor after Copy.
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
-const sys = @import("../../platform/sys.zig");
-const window = @import("../../ui/window.zig");
+const wl = @import("../../platform/linux/wayland.zig");
+const sys = @import("../../platform/linux/sys.zig");
+const window = @import("../../platform/linux/window.zig");
 
 /// Wait at most this long for the focus.
 const focus_ms = 1500;

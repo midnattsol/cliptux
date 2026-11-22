@@ -85,19 +85,19 @@ test "default bus address escapes the runtime dir" {
     const b = try defaultBusAddress(arena.allocator(), "/tmp/a b;c");
     try std.testing.expectEqualStrings("unix:path=/tmp/a%20b%3Bc/bus", b);
     var buf: [128]u8 = undefined;
-    var out: [2]@import("platform/dbus.zig").Address = undefined;
-    const parsed = try @import("platform/dbus.zig").parseAddresses(b, &buf, &out);
+    var out: [2]@import("platform/linux/dbus.zig").Address = undefined;
+    const parsed = try @import("platform/linux/dbus.zig").parseAddresses(b, &buf, &out);
     try std.testing.expectEqualStrings("/tmp/a b;c/bus", parsed[0].path);
 }
 
 test {
     _ = @import("cli/tests.zig");
     _ = @import("app/dispatch.zig");
-    _ = @import("platform/dbus.zig");
-    _ = @import("platform/permstore.zig");
-    _ = @import("platform/portal.zig");
-    _ = @import("platform/pw.zig");
-    _ = @import("platform/portal_test.zig");
+    _ = @import("platform/linux/dbus.zig");
+    _ = @import("platform/linux/permstore.zig");
+    _ = @import("platform/linux/portal.zig");
+    _ = @import("platform/linux/pw.zig");
+    _ = @import("platform/linux/portal_test.zig");
     _ = @import("app/config.zig");
     _ = @import("app/history.zig");
     _ = @import("app/annot.zig");
@@ -135,7 +135,7 @@ test {
     _ = @import("app/editfile.zig");
     _ = @import("app/toastwin.zig");
     _ = @import("app/history_ui.zig");
-    _ = @import("platform/ocr.zig");
+    _ = @import("platform/linux/tesseract.zig");
     _ = @import("ocr/page.zig");
     _ = @import("ocr/reflow.zig");
     _ = @import("redact/detect.zig");
@@ -169,9 +169,9 @@ test {
     _ = @import("app/daemon.zig");
     _ = @import("gfx/font.zig");
     _ = @import("gfx/render.zig");
-    _ = @import("platform/wayland.zig");
-    _ = @import("ui/keyboard.zig");
-    _ = @import("ui/window.zig");
+    _ = @import("platform/linux/wayland.zig");
+    _ = @import("platform/linux/keyboard.zig");
+    _ = @import("platform/linux/window.zig");
     _ = @import("ui/settings.zig");
     _ = @import("ui/frame.zig");
     _ = @import("ui/barkit.zig");

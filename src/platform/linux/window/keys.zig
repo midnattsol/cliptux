@@ -2,8 +2,8 @@
 //! layout (keyboard.zig) with key repeat, modifiers and focus.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
 const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");

@@ -5,8 +5,8 @@
 //! removing them.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
-const permstore = @import("../../platform/permstore.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const permstore = @import("../../platform/linux/permstore.zig");
 const select = @import("select.zig");
 
 pub const Table = enum {

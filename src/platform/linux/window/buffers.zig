@@ -2,8 +2,8 @@
 //! free back buffer, and presenting it (attach, damage, frame, commit).
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const events = @import("events.zig");

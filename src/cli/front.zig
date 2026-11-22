@@ -8,7 +8,7 @@ const help = @import("help.zig");
 const errors = @import("errors.zig");
 const commands = @import("commands.zig");
 const text = @import("text.zig");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 
 pub const Parsed = parse.Parsed;
 

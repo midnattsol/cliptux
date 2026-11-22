@@ -8,7 +8,7 @@
 //!   Tween.at(now)      current value;  Tween.busy(now): still moving
 
 const std = @import("std");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const theme = @import("theme.zig");
 
 /// Off when the desktop asks for reduced motion (or for scripted runs,

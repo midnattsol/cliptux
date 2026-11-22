@@ -2,8 +2,8 @@
 //! presented frame to <prefix>-<index>.png when the window closes.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const png = @import("../../gfx/png.zig");
+const sys = @import("../sys.zig");
+const png = @import("../../../gfx/png.zig");
 const window = @import("../window.zig");
 
 const Window = window.Window;

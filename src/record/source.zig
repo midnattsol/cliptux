@@ -3,11 +3,11 @@
 //! (a monitor, cropped to the area; consent once, then the restore token).
 
 const std = @import("std");
-const dbus = @import("../platform/dbus.zig");
-const pwstream = @import("../platform/pwstream.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const pwstream = @import("../platform/linux/pwstream.zig");
 const config = @import("../app/config.zig");
 const gnome = @import("../app/gnome.zig");
-const portal = @import("../platform/portal.zig");
+const portal = @import("../platform/linux/portal.zig");
 const region = @import("region.zig");
 const shellrec = @import("shellrec.zig");
 const portal_rec = @import("portal_rec.zig");

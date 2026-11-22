@@ -69,8 +69,8 @@
 //! selection), drag (drags out) and dump.
 
 const std = @import("std");
-const wl = @import("../platform/wayland.zig");
-const render = @import("../gfx/render.zig");
+const wl = @import("wayland.zig");
+const render = @import("../../gfx/render.zig");
 const keyboard = @import("keyboard.zig");
 const registry = @import("window/registry.zig");
 const output = @import("window/output.zig");
@@ -188,7 +188,7 @@ pub const pickIntScale = scale_mod.pickIntScale;
 pub const utf8Chunk = text_input.utf8Chunk;
 
 // clipboard and drag-and-drop payloads (transfer.zig)
-const transfer = @import("transfer.zig");
+const transfer = @import("../../ui/transfer.zig");
 pub const readBounded = transfer.readBounded;
 pub const drag_mimes = transfer.drag_mimes;
 pub const dragPayloadFor = transfer.dragPayloadFor;

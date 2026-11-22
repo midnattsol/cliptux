@@ -4,7 +4,7 @@
 //! drawn frame (ui/frame.zig).
 
 const std = @import("std");
-const window = @import("../window.zig");
+const window = @import("../../platform/linux/window.zig");
 const render = @import("../../gfx/render.zig");
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");

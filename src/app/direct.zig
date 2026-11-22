@@ -16,9 +16,9 @@
 
 const std = @import("std");
 const capture = @import("capture.zig");
-const dbus = @import("../platform/dbus.zig");
-const sys = @import("../platform/sys.zig");
-const wl = @import("../platform/wayland.zig");
+const dbus = @import("../platform/linux/dbus.zig");
+const sys = @import("../platform/linux/sys.zig");
+const wl = @import("../platform/linux/wayland.zig");
 const kwin = @import("direct_kwin.zig");
 
 pub const Method = enum {

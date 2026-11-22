@@ -2,9 +2,9 @@
 //! possibly encoded in the background), serving reads, and letting go.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
-const png = @import("../../gfx/png.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
+const png = @import("../../../gfx/png.zig");
 const window = @import("../window.zig");
 const events = @import("events.zig");
 

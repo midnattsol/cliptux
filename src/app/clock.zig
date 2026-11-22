@@ -4,7 +4,7 @@
 //! that TZ itself may hold, e.g. "CET-1CEST,M3.5.0,M10.5.0/3").
 
 const std = @import("std");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 
 pub const LocalTime = struct {
     year: u16,

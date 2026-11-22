@@ -3,8 +3,8 @@
 //! component that owns its object.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
 const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const registry = @import("registry.zig");

@@ -4,10 +4,10 @@
 const std = @import("std");
 const clock = @import("../clock.zig");
 const config = @import("../config.zig");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const env_mod = @import("../env.zig");
-const portal = @import("../../platform/portal.zig");
-const sys = @import("../../platform/sys.zig");
+const portal = @import("../../platform/linux/portal.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const Env = env_mod.Env;
 
 /// Where screenshots go: the configured save_dir (with ~ expanded), else the

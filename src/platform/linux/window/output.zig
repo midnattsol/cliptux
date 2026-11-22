@@ -2,7 +2,7 @@
 //! logical rectangle in the compositor's desktop space, and unplugging.
 
 const std = @import("std");
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const scale = @import("scale.zig");

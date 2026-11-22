@@ -3,7 +3,7 @@
 //! scroll.js): CaptureMode, and the scrolling capture's session.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const gnome = @import("../gnome.zig");
 const geom = @import("geom.zig");
 const mode = @import("mode.zig");

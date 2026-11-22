@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const capture = @import("../app/capture.zig");
-const window = @import("window.zig");
+const window = @import("../platform/linux/window.zig");
 const png = @import("../gfx/png.zig");
 const config = @import("../app/config.zig");
 const shapes_mod = @import("shapes.zig");
@@ -24,7 +24,7 @@ const doc_mod = @import("doc.zig");
 const ui = @import("editor_ui.zig");
 const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
-const dbus = @import("../platform/dbus.zig");
+const dbus = @import("../platform/linux/dbus.zig");
 const tools = @import("tools/mod.zig");
 const types = @import("editor/types.zig");
 

@@ -4,9 +4,9 @@
 const std = @import("std");
 const capture = @import("../capture.zig");
 const config = @import("../config.zig");
-const dbus = @import("../../platform/dbus.zig");
-const portal = @import("../../platform/portal.zig");
-const pw = @import("../../platform/pw.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const portal = @import("../../platform/linux/portal.zig");
+const pw = @import("../../platform/linux/pw.zig");
 const Env = @import("../env.zig").Env;
 const nowMs = @import("../shot.zig").nowMs;
 

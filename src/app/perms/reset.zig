@@ -4,7 +4,7 @@
 //! portal permission store, so the next portal capture asks again.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const config = @import("../config.zig");
 const Env = @import("../env.zig").Env;
 const store = @import("store.zig");

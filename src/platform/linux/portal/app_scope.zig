@@ -5,7 +5,7 @@ const std = @import("std");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 
-pub const app_id = @import("../../app_id.zig").app_id;
+pub const app_id = @import("../../../app_id.zig").app_id;
 
 /// Connect to the session bus and tell xdg-desktop-portal who we are,
 /// before anything on that connection talks to a portal.

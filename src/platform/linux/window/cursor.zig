@@ -2,9 +2,9 @@
 //! pool at open, and the current one is attached to a cursor surface.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
-const wl = @import("../../platform/wayland.zig");
-const render = @import("../../gfx/render.zig");
+const sys = @import("../sys.zig");
+const wl = @import("../wayland.zig");
+const render = @import("../../../gfx/render.zig");
 const window = @import("../window.zig");
 
 const Window = window.Window;

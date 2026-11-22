@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const config = @import("../../app/config.zig");
-const portal = @import("../../platform/portal.zig");
+const portal = @import("../../platform/linux/portal.zig");
 const gnome = @import("../../app/gnome.zig");
 const history = @import("../../app/history.zig");
 const keep = @import("../../app/keep.zig");

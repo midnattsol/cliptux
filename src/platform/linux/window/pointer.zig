@@ -2,7 +2,7 @@
 //! of the surface under it, wheel scrolling gathered per pointer frame,
 //! and relative motion (zwp_relative_pointer_v1).
 
-const wl = @import("../../platform/wayland.zig");
+const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const cursor = @import("cursor.zig");

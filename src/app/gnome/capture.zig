@@ -2,7 +2,7 @@
 //! asking it to capture, and what it reports about its shortcut.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const extension = @import("extension.zig");
 
 const bus_name = extension.bus_name;

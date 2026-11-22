@@ -8,11 +8,11 @@
 //!   back to selecting an area.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
 const direct = @import("../direct.zig");
 const env_mod = @import("../env.zig");
 const png = @import("../../gfx/png.zig");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
 

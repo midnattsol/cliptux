@@ -14,7 +14,7 @@ test {
     _ = @import("timeline.zig");
     _ = @import("region.zig");
     _ = @import("sync.zig");
-    _ = @import("../platform/pwstream.zig");
+    _ = @import("../platform/linux/pwstream.zig");
     _ = @import("audio.zig");
     _ = @import("frames.zig");
     _ = @import("strip.zig");

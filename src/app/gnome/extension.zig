@@ -3,8 +3,8 @@
 //! or from the copy bundled in the binary, and where its files live.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
-const sys = @import("../../platform/sys.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env_mod = @import("../env.zig");
 const Env = env_mod.Env;
 

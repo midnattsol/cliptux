@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
-const app_id = @import("../../app_id.zig").app_id;
+const app_id = @import("../../../app_id.zig").app_id;
 
 /// Fire-and-forget desktop notification.
 pub fn notify(alloc: std.mem.Allocator, conn: *dbus.Connection, summary: []const u8, text: []const u8) void {

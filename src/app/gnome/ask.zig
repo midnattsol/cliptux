@@ -2,7 +2,7 @@
 //! answered beforehand by its flags (and by the Settings window).
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 
 /// Ask, or the answer given beforehand.
 pub const Answer = enum { ask, yes, no };

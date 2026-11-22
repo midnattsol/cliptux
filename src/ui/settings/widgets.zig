@@ -3,7 +3,7 @@
 //! records its region so clicks and keyboard focus can find it.
 
 const std = @import("std");
-const window = @import("../window.zig");
+const window = @import("../../platform/linux/window.zig");
 const render = @import("../../gfx/render.zig");
 const config = @import("../../app/config.zig");
 const text = @import("../../gfx/text.zig");

@@ -2,7 +2,7 @@
 //! left by Shotlet's former name, cliptux.
 
 const std = @import("std");
-const sys = @import("../../platform/sys.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const env = @import("../env.zig");
 
 /// The config file in the config directory `dir`.

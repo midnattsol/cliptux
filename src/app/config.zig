@@ -9,7 +9,7 @@
 //! file's path and the move from cliptux).
 
 const std = @import("std");
-const sys = @import("../platform/sys.zig");
+const sys = @import("../platform/linux/sys.zig");
 const env = @import("env.zig");
 const model = @import("config/model.zig");
 const parse = @import("config/parse.zig");

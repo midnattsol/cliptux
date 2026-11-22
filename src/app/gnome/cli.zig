@@ -1,8 +1,8 @@
 //! `shotlet gnome-integration status|install|uninstall|shortcut`.
 
 const std = @import("std");
-const dbus = @import("../../platform/dbus.zig");
-const sys = @import("../../platform/sys.zig");
+const dbus = @import("../../platform/linux/dbus.zig");
+const sys = @import("../../platform/linux/sys.zig");
 const gsettings = @import("../gsettings.zig");
 const Env = @import("../env.zig").Env;
 const extension = @import("extension.zig");
