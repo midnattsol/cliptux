@@ -19,9 +19,8 @@ pub fn build(b: *std.Build) void {
     addGnomeExtension(b, exe.root_module);
     const platform = platformOptions(b, false);
     exe.root_module.addImport("platform_options", platform);
-    const options = b.addOptions();
-    options.addOption([]const u8, "version", resolveVersion(b));
-    exe.root_module.addOptions("build_options", options);
+    const version_mod = versionModule(b);
+    exe.root_module.addImport("version", version_mod);
     b.installArtifact(exe);
 
     addManPage(b, exe);
@@ -41,13 +40,13 @@ pub fn build(b: *std.Build) void {
         }),
     });
     addGnomeExtension(b, tests.root_module);
-    tests.root_module.addOptions("build_options", options);
+    tests.root_module.addImport("version", version_mod);
     tests.root_module.addImport("platform_options", platform);
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_tests.step);
     addSizeChecks(b, test_step);
-    addPortableCheck(b, options, test_step);
+    addPortableCheck(b, version_mod, test_step);
     const version_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("tools/version.zig"),
         .target = b.graph.host,
@@ -119,29 +118,33 @@ pub fn build(b: *std.Build) void {
     drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
 }
 
-/// What `shotlet --version` prints (tools/version.zig): `-Dversion` for a
+/// The "version" module (tools/version.zig's `string`): `-Dversion` for a
 /// release, else `git describe`'s, else build.zig.zon's.
-fn resolveVersion(b: *std.Build) []const u8 {
+fn versionModule(b: *std.Build) *std.Build.Module {
     const zon = @import("build.zig.zon").version;
-    if (b.option([]const u8, "version", "Release version (the tag, e.g. 0.1.7); default: from git describe")) |tag| {
-        return version.release(tag, zon) catch |err| switch (err) {
-            error.OlderThanZon => std.process.fatal("-Dversion={s} is older than build.zig.zon's {s}", .{ tag, zon }),
-            else => std.process.fatal("-Dversion={s} is not a version like 0.1.7", .{tag}),
-        };
-    }
-    return gitVersion(b, zon) orelse zon;
+    const options = b.addOptions();
+    options.addOption([]const u8, "zon", zon);
+    options.addOption([]const u8, "release", releaseVersion(b, zon));
+    // at make time, every build: the configure phase is cached across commits
+    const git = b.addSystemCommand(&.{
+        "sh", "-c", "git describe --tags --long --dirty --match 'v[0-9]*' 2>/dev/null || true",
+    });
+    git.setName("git describe");
+    git.setCwd(b.path("."));
+    git.has_side_effects = true;
+    const m = b.createModule(.{ .root_source_file = b.path("tools/version.zig") });
+    m.addOptions("build_options", options);
+    m.addAnonymousImport("git_describe", .{ .root_source_file = git.captureStdOut(.{}) });
+    return m;
 }
 
-/// The version from the checkout's last tag, or null without git or tags.
-fn gitVersion(b: *std.Build, zon: []const u8) ?[]const u8 {
-    const root = b.root.toString(b.allocator) catch return null;
-    var code: u8 = 0;
-    const out = b.runAllowFail(
-        &.{ "git", "-C", root, "describe", "--tags", "--long", "--dirty", "--match", "v[0-9]*" },
-        &code,
-        .ignore,
-    ) catch return null;
-    return version.fromDescribe(b.allocator, out, zon) catch null;
+/// `-Dversion`, checked against build.zig.zon's; "" when not given.
+fn releaseVersion(b: *std.Build, zon: []const u8) []const u8 {
+    const tag = b.option([]const u8, "version", "Release version (the tag, e.g. 0.1.7); default: from git describe") orelse return "";
+    return version.release(tag, zon) catch |err| switch (err) {
+        error.OlderThanZon => std.process.fatal("-Dversion={s} is older than build.zig.zon's {s}", .{ tag, zon }),
+        else => std.process.fatal("-Dversion={s} is not a version like 0.1.7", .{tag}),
+    };
 }
 
 /// The platform layer's build option: `stub` selects the compile-only
@@ -169,7 +172,7 @@ fn testkit(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
 /// only, nothing is emitted), proving everything outside
 /// src/platform/linux is free of Linux. `check-layers` (with `test`)
 /// fails when a file outside the backend imports it.
-fn addPortableCheck(b: *std.Build, options: *std.Build.Step.Options, test_step: *std.Build.Step) void {
+fn addPortableCheck(b: *std.Build, version_mod: *std.Build.Module, test_step: *std.Build.Step) void {
     const step = b.step("check-portable", "Compile the portable core for Windows and macOS against the stub backend");
     const targets = [_]std.Target.Query{
         .{ .cpu_arch = .x86_64, .os_tag = .windows },
@@ -185,7 +188,7 @@ fn addPortableCheck(b: *std.Build, options: *std.Build.Step.Options, test_step: 
                 .link_libc = true,
             });
             addGnomeExtension(b, m);
-            m.addOptions("build_options", options);
+            m.addImport("version", version_mod);
             m.addImport("platform_options", platformOptions(b, true));
             const c = if (comptime std.mem.eql(u8, kind, "exe"))
                 b.addExecutable(.{ .name = "shotlet-portable", .root_module = m })

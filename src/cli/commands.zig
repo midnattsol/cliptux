@@ -8,7 +8,7 @@ const spec = @import("spec.zig");
 pub const Command = spec.Command;
 pub const Id = spec.Id;
 
-pub const version = @import("build_options").version;
+pub const version = @import("version").string;
 
 pub const tagline = "screenshots, recordings and annotations for Linux";
 
