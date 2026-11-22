@@ -85,6 +85,16 @@ pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
 /// The tray icon's daemon (`shotlet daemon`): StatusNotifierItem.
 pub const daemon = @import("desktop/daemon.zig").run;
 
+/// The session's descriptor, to poll with others for what it sends.
+pub fn pollFd(s: *const Session) @import("sys.zig").fd_t {
+    return s.fd;
+}
+
+/// Whether the session already holds messages (poll would not wake).
+pub fn hasPending(s: *Session) bool {
+    return s.hasPending();
+}
+
 /// A notification (best effort).
 pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
     portal.notify(gpa, s, summary, text);

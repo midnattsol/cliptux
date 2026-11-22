@@ -68,25 +68,13 @@ fn extraApi() !*const Extra {
 
 pub const VideoFormat = pw.VideoFormat;
 
+const types = @import("../api/record.zig");
 /// A video buffer as mapped: the valid area of the frame.
-pub const Raw = struct {
-    base: [*]const u8,
-    /// bytes per row
-    stride: usize,
-    width: u32,
-    height: u32,
-    format: VideoFormat,
-    /// CLOCK_MONOTONIC, ns
-    time_ns: i64,
-};
-
-pub const VideoFn = *const fn (ctx: *anyopaque, raw: *const Raw) void;
-/// Interleaved stereo 16-bit samples; time of the first one.
-pub const AudioFn = *const fn (ctx: *anyopaque, samples: []const i16, time_ns: i64) void;
-
-pub const AudioSource = enum { mic, system };
-
-pub const rate = 48000;
+pub const Raw = types.Raw;
+pub const VideoFn = types.VideoFn;
+pub const AudioFn = types.AudioFn;
+pub const AudioSource = types.AudioSource;
+pub const rate = types.audio_rate;
 
 const max_streams = 3;
 

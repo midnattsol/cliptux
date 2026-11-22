@@ -14,18 +14,17 @@
 
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
+const media = @import("../platform/api.zig").record;
+const shell = @import("../platform/api.zig").shell;
 const env_mod = @import("../app/env.zig");
 const settings_mod = @import("settings.zig");
 const region = @import("region.zig");
 const ctlsock = @import("ctlsock.zig");
 const run_mod = @import("run.zig");
-const shellrec = @import("../platform/linux/gnome/shellrec.zig");
 const picker = @import("../ui/recui/picker.zig");
 const capture = @import("../app/capture.zig");
 const config = @import("../app/config.zig");
-const gnome = @import("../platform/linux/gnome.zig");
 const shot = @import("../app/shot.zig");
-const shellcap = @import("../platform/linux/gnome/shellcap.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("../ui/theme.zig");
 const Env = env_mod.Env;
@@ -126,12 +125,7 @@ pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
 fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: settings_mod.Settings) !void {
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
-    if (gnome.isGnome() and shellrec.available(gpa, &bus)) {
-        if (shellrec.select(gpa, &bus)) {
-            std.log.info("record: the picker is up through the GNOME integration", .{});
-            return;
-        } else |err| std.log.info("record: GNOME integration: {t}", .{err});
-    }
+    if (media.pickInShell(gpa, &bus)) return;
     var cfg = config.load(gpa, env.home);
     desktop.identify(gpa, &bus);
     var cap = (try shot.acquire(gpa, env, &bus, &cfg, .{})) orelse return;
@@ -140,8 +134,8 @@ fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: settings_mod.Sett
 }
 
 /// `shotlet --from-shell ID ... --then record`
-pub fn fromShell(gpa: std.mem.Allocator, env: Env, args: shellcap.Args) !void {
-    var cap = try shellcap.load(gpa, env.runtime_dir, args);
+pub fn fromShell(gpa: std.mem.Allocator, env: Env, args: shell.HandedCapture) !void {
+    var cap = try shell.loadHanded(gpa, env, args);
     defer cap.deinit(gpa);
     try pickOn(gpa, env, .{}, settings_mod.load(gpa, env.home), &cap, true);
 }

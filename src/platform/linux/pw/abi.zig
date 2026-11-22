@@ -34,13 +34,7 @@ pub const SPA_MEDIA_SUBTYPE_raw: u32 = 1;
 pub const SPA_CHOICE_Range: u32 = 1;
 pub const SPA_CHOICE_Enum: u32 = 3;
 
-pub const VideoFormat = enum(u32) {
-    RGBx = 7,
-    BGRx = 8,
-    RGBA = 11,
-    BGRA = 12,
-    _,
-};
+pub const VideoFormat = @import("../../api/record.zig").VideoFormat;
 
 pub const PW_DIRECTION_INPUT: c_uint = 0;
 pub const PW_STREAM_FLAG_AUTOCONNECT: c_uint = 1 << 0;

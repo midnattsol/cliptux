@@ -12,11 +12,7 @@ const region = @import("../../../record/region.zig");
 const shellrec = @import("../gnome/shellrec.zig");
 const portal_rec = @import("portal_rec.zig");
 
-pub const Want = struct {
-    area: region.Rect,
-    clicks: bool = false,
-    keys: bool = false,
-};
+pub const Want = @import("../../api/record.zig").Want;
 
 pub const Source = struct {
     kind: enum { shell, portal },

@@ -77,6 +77,16 @@ pub fn daemon(gpa: std.mem.Allocator, env: Env, foreground: bool) error{Unavaila
     _ = .{ gpa, env, foreground };
     return error.Unavailable;
 }
+/// The session's descriptor, to poll with others for what it sends.
+pub fn pollFd(s: *const Session) @import("sys.zig").fd_t {
+    _ = s;
+    return -1;
+}
+/// Whether the session already holds messages (poll would not wake).
+pub fn hasPending(s: *Session) bool {
+    _ = s;
+    return false;
+}
 pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
     _ = .{ gpa, s, summary, text };
 }

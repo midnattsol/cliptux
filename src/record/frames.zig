@@ -7,7 +7,7 @@
 const std = @import("std");
 const sync = @import("sync.zig");
 const region = @import("region.zig");
-const pwstream = @import("../platform/linux/pwstream.zig");
+const media = @import("../platform/api.zig").record;
 
 pub const Latest = struct {
     gpa: std.mem.Allocator,
@@ -42,7 +42,7 @@ pub const Latest = struct {
     }
 
     /// PipeWire callback: copy the area out of the mapped buffer.
-    pub fn onVideo(ctx: *anyopaque, raw: *const pwstream.Raw) void {
+    pub fn onVideo(ctx: *anyopaque, raw: *const media.Raw) void {
         const self: *Latest = @ptrCast(@alignCast(ctx));
         if (@atomicLoad(bool, &self.frozen, .acquire)) return;
         const a = self.area(raw.width, raw.height) orelse return;
@@ -89,7 +89,7 @@ pub const Latest = struct {
 };
 
 /// Copy area `a` of `raw` into dst (w x h), as 0xFFRRGGBB.
-fn copyArea(dst: []u32, w: u32, h: u32, raw: *const pwstream.Raw, a: region.Rect) void {
+fn copyArea(dst: []u32, w: u32, h: u32, raw: *const media.Raw, a: region.Rect) void {
     const cw = @min(w, @as(u32, @intCast(a.w)));
     const ch = @min(h, @as(u32, @intCast(a.h)));
     const swap = switch (raw.format) {
@@ -117,7 +117,7 @@ test "the area is cropped out and converted" {
     defer l.deinit();
     var px: [16]u32 = undefined;
     for (&px, 0..) |*p, i| p.* = @intCast(i);
-    const raw: pwstream.Raw = .{ .base = @ptrCast(&px), .stride = 16, .width = 4, .height = 4, .format = .BGRx, .time_ns = 5 };
+    const raw: media.Raw = .{ .base = @ptrCast(&px), .stride = 16, .width = 4, .height = 4, .format = .BGRx, .time_ns = 5 };
     try std.testing.expect(l.acquire() == null);
     Latest.onVideo(&l, &raw);
     const f = l.acquire().?;

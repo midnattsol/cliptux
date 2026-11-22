@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
+const media = @import("../platform/api.zig").record;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const keep = @import("../app/keep.zig");
@@ -14,8 +15,6 @@ const settings_mod = @import("settings.zig");
 const session = @import("session.zig");
 const region = @import("region.zig");
 const ctlsock = @import("ctlsock.zig");
-const shellrec = @import("../platform/linux/gnome/shellrec.zig");
-const gnome = @import("../platform/linux/gnome.zig");
 const control_mod = @import("../ui/recui/control.zig");
 const cli = @import("cli.zig");
 const Env = env_mod.Env;
@@ -45,7 +44,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
         }
     }
     // on GNOME the top bar has the stop button: no control in the picture
-    if (ctl) |*c| if (c.covers_monitor and gnome.isGnome() and shellrec.available(gpa, &bus)) {
+    if (ctl) |*c| if (c.covers_monitor and media.shellHasControls(gpa, &bus)) {
         c.close();
         ctl = null;
     };
@@ -60,7 +59,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
             return e;
         },
     };
-    shellrec.watchStop(&bus) catch {};
+    media.watchStop(&bus) catch {};
     const outcome = loop(&rec, &bus, &server, if (ctl) |*c| c else null, a.seconds);
     if (ctl) |*c| c.close();
     ctl = null;
@@ -119,23 +118,16 @@ fn pollCommands(rec: *session.Recording, server: *ctlsock.Server) ?Outcome {
 
 /// The GNOME top bar's stop button and the record shortcut.
 fn pollBus(rec: *session.Recording, bus: *desktop.Session) bool {
-    var stop = false;
-    var n: usize = 0;
-    while (n < 16) : (n += 1) {
-        var msg = (bus.nextMessageDeadline(sys.monoMs()) catch return false) orelse break;
-        defer msg.deinit(rec.gpa);
-        if (shellrec.isStopRequest(&msg)) stop = true;
-    }
-    return stop;
+    return media.pollStop(bus, rec.gpa);
 }
 
 fn waitAny(bus: *desktop.Session, server: *ctlsock.Server, ctl: ?*control_mod.Control) void {
     var fds = [_]sys.pollfd{
-        .{ .fd = bus.fd, .events = sys.POLL.IN, .revents = 0 },
+        .{ .fd = desktop.pollFd(bus), .events = sys.POLL.IN, .revents = 0 },
         .{ .fd = server.fd, .events = sys.POLL.IN, .revents = 0 },
         .{ .fd = if (ctl) |c| c.fd() else -1, .events = sys.POLL.IN, .revents = 0 },
     };
-    if (bus.hasPending()) return;
+    if (desktop.hasPending(bus)) return;
     const timeout: i32 = if (ctl) |c| c.waitMs() else 100;
     _ = sys.poll(&fds, timeout) catch {};
 }

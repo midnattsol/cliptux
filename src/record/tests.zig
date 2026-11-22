@@ -14,7 +14,6 @@ test {
     _ = @import("timeline.zig");
     _ = @import("region.zig");
     _ = @import("sync.zig");
-    _ = @import("../platform/linux/pwstream.zig");
     _ = @import("audio.zig");
     _ = @import("frames.zig");
     _ = @import("strip.zig");
@@ -22,7 +21,6 @@ test {
     _ = @import("settings.zig");
     _ = @import("keepvid.zig");
     _ = @import("ctlsock.zig");
-    _ = @import("../platform/linux/record/source.zig");
     _ = @import("cli.zig");
     _ = @import("run.zig");
     _ = @import("files.zig");

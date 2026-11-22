@@ -1,10 +1,4 @@
 # Files outside src/platform/linux that still import it (see
 # tools/check-layers.sh). Only removals; never add one.
 src/main.zig
-src/record/cli.zig
-src/record/engine.zig
-src/record/frames.zig
-src/record/run.zig
-src/record/session.zig
-src/record/tests.zig
 src/testkit.zig

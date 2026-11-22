@@ -12,7 +12,7 @@ const sink_mod = @import("../encode/sink.zig");
 const quantize = @import("../encode/quantize.zig");
 const yuv = @import("../encode/yuv.zig");
 const proc = @import("../platform/api.zig").proc;
-const pwstream = @import("../platform/linux/pwstream.zig");
+const rec_source = @import("../platform/api.zig").record;
 const sys = @import("../platform/api.zig").sys;
 const timeline = @import("timeline.zig");
 const frames_mod = @import("frames.zig");
@@ -80,7 +80,7 @@ pub const Engine = struct {
     strip: strip_mod.Strip,
 
     /// Start recording `node` of `cap` into `path` (created by the sink).
-    pub fn start(gpa: std.mem.Allocator, envp: proc.Envp, cap: *pwstream.Capture, node: u32, path: [:0]const u8, opts: Options) !*Engine {
+    pub fn start(gpa: std.mem.Allocator, envp: proc.Envp, cap: *rec_source.Stream, node: u32, path: [:0]const u8, opts: Options) !*Engine {
         const self = try gpa.create(Engine);
         errdefer gpa.destroy(self);
         const mixer = try gpa.create(audio.Mixer);
@@ -101,8 +101,8 @@ pub const Engine = struct {
         return self;
     }
 
-    fn addAudio(self: *Engine, cap: *pwstream.Capture) void {
-        const srcs = [_]struct { on: bool, src: pwstream.AudioSource }{ .{ .on = self.opts.mic, .src = .mic }, .{ .on = self.opts.system, .src = .system } };
+    fn addAudio(self: *Engine, cap: *rec_source.Stream) void {
+        const srcs = [_]struct { on: bool, src: rec_source.AudioSource }{ .{ .on = self.opts.mic, .src = .mic }, .{ .on = self.opts.system, .src = .system } };
         for (srcs, 0..) |s, i| {
             if (!s.on or self.opts.format == .gif) continue;
             self.taps[i] = .{ .engine = self, .which = i };

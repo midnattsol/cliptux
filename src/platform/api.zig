@@ -48,6 +48,10 @@ pub const shell = backend.shell;
 /// scrolling-capture frames, permissions.
 pub const capture = backend.capture;
 
+/// Screen recording: the source of an area's pictures and sound, the
+/// shell's own controls.
+pub const record = backend.record;
+
 /// Development commands of the backend (`shotlet test-window` ...);
 /// false when `cmd` is none of them.
 pub const devtools = backend.devtools;
