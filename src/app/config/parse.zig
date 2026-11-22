@@ -67,6 +67,7 @@ pub fn applyValue(cfg: *Config, key: []const u8, value: []const u8) void {
     if (applyGeneral(cfg, key, value)) return;
     if (applyBeautify(cfg, key, value)) return;
     if (applyQuickAndHistory(cfg, key, value)) return;
+    if (applyLoupe(cfg, key, value)) return;
     if (actionOf(key, model.bind_prefix)) |i| cfg.binds[i] = parseBind(value);
 }
 
@@ -137,6 +138,16 @@ fn applyQuickAndHistory(cfg: *Config, key: []const u8, value: []const u8) bool {
         cfg.history_max = std.math.clamp(std.fmt.parseInt(u16, value, 10) catch cfg.history_max, 1, 10000);
     } else if (std.mem.eql(u8, key, "history_max_mb")) {
         cfg.history_max_mb = std.math.clamp(std.fmt.parseInt(u32, value, 10) catch cfg.history_max_mb, 1, 1 << 20);
+    } else return false;
+    return true;
+}
+
+/// The magnifier while choosing an area: when it shows, its zoom.
+fn applyLoupe(cfg: *Config, key: []const u8, value: []const u8) bool {
+    if (std.mem.eql(u8, key, "loupe")) {
+        cfg.loupe = std.meta.stringToEnum(model.Loupe, value) orelse cfg.loupe;
+    } else if (std.mem.eql(u8, key, "loupe_zoom")) {
+        cfg.loupe_zoom = model.nearestZoom(std.fmt.parseInt(i64, value, 10) catch cfg.loupe_zoom);
     } else return false;
     return true;
 }
@@ -229,4 +240,17 @@ test "the thumbnail setting, and the switch it replaced" {
     try std.testing.expectEqual(model.Thumbnail.after_copy_and_save, cfg.thumbnail);
     applyValue(&cfg, "quick_access", "false");
     try std.testing.expect(!cfg.thumbnails() and !cfg.showsThumbnail(true));
+}
+
+test "the magnifier's settings" {
+    var cfg = Config{};
+    try std.testing.expectEqual(model.Loupe.always, cfg.loupe);
+    applyValue(&cfg, "loupe", "never");
+    try std.testing.expectEqual(model.Loupe.never, cfg.loupe);
+    applyValue(&cfg, "loupe", "sometimes");
+    try std.testing.expectEqual(model.Loupe.never, cfg.loupe);
+    applyValue(&cfg, "loupe_zoom", "11");
+    try std.testing.expectEqual(@as(u8, 12), cfg.loupe_zoom);
+    applyValue(&cfg, "loupe_zoom", "big");
+    try std.testing.expectEqual(@as(u8, 12), cfg.loupe_zoom);
 }

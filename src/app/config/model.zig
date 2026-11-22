@@ -23,6 +23,36 @@ pub const Thumbnail = enum {
     }
 };
 
+/// When the magnifier shows while choosing an area: while pointing and
+/// dragging (always), only while dragging a selection, or never.
+pub const Loupe = enum {
+    always,
+    selecting,
+    never,
+
+    pub fn label(l: Loupe) []const u8 {
+        return switch (l) {
+            .always => "Always",
+            .selecting => "While Selecting",
+            .never => "Never",
+        };
+    }
+};
+
+/// The magnifier's zoom levels: screen pixels per captured pixel, at
+/// scale 1 (the lens keeps its size: more zoom shows fewer pixels).
+pub const loupe_zooms = [_]u8{ 4, 8, 12, 16 };
+pub const loupe_zoom_default: u8 = 8;
+
+/// The zoom level nearest `v`.
+pub fn nearestZoom(v: i64) u8 {
+    var best = loupe_zooms[0];
+    for (loupe_zooms) |z| {
+        if (@abs(v - z) < @abs(v - best)) best = z;
+    }
+    return best;
+}
+
 pub const Config = struct {
     /// desktop notification after saving, when no thumbnail says so
     notify: bool = true,
@@ -60,6 +90,10 @@ pub const Config = struct {
     history_max: u16 = 50,
     /// ...taking at most this many MiB
     history_max_mb: u32 = 500,
+    /// the magnifier while choosing an area, and its zoom (one of
+    /// loupe_zooms)
+    loupe: Loupe = .always,
+    loupe_zoom: u8 = loupe_zoom_default,
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from
     /// disk) means every key is written.
@@ -99,7 +133,7 @@ pub const Config = struct {
 
 // --- keys ---
 
-pub const n_fixed_keys = 17;
+pub const n_fixed_keys = 19;
 /// an editor action's key: this, then the action's name
 pub const bind_prefix = "shortcut_";
 pub const n_keys = n_fixed_keys + n_actions;
@@ -127,6 +161,8 @@ const fixed_key_names = [n_fixed_keys][]const u8{
     "history",
     "history_max",
     "history_max_mb",
+    "loupe",
+    "loupe_zoom",
 };
 
 pub const padding_names = [4][]const u8{ "none", "small", "medium", "large" };
@@ -170,6 +206,8 @@ pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         14 => boolText(cfg.history),
         15 => intText(buf, cfg.history_max),
         16 => intText(buf, cfg.history_max_mb),
+        17 => @tagName(cfg.loupe),
+        18 => intText(buf, cfg.loupe_zoom),
         else => formatBind(cfg.binds[k - n_fixed_keys], buf),
     };
 }
@@ -189,4 +227,10 @@ pub fn valueHash(v: []const u8) u64 {
 pub fn rememberBase(cfg: *Config) void {
     var buf: [64]u8 = undefined;
     for (0..n_keys) |k| cfg.base[k] = valueHash(formatValue(cfg, k, &buf));
+}
+
+test "the magnifier's zoom snaps to a level" {
+    try std.testing.expectEqual(@as(u8, 8), nearestZoom(9));
+    try std.testing.expectEqual(@as(u8, 4), nearestZoom(-3));
+    try std.testing.expectEqual(@as(u8, 16), nearestZoom(400));
 }

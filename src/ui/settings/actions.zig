@@ -73,6 +73,7 @@ fn applyConfig(app: *App, hit: Hit) void {
         .color => |c| cfg.default_color = c,
         .reset_binds => cfg.binds = config.default_binds,
         .cycle_thumbnail => cfg.thumbnail = @fromBackingInt(@intCast((@backingInt(cfg.thumbnail) + 1) % 3)),
+        .cycle_loupe => cfg.loupe = @fromBackingInt(@intCast((@backingInt(cfg.loupe) + 1) % 3)),
         .quick_minus, .quick_plus => cfg.quick_access_seconds = steps.stepSeconds(cfg.quick_access_seconds, hit == .quick_plus),
         .toggle_history => cfg.history = !cfg.history,
         .hist_minus, .hist_plus => cfg.history_max = steps.stepCount(cfg.history_max, hit == .hist_plus),

@@ -26,6 +26,9 @@ pub const bindName = binds.bindName;
 
 pub const Config = model.Config;
 pub const Thumbnail = model.Thumbnail;
+pub const Loupe = model.Loupe;
+pub const loupe_zooms = model.loupe_zooms;
+pub const loupe_zoom_default = model.loupe_zoom_default;
 pub const n_keys = model.n_keys;
 pub const padding_names = model.padding_names;
 pub const parseLine = parse.parseLine;
@@ -128,6 +131,8 @@ test "config save/load roundtrip" {
     cfg.history = false;
     cfg.history_max = 7;
     cfg.history_max_mb = 64;
+    cfg.loupe = .selecting;
+    cfg.loupe_zoom = 16;
     try saveDir(alloc, dir, &cfg);
 
     const loaded = loadDir(alloc, dir);
@@ -142,6 +147,8 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(false, loaded.history);
     try std.testing.expectEqual(@as(u16, 7), loaded.history_max);
     try std.testing.expectEqual(@as(u32, 64), loaded.history_max_mb);
+    try std.testing.expectEqual(Loupe.selecting, loaded.loupe);
+    try std.testing.expectEqual(@as(u8, 16), loaded.loupe_zoom);
 
     // private to the user
     var path_buf: [600]u8 = undefined;

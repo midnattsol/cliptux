@@ -78,7 +78,7 @@ fn capture(p: Page, y0: i32) !i32 {
     const ui = p.ui;
     const st = p.st;
     const y = try p.title(y0, "Capture", null);
-    var card = p.card(y, 3 * p.rowH());
+    var card = p.card(y, 4 * p.rowH());
     var line_buf: [160]u8 = undefined;
     w.rowTitle(ui, w.rowBegin(ui, &card, p.rowH()), "Capture", perms.captureLine(st, &line_buf));
     const r = w.rowBegin(ui, &card, p.rowH());
@@ -91,6 +91,9 @@ fn capture(p: Page, y0: i32) !i32 {
         if (remembered) try w.chipButton(ui, r, .forget_monitors, null, "Choose again", true);
     }
     try perms.drawRow(ui, &card, p.rowH(), &st.perm_note);
+    const m = w.rowBegin(ui, &card, p.rowH());
+    w.rowTitle(ui, m, "Magnifier", "The pixels around the pointer while choosing an area");
+    try w.chipButton(ui, m, .cycle_loupe, null, p.cfg.loupe.label(), false);
     return w.endCard(&card) + ui.sc(26);
 }
 

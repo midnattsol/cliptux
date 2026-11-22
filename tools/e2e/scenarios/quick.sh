@@ -133,22 +133,24 @@ open_settings() {
 }
 # the quick-access, history and GNOME integration settings, from the
 # keyboard (SHOTLET_SETTINGS_FOCUS=n focuses the n-th control: 3 Reset
-# permissions (4 while a token is stored: 3 is Choose again), 4 thumbnail
-# choice, 6 seconds +, 12 Clear history, 14 Enable)
+# permissions (4 while a token is stored: 3 is Choose again), 4 magnifier
+# choice, 5 thumbnail choice, 7 seconds +, 13 Clear history, 15 Enable)
 scenario_settings() {
     drv_ready Meta-0
     cfgf=$HOME/.config/shotlet/config
     settings_reset
     open_settings 4 space
+    check "the magnifier choice goes to while selecting" grep -q "^loupe=selecting" "$cfgf"
+    open_settings 5 space
     check "the thumbnail choice goes to after Copy and Save" grep -q "^thumbnail=after_copy_and_save" "$cfgf"
-    open_settings 6 enter
+    open_settings 7 enter
     check "  ... and + makes it stay longer" grep -q "^quick_access_seconds=10" "$cfgf"
     mkdir -p "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
-    open_settings 12 enter
+    open_settings 13 enter
     check "Clear history asks first" test -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
-    open_settings 12 enter enter
+    open_settings 13 enter enter
     check "  ... and a second press empties it" test ! -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
-    open_settings 14 enter
+    open_settings 15 enter
     check "Enable installs the GNOME Shell extension" test -f "$HOME/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io/extension.js"
     check "  ... enabled for the next login" eval "gsettings get org.gnome.shell enabled-extensions | grep -q shotlet@midnattsol.github.io"
     settings_snapped
