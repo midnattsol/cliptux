@@ -267,8 +267,8 @@ pub const Picker = struct {
         const k = self.scaleOf(i);
         const sb: ?Rect = if (self.sel.sel) |s| self.bufRect(i, s) else null;
         dimOutside(&cv, sb);
-        if (sb) |r| drawSelection(&cv, r, k, self.sel.sel.?);
-        if (self.sel.sel == null and i == self.paneAt(self.mouse)) drawHint(&cv, k);
+        if (sb) |r| drawSelection(&cv, r, k, self.sel.sel.?, self.st.th);
+        if (self.sel.sel == null and i == self.paneAt(self.mouse)) drawHint(&cv, k, self.st.th);
         if (self.bar_at) |at| {
             const b = self.bufRect(i, .{ .x = at.x, .y = at.y, .w = 1, .h = 1 });
             if (selmod.inside(p.rect, at)) bar.paint(self.gpa, &cv, b.x, b.y, k, &self.st);
@@ -291,7 +291,7 @@ fn dimOutside(cv: *render.Canvas, sel: ?Rect) void {
     }
 }
 
-fn drawSelection(cv: *render.Canvas, r: Rect, k: f64, logical: Rect) void {
+fn drawSelection(cv: *render.Canvas, r: Rect, k: f64, logical: Rect, th: theme.Theme) void {
     const lw: i32 = @max(1, @as(i32, @intFromFloat(@round(k))));
     cv.fillRect(r.x - lw, r.y - lw, r.w + 2 * lw, lw, 0xFFFFFFFF);
     cv.fillRect(r.x - lw, r.y + r.h, r.w + 2 * lw, lw, 0xFFFFFFFF);
@@ -306,32 +306,33 @@ fn drawSelection(cv: *render.Canvas, r: Rect, k: f64, logical: Rect) void {
     const label = std.fmt.bufPrint(&buf, "{d} \u{00D7} {d}", .{ logical.w, logical.h }) catch return;
     const fs = 12 * k;
     const tw = text.width(fs, label) + @as(i32, @intFromFloat(16 * k));
-    const th = text.height(fs) + @as(i32, @intFromFloat(8 * k));
-    const y = if (r.y - th - 8 > 0) r.y - th - @as(i32, @intFromFloat(8 * k)) else r.y + @as(i32, @intFromFloat(8 * k));
-    cv.fillRoundRectAA(r.x, y, tw, th, 6 * k, 0xE01F1F23);
-    text.draw(cv, r.x + @as(i32, @intFromFloat(8 * k)), y + @as(i32, @intFromFloat(4 * k)), fs, 0xFFF5F5F7, label);
+    const lh = text.height(fs) + @as(i32, @intFromFloat(8 * k));
+    const y = if (r.y - lh - 8 > 0) r.y - lh - @as(i32, @intFromFloat(8 * k)) else r.y + @as(i32, @intFromFloat(8 * k));
+    cv.fillRoundRectAA(r.x, y, tw, lh, 6 * k, th.pill_bg);
+    text.draw(cv, r.x + @as(i32, @intFromFloat(8 * k)), y + @as(i32, @intFromFloat(4 * k)), fs, th.pill_fg, label);
 }
 
-fn drawHint(cv: *render.Canvas, k: f64) void {
+fn drawHint(cv: *render.Canvas, k: f64, th: theme.Theme) void {
     const s = "Drag to choose what to record \u{00B7} click: the whole screen \u{00B7} Esc: cancel";
     const fs = 14 * k;
     const tw = text.width(fs, s) + @as(i32, @intFromFloat(32 * k));
-    const th = text.height(fs) + @as(i32, @intFromFloat(18 * k));
+    const hh = text.height(fs) + @as(i32, @intFromFloat(18 * k));
     const x = @divTrunc(cv.w - tw, 2);
-    const y = @divTrunc(cv.h - th, 2);
-    cv.fillRoundRectAA(x, y, tw, th, 12 * k, 0xE01F1F23);
-    text.draw(cv, x + @as(i32, @intFromFloat(16 * k)), y + @as(i32, @intFromFloat(9 * k)), fs, 0xFFF5F5F7, s);
+    const y = @divTrunc(cv.h - hh, 2);
+    cv.fillRoundRectAA(x, y, tw, hh, 12 * k, th.pill_bg);
+    text.draw(cv, x + @as(i32, @intFromFloat(16 * k)), y + @as(i32, @intFromFloat(9 * k)), fs, th.pill_fg, s);
 }
 
 /// Show the picker over the frozen desktop `cap`; the chosen area, or
-/// cancelled. `set` holds the bar's choices (format, sound, overlays).
-pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Capture, set: *settings_mod.Settings, overlays: bool) !Result {
+/// cancelled. `set` holds the bar's choices (format, sound, overlays);
+/// `th` is the desktop's appearance.
+pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Capture, set: *settings_mod.Settings, overlays: bool, th: theme.Theme) !Result {
     var p: Picker = .{
         .gpa = gpa,
         .win = try window.Window.init(gpa, env.runtime_dir, env.wayland_display),
         .cap = cap,
         .sel = .{ .monitors = &.{} },
-        .st = .{ .set = set, .overlays = overlays },
+        .st = .{ .set = set, .overlays = overlays, .th = th },
     };
     defer p.deinit();
     try p.win.openOutputs("Shotlet");

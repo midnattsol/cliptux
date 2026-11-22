@@ -28,6 +28,7 @@ const shellcap = @import("../app/shellcap.zig");
 const dbus = @import("../platform/dbus.zig");
 const portal = @import("../platform/portal.zig");
 const text = @import("../gfx/text.zig");
+const theme = @import("../ui/theme.zig");
 const Env = env_mod.Env;
 
 pub const Args = struct {
@@ -150,7 +151,7 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings
     var set = set0;
     text.init(gpa);
     std.log.info("record: picker up", .{});
-    const res = picker.pick(gpa, env, cap, &set, overlays);
+    const res = picker.pick(gpa, env, cap, &set, overlays, appearance(gpa, env));
     text.deinit();
     const area = switch (try res) {
         .area => |r| r,
@@ -162,6 +163,13 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings
     saveChoices(gpa, env.home, &set0, &set);
     std.log.info("record: picked {d},{d} {d}x{d}", .{ area.x, area.y, area.w, area.h });
     try run_mod.run(gpa, env, a, set, area);
+}
+
+/// The desktop's light or dark look and accent, for the picker.
+fn appearance(gpa: std.mem.Allocator, env: Env) theme.Theme {
+    var bus = dbus.Connection.connectSession(gpa, env.bus_addr) catch return theme.Theme.get(true, null);
+    defer bus.deinit();
+    return theme.readPrefs(&bus, 300).theme();
 }
 
 /// Remember the bar's choices for next time.
