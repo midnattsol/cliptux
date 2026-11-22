@@ -269,10 +269,10 @@ const Pin = struct {
         if (p.zoom == 1) return;
         var zb: [16]u8 = undefined;
         const zs = std.fmt.bufPrint(&zb, "{d}%", .{@as(u32, @intFromFloat(@round(p.zoom * 100)))}) catch "";
-        const tw = text.width(11 * k, zs) + @as(i32, @intFromFloat(12 * k));
+        const tw = text.widthStyled(11 * k, text.Style.regular.num(), zs) + @as(i32, @intFromFloat(12 * k));
         const th: i32 = @intFromFloat(20 * k);
         cv.fillRoundRectAA(@intFromFloat(8 * k), @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), tw, th, 10 * k, 0x99000000);
-        fui.textCentered(cv, .{ .x = @intFromFloat(8 * k), .y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, .regular, zs);
+        fui.textCentered(cv, .{ .x = @intFromFloat(8 * k), .y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(8 * k)), .w = tw, .h = th }, 11 * k, 0xFFFFFFFF, text.Style.regular.num(), zs);
     }
 
     fn drawTopHint(cv: *fui.Canvas, k: f64, pw: u32, ph: u32) void {

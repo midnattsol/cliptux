@@ -25,7 +25,7 @@ fn draw(win: *window.Window, left: u32) !void {
     var buf: [4]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{left}) catch "";
     const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
-    fui.textCentered(&cv, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) }, 60 * k, 0xFFFFFFFF, .bold, s);
+    fui.textCentered(&cv, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) }, 60 * k, 0xFFFFFFFF, text.Style.semibold.num(), s);
     const px = try win.backBuffer();
     @memset(px, 0);
     fui.placeCard(px, bw, bh, card, bw, bh, 0, 0, @intFromFloat(32 * k), 0);

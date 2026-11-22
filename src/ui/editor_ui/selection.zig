@@ -15,6 +15,9 @@ const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
 const handlePoints = shapes_mod.handlePoints;
 
+/// The size pill's text: medium weight, figures that do not jiggle.
+const dims_style = text_mod.Style.medium.num();
+
 fn dimsLabel(self: *const Editor, buf: []u8) []const u8 {
     const s = self.doc.sel.?.normalized();
     const x = if (text_mod.available()) "\u{00D7}" else "x";
@@ -30,7 +33,7 @@ pub fn dimsPillRect(self: *const Editor, s: Rect) Rect {
     const label = dimsLabel(self, &buf);
     const w: i32 = @intCast(self.pn().width);
     const fs = theme.font_small * self.uf();
-    const tw = text_mod.width(fs, label);
+    const tw = text_mod.widthStyled(fs, dims_style, label);
     const ph = text_mod.height(fs) + self.sc(8);
     const pw = tw + self.sc(20);
     const fr = self.frameRect(s);
@@ -100,7 +103,7 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
             const label = dimsLabel(self, &buf);
             const r = dimsPillRect(self, s);
             draw_chrome.drawPill(self, canvas, r, 7.0 * f);
-            text_mod.draw(canvas, r.x + self.sc(10), r.y + self.sc(4), theme.font_small * f, th.pill_fg, label);
+            text_mod.drawStyled(canvas, r.x + self.sc(10), r.y + self.sc(4), theme.font_small * f, th.pill_fg, dims_style, label);
         }
     }
     if (self.show_hint) {

@@ -68,7 +68,7 @@ pub fn render(self: *Panel) !void {
 /// Title and the close button.
 fn drawHeader(self: *const Panel, cv: *Canvas, kk: f64) void {
     const th = self.theme;
-    text.drawStyled(cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .bold, "Recent captures");
+    text.drawStyled(cv, s(inset, kk), s(inset, kk), 14 * kk, th.fg, .semibold, "Recent captures");
     const xr = self.closeRect();
     const xcx = (@as(f64, @floatFromInt(xr.x)) + 11) * kk;
     const xcy = (@as(f64, @floatFromInt(xr.y)) + 11) * kk;
@@ -217,20 +217,20 @@ fn drawConfirm(self: *const Panel, cv: *Canvas, kk: f64) void {
     var buf: [48]u8 = undefined;
     const n = self.items.items.len;
     const q = std.fmt.bufPrint(&buf, "Clear {d} capture{s}?", .{ n, if (n == 1) "" else "s" }) catch "Clear all?";
-    text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .bold, q);
+    text.drawStyled(cv, s(inset, kk), cancel.y + @divTrunc(cancel.h - text.height(12 * kk), 2), 12 * kk, th.fg, .semibold, q);
     cv.fillRoundRectAA(cancel.x, cancel.y, cancel.w, cancel.h, 7 * kk, if (self.hover_confirm == .cancel) th.hover else th.field);
     fui.textCentered(cv, cancel, 12 * kk, th.fg, .regular, "Cancel");
     const red = if (self.hover_confirm == .clear) theme.destructive_fill_hover else theme.destructive_fill;
     cv.fillRoundRectAA(clear.x, clear.y, clear.w, clear.h, 7 * kk, red);
-    fui.textCentered(cv, clear, 12 * kk, fui.white, .bold, "Clear");
+    fui.textCentered(cv, clear, 12 * kk, fui.white, .semibold, "Clear");
 }
 
 fn drawNotice(self: *const Panel, cv: *Canvas, pw: u32, ph: u32, kk: f64) void {
-    const nw = text.widthStyled(13 * kk, .bold, self.notice) + s(28, kk);
+    const nw = text.widthStyled(13 * kk, .semibold, self.notice) + s(28, kk);
     const nh = s(30, kk);
     const nr: Rect = .{ .x = @divTrunc(@as(i32, @intCast(pw)) - nw, 2), .y = @as(i32, @intCast(ph)) - nh - s(actions_h + 12, kk), .w = nw, .h = nh };
     cv.fillRoundRectAA(nr.x, nr.y, nr.w, nr.h, 15 * kk, 0xE6000000);
-    fui.textCentered(cv, nr, 13 * kk, fui.white, .bold, self.notice);
+    fui.textCentered(cv, nr, 13 * kk, fui.white, .semibold, self.notice);
 }
 
 /// blitRounded onto an opaque buffer, clipped (rows may fall outside).

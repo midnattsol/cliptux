@@ -146,7 +146,8 @@ fn drawLabel(ed: *Editor, canvas: *Canvas, r: Rect, size: i32) void {
     const label = color.hex(&buf, c);
     const fs = theme.font_small * f;
     const sw = ed.sc(12);
-    const lw = sw + ed.sc(6) + text_mod.width(fs, label) + ed.sc(20);
+    const style = text_mod.Style.medium.num();
+    const lw = sw + ed.sc(6) + text_mod.widthStyled(fs, style, label) + ed.sc(20);
     const lh = text_mod.height(fs) + ed.sc(12);
     const lx = r.x + @divTrunc(size - lw, 2);
     const ly = r.y + size + ed.sc(6);
@@ -154,5 +155,5 @@ fn drawLabel(ed: *Editor, canvas: *Canvas, r: Rect, size: i32) void {
     const scy = ly + @divTrunc(lh - sw, 2);
     canvas.fillRoundRectAA(lx + ed.sc(10), scy, sw, sw, 3 * f, c);
     canvas.rectOutline(lx + ed.sc(10), scy, sw, sw, 1, 0x40FFFFFF);
-    text_mod.draw(canvas, lx + ed.sc(10) + sw + ed.sc(6), ly + @divTrunc(lh - text_mod.height(fs), 2), fs, th.pill_fg, label);
+    text_mod.drawStyled(canvas, lx + ed.sc(10) + sw + ed.sc(6), ly + @divTrunc(lh - text_mod.height(fs), 2), fs, th.pill_fg, style, label);
 }

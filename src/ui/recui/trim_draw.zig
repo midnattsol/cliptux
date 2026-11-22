@@ -153,13 +153,13 @@ fn paintRow(cv: *render.Canvas, k: f64, st: *const State) void {
     var c: [80]u8 = undefined;
     const label = std.fmt.bufPrint(&c, "{s} \u{2013} {s}   \u{00B7}   {s}", .{ fmtMs(&a, st.start_ms), fmtMs(&b, st.end_ms), if (st.busy.len > 0) st.busy else lengthLabel(st) }) catch "";
     const fs = 13 * k;
-    text.draw(cv, p.x + p.w + sc(12, k), p.y + @divTrunc(p.h - text.height(fs), 2), fs, muted, label);
+    text.drawStyled(cv, p.x + p.w + sc(12, k), p.y + @divTrunc(p.h - text.height(fs), 2), fs, muted, text.Style.regular.num(), label);
     for ([_]Part{ .cancel, .save }) |part| {
         const r = scr(partRect(part), k);
         const save = part == .save;
         const col: u32 = if (save) (if (st.hover == part) save_fill_hover else save_fill) else (if (st.hover == part) 0xFF3A3A40 else 0xFF2C2C30);
         cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 8 * k, col);
-        fui.textCentered(cv, r, 13 * k, fg, .bold, if (save) "Save trimmed" else "Cancel");
+        fui.textCentered(cv, r, 13 * k, fg, .semibold, if (save) "Save trimmed" else "Cancel");
     }
 }
 

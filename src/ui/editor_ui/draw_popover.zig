@@ -117,7 +117,8 @@ fn drawSizeSlider(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) vo
     text_mod.draw(canvas, pr.x + pad, ly, fs, th.muted, "Size");
     var buf: [16]u8 = undefined;
     const v = std.fmt.bufPrint(&buf, "{d} px", .{self.thickness}) catch "?";
-    text_mod.draw(canvas, pr.right() - pad - text_mod.width(fs, v), ly, fs, th.muted, v);
+    const num = text_mod.Style.regular.num();
+    text_mod.drawStyled(canvas, pr.right() - pad - text_mod.widthStyled(fs, num, v), ly, fs, th.muted, num, v);
     const knob = 9.0 * f;
     const t = ff(self.thickness - 1) / 31.0;
     const track_h = self.sc(4);

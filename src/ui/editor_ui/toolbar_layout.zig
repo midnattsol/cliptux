@@ -31,7 +31,7 @@ const Flow = struct {
 };
 
 fn copyButtonWidth(self: *const Editor) i32 {
-    return self.sc(10) + self.sc(16) + self.sc(6) + text_mod.widthStyled(theme.font_label * self.uf(), .bold, "Copy") + self.sc(14);
+    return self.sc(10) + self.sc(16) + self.sc(6) + text_mod.widthStyled(theme.font_label * self.uf(), .semibold, "Copy") + self.sc(14);
 }
 
 /// Lay out `items` in rows of at most `max_w`, groups kept together and

@@ -124,7 +124,7 @@ fn drawBadge(ed: *Editor, canvas: *Canvas, t: *const Toast, cx: f64, cy: f64, f:
         },
         .info => {
             canvas.fillCircleAA(cx, cy, 11.0 * f, th.accent);
-            text_mod.drawStyled(canvas, ix + @divTrunc(is - text_mod.widthStyled(13 * f, .bold, "i"), 2), iy + @divTrunc(is - text_mod.heightStyled(13 * f, .bold), 2), 13 * f, 0xFFFFFFFF, .bold, "i");
+            text_mod.drawStyled(canvas, ix + @divTrunc(is - text_mod.widthStyled(13 * f, .semibold, "i"), 2), iy + @divTrunc(is - text_mod.heightStyled(13 * f, .semibold), 2), 13 * f, 0xFFFFFFFF, .semibold, "i");
         },
     }
 }

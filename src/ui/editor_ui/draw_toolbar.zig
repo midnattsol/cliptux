@@ -113,7 +113,7 @@ fn drawCopyButton(self: *const Editor, canvas: *Canvas, r: Rect, hv: f64) void {
     const is = self.sc(16);
     icons.draw(canvas, .copy, r.x + self.sc(10), r.y + @divTrunc(r.h - is, 2), is, th.on_accent);
     const fs = theme.font_label * f;
-    text_mod.drawStyled(canvas, r.x + self.sc(10) + is + self.sc(6), r.y + @divTrunc(r.h - text_mod.heightStyled(fs, .bold), 2), fs, th.on_accent, .bold, "Copy");
+    text_mod.drawStyled(canvas, r.x + self.sc(10) + is + self.sc(6), r.y + @divTrunc(r.h - text_mod.heightStyled(fs, .semibold), 2), fs, th.on_accent, .semibold, "Copy");
 }
 
 /// The colour and size button: the current colour's dot and a chevron;

@@ -60,7 +60,7 @@ pub fn draw(self: *Editor, canvas: *Canvas) void {
     const lh = text_mod.height(fs) + self.sc(7);
     const pad = self.sc(24);
     icons.draw(canvas, .keyboard, r.x + pad, r.y + self.sc(20), self.sc(18), th.fg);
-    text_mod.drawStyled(canvas, r.x + pad + self.sc(26), r.y + self.sc(20) + @divTrunc(self.sc(18) - text_mod.heightStyled(15 * f, .bold), 2), 15.0 * f, th.fg, .bold, "Keyboard shortcuts");
+    text_mod.drawStyled(canvas, r.x + pad + self.sc(26), r.y + self.sc(20) + @divTrunc(self.sc(18) - text_mod.heightStyled(15 * f, .semibold), 2), 15.0 * f, th.fg, .semibold, "Keyboard shortcuts");
     var y = r.y + self.sc(58);
     const ks = theme.font_small * f;
     for (help_lines) |l| {

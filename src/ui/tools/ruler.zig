@@ -62,7 +62,7 @@ fn tick(s: *const Shape) f64 {
 pub fn labelRect(s: *const Shape) Rect {
     var buf: [96]u8 = undefined;
     const fs = fontPx(s);
-    const tw = text_mod.width(fs, Measure.of(s).label(&buf));
+    const tw = text_mod.widthStyled(fs, label_style, Measure.of(s).label(&buf));
     const pad: i32 = @intFromFloat(@round(fs * 0.5));
     const w = tw + 2 * pad;
     const h = text_mod.height(fs) + pad;
@@ -104,15 +104,18 @@ pub fn draw(canvas: *Canvas, s: *const Shape, xf: shapes.Xform) void {
     drawLabel(canvas, s, xf);
 }
 
+/// The measurement: figures that do not jiggle while it is dragged.
+const label_style = text_mod.Style.regular.num();
+
 fn drawLabel(canvas: *Canvas, s: *const Shape, xf: shapes.Xform) void {
     var buf: [96]u8 = undefined;
     const label = Measure.of(s).label(&buf);
     const r = xf.rect(labelRect(s));
     const fs = fontPx(s) * xf.scale;
     canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, @as(f64, @floatFromInt(r.h)) / 2.0, label_bg);
-    const tx = r.x + @divTrunc(r.w - text_mod.width(fs, label), 2);
+    const tx = r.x + @divTrunc(r.w - text_mod.widthStyled(fs, label_style, label), 2);
     const ty = r.y + @divTrunc(r.h - text_mod.height(fs), 2);
-    text_mod.draw(canvas, tx, ty, fs, label_fg, label);
+    text_mod.drawStyled(canvas, tx, ty, fs, label_fg, label_style, label);
 }
 
 /// The ruler's end under the pointer: Shift keeps it on the axis it is
