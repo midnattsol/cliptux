@@ -205,9 +205,10 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, c
             },
             .cancel, .copied => try f.closed(result.action == .copied),
             .save, .save_as => if (!try f.saved(result.action == .save, result.png_data.?)) {
-                // the file chooser was cancelled: back to the editor,
-                // annotations intact, rather than losing the work
-                try openEditor(win, cap, per_monitor);
+                // the file chooser was cancelled or the file could not be
+                // written: back to the editor, annotations intact, rather
+                // than losing the work
+                if (!win.surfaces[0].alive) try openEditor(win, cap, per_monitor);
                 ed.running = true;
                 ed.action = .cancel;
                 continue;
@@ -274,7 +275,8 @@ const Finish = struct {
     }
 
     /// Save (`quick`: to the screenshots folder) or Save As. False when
-    /// the file chooser was cancelled.
+    /// the file chooser was cancelled or writing failed (the editor says
+    /// why). Save writes before the editor closes, so a failure keeps it.
     fn saved(f: Finish, quick: bool, data: []const u8) !bool {
         const gpa = f.gpa;
         if (f.cfg.copy_on_save) {
@@ -284,19 +286,38 @@ const Finish = struct {
                 std.log.warn("copy-on-save failed: {t}", .{err});
             };
         }
-        f.win.closeWindow();
-        f.ed.releaseCaches();
-        const path = (if (quick)
-            try savePng(gpa, f.env, f.cfg, data)
-        else
-            try saveAs(gpa, f.env, f.conn, f.cfg, data)) orelse return false;
+        if (!quick) f.close(); // the file chooser takes the screen
+        const path = f.write(quick, data) orelse return false;
         defer gpa.free(path);
+        if (quick) f.close();
         var buf: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved";
         if (f.cfg.notify) portal.notify(gpa, f.conn, "Shotlet", msg);
         f.keep(data, path);
         if (f.win.hasClipboard()) try f.win.serveClipboard();
         return true;
+    }
+
+    /// The file written (owned); null when the chooser was cancelled or
+    /// writing failed, which the editor shows when it is back.
+    fn write(f: Finish, quick: bool, data: []const u8) ?[]u8 {
+        return f.writeFile(quick, data) catch |err| {
+            std.log.warn("could not save: {t}", .{err});
+            var buf: [160]u8 = undefined;
+            f.ed.tools.toast.show(.problem, save.failureText(&buf, err), 6000);
+            f.ed.needs_render = true;
+            return null;
+        };
+    }
+
+    fn close(f: Finish) void {
+        f.win.closeWindow();
+        f.ed.releaseCaches();
+    }
+
+    fn writeFile(f: Finish, quick: bool, data: []const u8) !?[]u8 {
+        if (quick) return try savePng(f.gpa, f.env, f.cfg, data);
+        return saveAs(f.gpa, f.env, f.conn, f.cfg, data);
     }
 
     /// Keeps the capture for the history (and quick access).

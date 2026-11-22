@@ -26,6 +26,7 @@ scenario_keyboard() {
     keyboard_shift
     keyboard_space
     keyboard_esc
+    keyboard_save_fails
     keyboard_save
 }
 
@@ -127,6 +128,26 @@ keyboard_esc() {
     keys esc esc
     check "  ... further Esc presses quit" wait_exit 3
     check "  ... with status 0" eq "$RC" 0
+}
+
+# a save that cannot be written keeps the editor, and the work, open
+keyboard_save_fails() {
+    local cfg=$HOME/.config/shotlet/config locked=$HOME/locked
+    mkdir -p "$locked" && chmod 555 "$locked"
+    cp "$cfg" "$cfg.bak"
+    echo "save_dir=$locked" >>"$cfg"
+    run_shotlet savefail
+    wait_editor 5
+    drag 0 100 100 0 260 220
+    keys ctrl+s
+    check "a failed save keeps the editor open" eval '! wait_exit 2'
+    check "  ... saying why" grep -q "could not save: AccessDenied" "$SHOT_LOG"
+    shot 0 savefail
+    chmod 755 "$locked"
+    keys ctrl+s
+    check "  ... and saving again once it can be written closes it" wait_exit 5
+    check "  ... with the same selection" eq "$(png_size "$(ls "$locked"/shotlet-*.png | head -1)")" 160x120
+    mv "$cfg.bak" "$cfg"
 }
 
 # Ctrl+S saves to ~/Pictures and closes

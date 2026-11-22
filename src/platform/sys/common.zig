@@ -24,6 +24,11 @@ pub fn check(rc: usize) !usize {
         .NOTDIR => error.NotDir,
         .NOTEMPTY => error.DirNotEmpty,
         .TIMEDOUT => error.Timeout,
+        // why a file could not be written, in words for the person
+        .NOSPC => error.NoSpaceLeft,
+        .DQUOT => error.DiskQuota,
+        .ROFS => error.ReadOnlyFileSystem,
+        .NAMETOOLONG => error.NameTooLong,
         else => {
             std.log.err("syscall failed: {t}", .{e});
             return error.SyscallFailed;

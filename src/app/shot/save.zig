@@ -89,6 +89,26 @@ pub fn saveAs(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *co
     return try writeUnique(gpa, path[0..slash], path[slash + 1 ..], ".png", data);
 }
 
+/// What the editor says when a save failed: the file was not written,
+/// the capture is still open.
+pub fn failureText(buf: []u8, err: anyerror) []const u8 {
+    const why = switch (err) {
+        error.AccessDenied => "no permission to write there",
+        error.ReadOnlyFileSystem => "the disk is read-only",
+        error.NoSpaceLeft, error.DiskQuota => "the disk is full",
+        error.NotFound, error.NotDir => "the folder does not exist",
+        error.NameTooLong, error.BadPath => "the path is too long or invalid",
+        else => @errorName(err),
+    };
+    return std.fmt.bufPrint(buf, "Not saved: {s}", .{why}) catch "Not saved";
+}
+
+test "a failed save says why in words" {
+    var buf: [160]u8 = undefined;
+    try std.testing.expectEqualStrings("Not saved: the disk is full", failureText(&buf, error.NoSpaceLeft));
+    try std.testing.expectEqualStrings("Not saved: Unexpected", failureText(&buf, error.Unexpected));
+}
+
 test "saved names never overwrite" {
     const gpa = std.testing.allocator;
     const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
