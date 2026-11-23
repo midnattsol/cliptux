@@ -42,10 +42,27 @@ const help_lines = [_][2][]const u8{
     .{ "Right click / Esc", "Cancel current action; Esc again closes (twice with annotations)" },
 };
 
+/// Where the meanings start: past the widest key cap and a gap.
+fn meaningX(self: *const Editor) i32 {
+    const ks = theme.font_small * self.uf();
+    var widest: i32 = 0;
+    for (help_lines) |l| widest = @max(widest, text_mod.width(ks, l[0]));
+    return widest + self.sc(12 + 20);
+}
+
+/// Wide enough for the longest key and meaning, within the screen.
+fn panelWidth(self: *const Editor) i32 {
+    const fs = theme.font_label * self.uf();
+    var widest: i32 = 0;
+    for (help_lines) |l| widest = @max(widest, text_mod.width(fs, l[1]));
+    const want = self.sc(24) * 2 + meaningX(self) + widest;
+    return @min(want, @as(i32, @intCast(self.pn().width)) - self.sc(16));
+}
+
 pub fn rect(self: *const Editor) Rect {
     const fs = theme.font_label * self.uf();
     const lh = text_mod.height(fs) + self.sc(7);
-    const pw = self.sc(620);
+    const pw = panelWidth(self);
     const ph = lh * @as(i32, help_lines.len) + self.sc(76);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
@@ -64,12 +81,13 @@ pub fn draw(self: *Editor, canvas: *Canvas) void {
     text_mod.drawStyled(canvas, r.x + pad + self.sc(26), r.y + self.sc(20) + @divTrunc(self.sc(18) - text_mod.heightStyled(15 * f, .semibold), 2), 15.0 * f, th.fg, .semibold, "Keyboard shortcuts");
     var y = r.y + self.sc(58);
     const ks = theme.font_small * f;
+    const mx = r.x + pad + meaningX(self);
     for (help_lines) |l| {
         // the keys as a cap, the meaning beside it
         const kw = text_mod.width(ks, l[0]) + self.sc(12);
         canvas.fillRoundRectAA(r.x + pad, y + @divTrunc(lh - self.sc(20), 2) - self.sc(1), kw, self.sc(20), 5 * f, th.track);
         text_mod.draw(canvas, r.x + pad + self.sc(6), y + @divTrunc(lh - text_mod.height(ks), 2) - self.sc(1), ks, th.fg, l[0]);
-        text_mod.draw(canvas, r.x + pad + self.sc(232), y + @divTrunc(lh - text_mod.height(fs), 2) - self.sc(1), fs, th.muted, l[1]);
+        text_mod.draw(canvas, mx, y + @divTrunc(lh - text_mod.height(fs), 2) - self.sc(1), fs, th.muted, l[1]);
         y += lh;
     }
 }
