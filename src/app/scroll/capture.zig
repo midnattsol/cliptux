@@ -3,8 +3,9 @@
 //! it can, else the person scrolling), stitched (stitch.zig) while the
 //! control (ui/scroll_hud.zig) shows the image growing (session.zig).
 //! Stop, the end of the page or the maximum height ends it; a short stop
-//! pauses with its reason and Continue (stop.zig). The tall image goes
-//! to the editor.
+//! pauses with its reason and Continue (stop.zig); no frame at all says
+//! so on the control. The tall image goes to the editor. Whether it can
+//! run at all is decided before (available.zig).
 
 const std = @import("std");
 const capture = @import("../capture.zig");
@@ -31,9 +32,21 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     var hud = try hud_mod.Hud.open(c.win, theme.of(theme.readPrefs(c.conn, 800)));
     defer c.win.closeWindow();
     try showHud(c, &hud, cap, region, shell);
-    var session = try Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height);
+    var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(&hud, err);
     defer session.deinit();
-    return session.collect();
+    return session.collect() catch |err| failed(&hud, err);
+}
+
+/// No frame of the region came (the source would not start, or gave
+/// nothing): the control says so until it is closed, instead of
+/// vanishing. Null: nothing to edit.
+fn failed(hud: *hud_mod.Hud, err: anyerror) !?png.Image {
+    std.log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
+    hud.show(.failed, "Couldn\u{2019}t capture the region", "Close and try again", 0);
+    while (true) {
+        try hud.draw(null);
+        if (try hud.poll(100)) |_| return null;
+    }
 }
 
 /// Map the control, beside the region on GNOME, and let the overlay go.

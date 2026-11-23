@@ -170,7 +170,7 @@ fn copy(c: Ctx, data: []u8) !void {
 fn scrolling(c: Ctx, cap: *capture.Capture) !Outcome {
     const s = settings.load(c.gpa, c.env.home);
     var tall = (scroll.run(c, cap, s) catch |err| {
-        std.log.warn("scrolling capture failed ({t}): it needs the GNOME integration or a compositor Shotlet can capture directly", .{err});
+        std.log.warn("scrolling capture failed ({t})", .{err});
         return .done;
     }) orelse return .done;
     errdefer tall.deinit(c.gpa);

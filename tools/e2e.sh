@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
+scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark scroll-unavailable modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
 
 # ---------------------------------------------------------------- inner side
 # (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:

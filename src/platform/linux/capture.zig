@@ -117,6 +117,9 @@ pub const captureWindow = @import("capture/window_direct.zig").run;
 /// Frames of a region for a scrolling capture, and who scrolls.
 pub const ScrollSource = @import("capture/scroll_source.zig").Source;
 pub const openScroll = @import("capture/scroll_source.zig").open;
+/// Whether a scrolling capture can run here, before a region is picked.
+pub const ScrollSupport = @import("../api/capture.zig").ScrollSupport;
+pub const scrollSupport = @import("capture/scroll_support.zig").support;
 
 /// Forget the permissions captures keep (restore token, the portal's
 /// grants); with `dry_run` only find them.
@@ -131,4 +134,5 @@ pub const permissionsCli = @import("capture/permissions.zig").run;
 comptime {
     _ = direct;
     _ = winrects;
+    _ = @import("capture/scroll_support.zig");
 }

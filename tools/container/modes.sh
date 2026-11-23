@@ -4,7 +4,9 @@
 # `shotlet window` is KWin's window picker (ScreenShot2.CaptureInteractive,
 # authorized by the installed desktop entry), and on wlroots an area
 # selection with a note that windows are not offered. Then the editor's
-# mode strip, and a click on a window selecting it on KWin.
+# mode strip, and a click on a window selecting it on KWin. Last,
+# `shotlet scroll`: the region picker (direct capture), and with
+# SHOTLET_NO_DIRECT=1 the notice that it cannot run here, exit status 1.
 mkdir -p "$XDG_CONFIG_HOME/shotlet"
 printf 'thumbnail=never\nafter_fullscreen=copy\nwindow_shadow=false\n' >"$XDG_CONFIG_HOME/shotlet/config"
 check "a window to capture is up" start_droptarget
@@ -48,3 +50,16 @@ else
     keys esc
 fi
 kill "$SHOT_PID" 2>/dev/null
+# a scrolling capture: direct capture here, so the region picker; with
+# direct capture turned off nothing captures while the person scrolls:
+# it says so before any picker, and exits 1
+run_shotlet scroll scroll
+check "shotlet scroll: the region picker (direct capture)" wait_log 15 "scrolling capture: pick a region"
+sleep 1
+keys esc
+check "  ... Esc cancels it" wait_exit 10
+SHOTLET_NO_DIRECT=1 run_shotlet scroll-off scroll
+check "without direct capture, shotlet scroll exits 1" eval 'wait_exit 10 && { wait "$SHOT_PID"; test $? = 1; }'
+check "  ... saying why on stderr" grep -qF "shotlet scroll: Scrolling capture isn’t available here. This desktop doesn’t let Shotlet capture while you scroll." "$SHOT_LOG"
+check "  ... and on the screen" wait_log 10 "toast: Scrolling capture isn.t available here"
+check "  ... no region picker" eval '! grep -q "pick a region" "$SHOT_LOG"'

@@ -77,6 +77,7 @@ test {
     _ = @import("app/modes/window_frame.zig");
     _ = @import("app/modes/cli.zig");
     _ = @import("app/scroll/capture.zig");
+    _ = @import("app/scroll/available.zig");
     _ = @import("app/scroll/session.zig");
     _ = @import("app/scroll/stop.zig");
     _ = @import("app/pin.zig");

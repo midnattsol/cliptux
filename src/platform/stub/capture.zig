@@ -15,6 +15,7 @@ const Rect = @import("../../ui/shapes.zig").Rect;
 const Env = @import("../../app/env.zig").Env;
 
 pub const Path = types.Path;
+pub const ScrollSupport = types.ScrollSupport;
 
 /// Remember how the last capture went.
 pub fn remember(home: []const u8, p: Path) void {
@@ -69,6 +70,11 @@ pub const ScrollSource = union(enum) {
         return error.Unavailable;
     }
 };
+/// Whether a scrolling capture can run here (before a region is picked).
+pub fn scrollSupport(gpa: std.mem.Allocator, env: Env, s: *desktop.Session) ScrollSupport {
+    _ = .{ gpa, env, s };
+    return .unsupported;
+}
 pub fn openScroll(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) error{Unavailable}!ScrollSource {
     _ = .{ gpa, env, s, cap, region, shell, auto };
     return error.Unavailable;

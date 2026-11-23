@@ -227,6 +227,17 @@ windows are is taken with the capture, never live:
   and direct capture; on KDE, unless KWin offers Shotlet its fake input,
   you scroll yourself and Shotlet captures as the content moves (also
   with `scroll_auto=false`).
+  Whether it can run at all is checked first, before a region is picked
+  (`shotlet scroll`, `J` in the mode strip and the tray alike): it needs
+  the GNOME integration or a compositor Shotlet captures directly. When
+  neither is there, no picker opens; a notice says why and what to do,
+  as does stderr (exit status 1): "Scrolling capture needs the GNOME
+  integration" with "It loads at your next login: log out and back in"
+  (installed, not loaded yet), "Install it with shotlet
+  gnome-integration install" or "It isn't running: see shotlet
+  gnome-integration status"; elsewhere "This desktop doesn't let Shotlet
+  capture while you scroll". If no frame of the region comes once it has
+  started, the control says "Couldn't capture the region" with Close.
 - **Self-timer**: a small countdown in the middle of the screen, gone
   before the capture; on GNOME the shell draws it and it never takes the
   keyboard focus, so a menu left open for it stays open. Click it to
@@ -683,7 +694,10 @@ expected height, its marker band exactly once, scrolling in the editor),
 lines it up, Stop ends it), `modes-scroll-stops` and `modes-scroll-dark`
 (each stop reason in the light and dark control: the page didn't move and C
 continues, couldn't match and Continue then scrolling back keeps what was
-stitched, the height limit, Esc on a pause; `tools/e2e/scroll.sh`)
+stitched, the height limit, Esc on a pause; `tools/e2e/scroll.sh`),
+`scroll-unavailable` (without the extension, then with it installed for
+the next login: `shotlet scroll` exits 1 with the reason on stderr and
+in a notice, no picker, nothing captured; after a new login the picker)
 and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
 run without the extension. `blink` and `blink-ext` (`tools/e2e/scenarios/blink.sh`)
 film the editor's open and close frame by frame with GNOME's animations on
@@ -717,7 +731,8 @@ text search with Tesseract (English and Spanish), and the editor's text
 tools with it (`sway:ocr-tools`: `shotlet text`, Copy text, Redact
 sensitive data finding an e-mail address and a token); `modes`: screen
 capture without the editor and window capture (KWin's picker; an area on
-wlroots); on sway, `record`: a GIF recording through
+wlroots), `shotlet scroll` opening its region picker, and with
+`SHOTLET_NO_DIRECT=1` saying it cannot run here (exit status 1); on sway, `record`: a GIF recording through
 `xdg-desktop-portal-wlr`, one chooser and then none. Scenarios count the
 consent prompts: zero on the direct path. Shotlet is installed in each
 container with `install.sh`. Each scenario runs in a throwaway

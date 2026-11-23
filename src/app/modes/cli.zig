@@ -1,6 +1,8 @@
 //! `shotlet MODE` (see mode.zig): the self-timer and the window mode
-//! where the GNOME extension does not handle them, then the usual
-//! capture flow (app/shot.zig) with the mode.
+//! where the GNOME extension does not handle them, a scrolling capture
+//! only where one can run (scroll/available.zig: else the person is told
+//! why and it exits with status 1), then the usual capture flow
+//! (app/shot.zig) with the mode.
 
 const std = @import("std");
 const platform = @import("../../platform/api.zig");
@@ -9,6 +11,7 @@ const env_mod = @import("../env.zig");
 const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
 const settings = @import("settings.zig");
+const scroll_available = @import("../scroll/available.zig");
 
 /// The GNOME extension is here to pick windows.
 fn gnomeExtension(gpa: std.mem.Allocator, env: env_mod.Env) bool {
@@ -24,6 +27,7 @@ pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, cmd: []const u8, rest: []co
         std.log.info("window capture: not offered here; selecting an area instead", .{});
         req.mode = .area;
     }
+    if (req.mode == .scroll and !scroll_available.ensure(gpa, env)) std.process.exit(1);
     try shot.run(gpa, env, .{ .req = req }, null, 0);
     return true;
 }

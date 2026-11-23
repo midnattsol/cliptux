@@ -38,7 +38,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, p: Parsed) !void {
         .quick => try @import("quick.zig").run(gpa, env, (try need(p, 2))[0], r[1], readyFd(r[2..])),
         .quick_video => try @import("../record/quickvid.zig").run(gpa, env, (try need(p, 2))[0], r[1]),
         .trim => try @import("../ui/recui/trimui.zig").run(gpa, env, (try need(p, 2))[0], r[1], r[2..]),
-        .toast => try @import("toastwin.zig").run(gpa, env, (try need(p, 1))[0], if (r.len > 1) r[1] else ""),
+        .toast => try @import("toastwin.zig").runArgs(gpa, env, try need(p, 1)),
         .test_window, .test_grab, .test_font, .test_decode => {
             _ = try platform.devtools(gpa, env, p.chain.items[0].name, r);
         },

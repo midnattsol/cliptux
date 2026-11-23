@@ -5,6 +5,7 @@
 //!   running, warning   Stop                         Enter; Esc cancels
 //!   paused             Cancel  Finish  Continue     Esc, Enter, C or Space
 //!   done               Finish (the editor opens by itself)
+//!   failed             Close                        Enter or Esc
 //!
 //! Light or dark with the desktop (ui/theme.zig). It changes in place:
 //! the layout is the same in every phase, only words and buttons change,
@@ -43,6 +44,8 @@ pub const Phase = enum {
     paused,
     /// complete; the editor opens in a moment
     done,
+    /// it could not start (no frame of the region): why, and Close
+    failed,
 };
 
 pub const Action = enum { finish, cancel, @"continue" };
@@ -169,7 +172,7 @@ pub const Hud = struct {
         const pv: Rect = .{ .x = x0, .y = self.sc(preview_y), .w = inner, .h = self.sc(preview_h) };
         cv.fillRect(pv.x, pv.y, pv.w, pv.h, lk.well);
         if (src) |s| drawPreview(cv, pv, s);
-        text.drawStyled(cv, x0, pv.y + pv.h + self.sc(8), fs, lk.muted, text.Style.regular.num(), self.detail);
+        if (self.phase != .failed) text.drawStyled(cv, x0, pv.y + pv.h + self.sc(8), fs, lk.muted, text.Style.regular.num(), self.detail);
         self.layoutButtons(cv.w, cv.h);
         for (self.buttons) |b| self.drawButton(cv, b);
     }
@@ -182,7 +185,11 @@ pub const Hud = struct {
         const inner = w - 2 * x0;
         const b = &self.buttons_buf;
         if (self.phase != .paused) {
-            b[0] = .{ .r = .{ .x = x0, .y = y, .w = inner, .h = bh }, .action = .finish, .label = if (self.phase == .done) "Finish" else "Stop", .primary = true };
+            b[0] = .{ .r = .{ .x = x0, .y = y, .w = inner, .h = bh }, .action = .finish, .label = switch (self.phase) {
+                .done => "Finish",
+                .failed => "Close",
+                else => "Stop",
+            }, .primary = true };
             self.buttons = b[0..1];
             return;
         }
