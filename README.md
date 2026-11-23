@@ -164,16 +164,28 @@ the selection. Its keys work while it shows (none is a tool's key):
 | `Q` | Record | the recording picker, on the same frozen frame |
 | `H` | Self-timer | `shotlet timer` |
 
-**The magnifier.** While you pick an area, a lens beside the pointer
-shows the pixels around it (the centre one framed) with its coordinates
-and colour (`#RRGGBB` and a swatch) in a label below; it moves off the
-pointer's way near the edges and never covers the mode strip, the
-toolbar or the size label. `C` copies the colour under the pointer (the
-label says "Copied"), the wheel or `-` `=` zoom it (4×, 8×, 12×, 16×;
-the zoom is kept for the next capture, `loupe_zoom=8`). Settings ›
-General › Capture › Magnifier (`loupe=always|selecting|never`) shows it
-always (the default: pointing and dragging), only while dragging a
-selection, or never. The colour picker (`I`) uses the same lens.
+**The magnifier.** While you pick an area, a small lens shows the pixels
+around the pointer (the one under it framed), only when it helps: not
+while the pointer sweeps across the screen, but as soon as it slows down
+to aim or rests, and always while you drag an edge or a corner of the
+selection or nudge it with the arrow keys. On an edge it looks at that
+edge, the selection drawn inside it to the pixel (the outside dimmed as
+on the screen), so you see exactly which pixel the cut falls on. It sits
+on the selection's inside, away from where it grows, and never covers
+the corner you move, the mode strip, the toolbar or the size label (the
+only label while you select). Hold `Alt` to see the colour under the
+pointer (`#RRGGBB` and a swatch); `C` copies it (the label says
+"Copied"), the wheel or `-` `=` zoom the lens (4×, 8×, 12×, 16×, a faint
+pixel grid from 12×; the zoom is kept for the next capture,
+`loupe_zoom=8`). Settings › General › Capture › Magnifier
+(`loupe=auto|always|never`) shows it when needed (the default), always
+while pointing and dragging, or never; an older `loupe=selecting` reads
+as `auto`. The colour picker (`I`) uses the same lens.
+
+**Arrow keys** move the selection by a pixel (`Shift`: 10): the whole
+of it, or once you have dragged one of its edges or corners, that edge
+or corner (`Alt`+arrows: the right and bottom edges); the magnifier
+shows the edge as it moves.
 
 **Click a window while selecting an area**, as on macOS: the window under
 the pointer lights up (an accent outline, the rest dimmed), a click
@@ -519,7 +531,7 @@ the editor for the full list.
 | Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
 | Click a window | select that window (before a selection; GNOME with the extension, KDE) |
 | `G` `W` `D` `J` `O` `Q` `H` | before a selection: area, window, screen, scrolling, text, record, timer (the mode strip) |
-| `C`, wheel, `-` `=` | while the magnifier shows: copy the pixel's `#RRGGBB`, zoom it |
+| `Alt`, `C`, wheel, `-` `=` | while picking an area: show and copy the pixel's `#RRGGBB`, zoom the magnifier |
 | `Enter` / `Ctrl+C` | copy to the clipboard and close |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
 | `Esc` / right click | cancel the current action; `Esc` again closes (with unsaved annotations it asks first: `Esc` once more discards them) |
@@ -534,7 +546,7 @@ the editor for the full list.
 | `1`-`8`, `9` | preset colours, custom colour |
 | wheel, `-` `=` | size |
 | `Shift` while drawing | square, circle, 45° lines and arrows (`Alt`: from the centre) |
-| arrows, `Shift`+arrows | move the selection or shape by 1 / 10 px (`Alt`: resize) |
+| arrows, `Shift`+arrows | move the shape, the selection's edge last dragged or the whole selection by 1 / 10 px (`Alt`: resize) |
 | `Delete`, `Ctrl+D`, `Ctrl+]` | delete, duplicate, bring to front |
 | `Ctrl+Z` / `Ctrl+Shift+Z`, `Ctrl+Y` | undo / redo |
 | `Tab`, `Enter` | move through the toolbar, activate |
@@ -543,7 +555,7 @@ the editor for the full list.
 ## Editor tools
 
 - **Colour picker** (`I`, or the eyedropper on the toolbar): a loupe shows
-  the pixel grid and the colour under the pointer; a click copies
+  the pixels and the colour under the pointer; a click copies
   `#RRGGBB`, `Shift`+click `rgb(r, g, b)`, `Alt`+click makes it the
   annotation colour. The last six picked colours wait in the colour
   popover, one click to use one.

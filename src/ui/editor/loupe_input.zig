@@ -1,10 +1,12 @@
-//! The magnifier's keys and wheel (editor_ui/loupe.zig): while it shows
-//! in the capture screen, C copies the pixel's colour as `#RRGGBB` (the
-//! label says so), and the wheel or - = zoom it (the colour picker's
-//! lens zooms too). C is matched like the mode strip's letters, by the
-//! key's place (where a US layout has it). While the magnifier shows it
-//! wins over C for crop: there is no selection to crop yet, or one is
-//! being dragged.
+//! The magnifier's keys and wheel (editor_ui/loupe.zig): while it is up
+//! in the capture screen (also while it waits for the pointer to slow
+//! down), C copies the pixel's colour as `#RRGGBB` (the label says so),
+//! and the wheel or - = zoom it (the colour picker's lens zooms too).
+//! Holding Alt shows that colour (editor_ui/loupe.zig reads the held
+//! modifier). C is matched like the mode strip's letters, by the key's
+//! place (where a US layout has it). While the magnifier is up it wins
+//! over C for crop: there is no selection to crop yet, or one is being
+//! dragged.
 
 const std = @import("std");
 const editor = @import("../editor.zig");
@@ -15,7 +17,7 @@ const color = @import("../tools/color.zig");
 
 const Editor = editor.Editor;
 
-/// A key while the magnifier shows. True when taken.
+/// A key while the magnifier is up. True when taken.
 pub fn onKey(ed: *Editor, k: window.Key) !bool {
     if (k.ctrl or k.alt or !ui.loupeWanted(ed)) return false;
     switch (k.code) {
@@ -30,8 +32,8 @@ pub fn onKey(ed: *Editor, k: window.Key) !bool {
     return true;
 }
 
-/// Wheel notches while the magnifier shows (up, positive, zooms in). True when
-/// taken.
+/// Wheel notches while the magnifier is up (up, positive, zooms in). True
+/// when taken.
 pub fn onScroll(ed: *Editor, steps: i32) bool {
     if (steps == 0 or !ui.loupeWanted(ed)) return false;
     zoomBy(ed, steps);

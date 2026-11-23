@@ -194,20 +194,6 @@ pub const Document = struct {
             .h = s.h,
         };
     }
-
-    /// Grow or shrink the selection's right/bottom edges, kept inside the
-    /// image and at least 1×1.
-    pub fn resizeSelection(self: *Document, dw: i32, dh: i32) void {
-        const s = (self.sel orelse return).normalized();
-        const iw: i32 = @intCast(self.width);
-        const ih: i32 = @intCast(self.height);
-        self.sel = .{
-            .x = s.x,
-            .y = s.y,
-            .w = std.math.clamp(s.w + dw, 1, @max(1, iw - s.x)),
-            .h = std.math.clamp(s.h + dh, 1, @max(1, ih - s.y)),
-        };
-    }
 };
 
 fn freeShapes(alloc: std.mem.Allocator, list: []Shape) void {
@@ -328,8 +314,6 @@ test "keyboard selection moves stay inside the image" {
     try testing.expectEqual(@as(i32, 0), d.sel.?.x);
     d.moveSelection(500, 500);
     try testing.expect(d.sel.?.eql(.{ .x = 80, .y = 60, .w = 20, .h = 20 }));
-    d.resizeSelection(10, -100);
-    try testing.expect(d.sel.?.eql(.{ .x = 80, .y = 60, .w = 20, .h = 1 }));
 }
 
 test "undo covers a text box's width" {

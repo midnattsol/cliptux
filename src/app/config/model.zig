@@ -23,20 +23,31 @@ pub const Thumbnail = enum {
     }
 };
 
-/// When the magnifier shows while choosing an area: while pointing and
-/// dragging (always), only while dragging a selection, or never.
+/// When the magnifier shows while choosing an area: when the pointer
+/// slows down or rests, while an edge is dragged or nudged (auto); all
+/// the while pointing and dragging (always); or never.
 pub const Loupe = enum {
+    auto,
     always,
-    selecting,
     never,
 
     pub fn label(l: Loupe) []const u8 {
         return switch (l) {
+            .auto => "When Needed",
             .always => "Always",
-            .selecting => "While Selecting",
             .never => "Never",
         };
     }
+
+    /// The setting a config value names; older files' "selecting" (only
+    /// while dragging) is auto now.
+    pub fn parse(value: []const u8) ?Loupe {
+        if (std.mem.eql(u8, value, legacy_selecting)) return .auto;
+        return std.meta.stringToEnum(Loupe, value);
+    }
+
+    /// what older files called the setting closest to auto
+    pub const legacy_selecting = "selecting";
 };
 
 /// The magnifier's zoom levels: screen pixels per captured pixel, at
@@ -92,7 +103,7 @@ pub const Config = struct {
     history_max_mb: u32 = 500,
     /// the magnifier while choosing an area, and its zoom (one of
     /// loupe_zooms)
-    loupe: Loupe = .always,
+    loupe: Loupe = .auto,
     loupe_zoom: u8 = loupe_zoom_default,
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from
@@ -134,6 +145,8 @@ pub const Config = struct {
 // --- keys ---
 
 pub const n_fixed_keys = 19;
+/// `loupe`'s number among the keys
+pub const loupe_key = 17;
 /// an editor action's key: this, then the action's name
 pub const bind_prefix = "shortcut_";
 pub const n_keys = n_fixed_keys + n_actions;
@@ -206,7 +219,7 @@ pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
         14 => boolText(cfg.history),
         15 => intText(buf, cfg.history_max),
         16 => intText(buf, cfg.history_max_mb),
-        17 => @tagName(cfg.loupe),
+        loupe_key => @tagName(cfg.loupe),
         18 => intText(buf, cfg.loupe_zoom),
         else => formatBind(cfg.binds[k - n_fixed_keys], buf),
     };
@@ -227,6 +240,11 @@ pub fn valueHash(v: []const u8) u64 {
 pub fn rememberBase(cfg: *Config) void {
     var buf: [64]u8 = undefined;
     for (0..n_keys) |k| cfg.base[k] = valueHash(formatValue(cfg, k, &buf));
+}
+
+test "the keys' numbering" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("loupe", keyName(loupe_key, &buf));
 }
 
 test "the magnifier's zoom snaps to a level" {

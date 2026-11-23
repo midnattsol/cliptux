@@ -33,7 +33,7 @@ pub const Hit = union(enum) {
     win_close,
     /// when the thumbnail shows: after Save, Copy and Save, never
     cycle_thumbnail,
-    /// when the magnifier shows: always, while selecting, never
+    /// when the magnifier shows: when needed, always, never
     cycle_loupe,
     quick_minus,
     quick_plus,
