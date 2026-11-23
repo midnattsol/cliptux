@@ -9,6 +9,7 @@ const tall_view = @import("../tall_view.zig");
 const caches = @import("caches.zig");
 const pointer = @import("pointer.zig");
 const drag = @import("drag.zig");
+const hit = @import("hit.zig");
 const keys_input = @import("keys_input.zig");
 const props = @import("props.zig");
 const text_edit = @import("text_edit.zig");
@@ -39,6 +40,12 @@ pub fn handle(ed: *Editor, ev: window.InputEvent) !void {
         },
         .pointer_axis => |a| try onScroll(ed, a.value, a.value120),
         .key => |k| try onKeyEvent(ed, k),
+    }
+    // input may start, end or cancel a drag, or change what lies under
+    // the pointer
+    switch (ev) {
+        .pointer_motion, .pointer_button, .key => try ed.win.setCursor(hit.cursorFor(ed, ed.mouse)),
+        else => {},
     }
 }
 

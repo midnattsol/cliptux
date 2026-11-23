@@ -14,7 +14,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark scroll-unavailable modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
+scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime cursors cursors-drawn quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark scroll-unavailable modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
 
 # ---------------------------------------------------------------- inner side
 # (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:
@@ -23,7 +23,7 @@ scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyb
 # the scenario's settings, before anything starts
 prepare_scenario() {
     case $scenario in
-    capture | blink* | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | shell* | perms* | gnome-install | pin)
+    capture | blink* | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | cursors* | shell* | perms* | gnome-install | pin)
         # these check what happens without the floating thumbnail
         mkdir -p "$HOME/.config/shotlet"
         printf 'thumbnail=never\n' >"$HOME/.config/shotlet/config"
@@ -118,6 +118,7 @@ session_env() {
     case $1 in
         multimon | modes-screen) mons="1600x900 1280x720" ;;
         mixed | fractional | integer | shell-mixed) mons="2560x1440 1280x720" ;;
+        cursors-drawn) mons="2560x1440" ;;
         keyboard | clipboard) layout=es ;;
     esac
     # GNOME maps windows (and portal callers) to apps through installed

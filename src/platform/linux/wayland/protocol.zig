@@ -231,6 +231,27 @@ pub const wp_fractional_scale_v1 = struct {
     pub const ev_preferred_scale = 0;
 };
 
+/// cursor-shape-v1 (staging): the compositor draws the pointer from the
+/// desktop's cursor theme
+pub const wp_cursor_shape_manager_v1 = struct {
+    pub const get_pointer = 1;
+};
+
+pub const wp_cursor_shape_device_v1 = struct {
+    pub const destroy = 0;
+    pub const set_shape = 1;
+    /// the shapes shotlet uses (CSS cursor names)
+    pub const shape_default: u32 = 1;
+    pub const shape_crosshair: u32 = 8;
+    pub const shape_text: u32 = 9;
+    pub const shape_grab: u32 = 16;
+    pub const shape_grabbing: u32 = 17;
+    pub const shape_ew_resize: u32 = 26;
+    pub const shape_ns_resize: u32 = 27;
+    pub const shape_nesw_resize: u32 = 28;
+    pub const shape_nwse_resize: u32 = 29;
+};
+
 pub const wl_data_device_manager = struct {
     pub const create_data_source = 0;
     pub const get_data_device = 1;

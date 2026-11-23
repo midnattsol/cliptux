@@ -58,9 +58,8 @@ pub fn onMotion(ed: *Editor) !void {
     }
 }
 
-/// No drag: the cursor, the hovered button and selection handle.
+/// No drag: the hovered button and selection handle.
 fn hover(ed: *Editor, m: Point) !void {
-    try ed.win.setCursor(hit.cursorFor(ed, m));
     const over: i32 = if (ui.buttonAt(ed, m)) |bi| @intCast(bi) else -1;
     if (over != ed.hover_btn) {
         const t = motion.now();

@@ -114,6 +114,7 @@ pub const Picker = struct {
                 if (b.button == .right and b.pressed) self.result = .cancelled;
                 if (b.button != .left) return;
                 if (b.pressed) self.onPress(p) else self.onRelease(p);
+                self.win.setCursor(self.cursorAt(p)) catch {};
             },
             .key => |k| if (k.pressed) self.onKey(k),
             .pointer_axis => {},
@@ -164,15 +165,17 @@ pub const Picker = struct {
         return null;
     }
 
+    /// What the drag in progress does, else what a press at `p` would.
     fn cursorAt(self: *const Picker, p: Point) window.Cursor {
-        if (self.st.hover != null) return .arrow;
-        if (self.sel.handleAt(p)) |h| return switch (h) {
-            0, 4 => .resize_nwse,
-            2, 6 => .resize_nesw,
-            1, 5 => .resize_ns,
-            else => .resize_ew,
-        };
-        if (self.sel.sel) |s| if (selmod.inside(s, p)) return .move;
+        switch (self.sel.drag) {
+            .moving => return .grabbing,
+            .resizing => |rz| return selchrome.handleCursor(rz.handle),
+            .selecting => return .crosshair,
+            .none => {},
+        }
+        if (self.st.hover != null or self.pressed_bar != null) return .arrow;
+        if (self.sel.handleAt(p)) |h| return selchrome.handleCursor(h);
+        if (self.sel.sel) |s| if (selmod.inside(s, p)) return .grab;
         return .crosshair;
     }
 

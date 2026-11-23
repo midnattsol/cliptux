@@ -9,7 +9,6 @@ const buffers = @import("buffers.zig");
 const registry = @import("registry.zig");
 const events = @import("events.zig");
 const text_input = @import("text_input.zig");
-const cursor = @import("cursor.zig");
 const data_device = @import("data_device.zig");
 const clipboard = @import("clipboard.zig");
 const drag = @import("drag.zig");
@@ -68,13 +67,12 @@ fn openOn(w: *Window, idx: u8, title: []const u8, o: *const Output) !void {
     output.setOutputRect(s, o);
 }
 
-/// Take the seat's devices, the data device, text input and cursors, then
-/// wait for the initial configure of every surface.
+/// Take the seat's devices, the data device and text input, then wait
+/// for the initial configure of every surface.
 fn finishOpen(w: *Window) !void {
     try registry.updateSeatDevices(w);
     try data_device.ensureDevice(w);
     try text_input.ensureObject(w);
-    if (w.cursors.surface == 0) try cursor.init(w);
     while (!allConfigured(w)) try events.dispatchOne(w);
 }
 

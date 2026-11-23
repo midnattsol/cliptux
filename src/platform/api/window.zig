@@ -58,7 +58,26 @@ pub const Key = struct {
     }
 };
 
-pub const Cursor = enum { crosshair, arrow, move, text, resize_nwse, resize_nesw, resize_ns, resize_ew };
+/// The pointer's shape over our surfaces. A backend shows the desktop's
+/// own cursor for each where it can, else draws a lookalike.
+pub const Cursor = enum {
+    crosshair,
+    arrow,
+    /// over something that a drag moves (open hand)
+    grab,
+    /// while dragging it (closed hand)
+    grabbing,
+    text,
+    resize_nwse,
+    resize_nesw,
+    resize_ns,
+    resize_ew,
+
+    /// The hand over something draggable: closed while `held`.
+    pub fn hand(held: bool) Cursor {
+        return if (held) .grabbing else .grab;
+    }
+};
 
 /// A floating surface above other windows (thumbnails, pins, controls),
 /// where the platform has such surfaces (Linux: wlr-layer-shell); an
@@ -142,4 +161,10 @@ test "layer anchors and keyboard use wlr-layer-shell's values" {
     const a: Layer.Anchor = .{ .top = true, .right = true };
     try std.testing.expectEqual(@as(u32, 1 | 8), @as(u32, @bitCast(a)));
     try std.testing.expectEqual(@as(u32, 2), @backingInt(Layer.Keyboard.on_demand));
+}
+
+test "the hand closes while held" {
+    const std = @import("std");
+    try std.testing.expectEqual(Cursor.grab, Cursor.hand(false));
+    try std.testing.expectEqual(Cursor.grabbing, Cursor.hand(true));
 }

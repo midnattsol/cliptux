@@ -237,6 +237,15 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     }
 }
 
+/// The ends of the kept range drag sideways; elsewhere the arrow.
+fn cursorOf(hover: ?draw.Part) window.Cursor {
+    const h = hover orelse return .arrow;
+    return switch (h) {
+        .start, .end => .resize_ew,
+        .play, .cancel, .save, .strip => .arrow,
+    };
+}
+
 fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
     const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
     const F = frame_mod.Frame;
@@ -251,6 +260,7 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
                 try win.startMove();
             };
             t.st.hover = if (t.dragging == null) draw.hit(x, y, &t.st) else t.dragging;
+            win.setCursor(cursorOf(t.st.hover)) catch {};
         },
         .pointer_button => |b| if (b.button == .left) {
             if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else {

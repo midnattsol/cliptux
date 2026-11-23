@@ -103,6 +103,9 @@ scenario_multimon() {
     shot 1 editor1
     # 1400..1800 x 300..500 in desktop coordinates: across the seam
     drag 0 1400 300 0 1599 400 1 100 450 1 200 500
+    # the pointer (shown in the shots) off the second monitor: its corner
+    # arrows have the pill's white
+    drv move 0 1500 350
     sleep 0.3
     shot 0 sel0
     shot 1 sel1

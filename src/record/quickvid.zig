@@ -124,6 +124,7 @@ const Quick = struct {
                     const dy = (m.y - self.press_at[1]) / k;
                     if (dx * dx + dy * dy > 36) self.startDrag() catch |err| std.log.warn("quick video: drag failed: {t}", .{err});
                 }
+                self.win.setCursor(self.cursor()) catch {};
             },
             .pointer_button => |b| if (b.button == .left) {
                 const h = card.hit(@intFromFloat(b.x / k), @intFromFloat(b.y / k));
@@ -135,9 +136,17 @@ const Quick = struct {
                     self.pressed = null;
                     if (p != null and p == h) self.act(h.?);
                 }
+                self.win.setCursor(self.cursor()) catch {};
             },
             else => {},
         }
+    }
+
+    /// The hand over the picture, which drags the file out (closed while
+    /// pressed); the arrow over the buttons.
+    fn cursor(self: *const Quick) window.Cursor {
+        if (self.hover != .body) return .arrow;
+        return window.Cursor.hand(self.pressed == .body);
     }
 
     fn act(self: *Quick, c: card.Control) void {

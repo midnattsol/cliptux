@@ -21,8 +21,14 @@ pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
                 c.fade_from = sys.monoMs();
             };
         },
-        .pointer_motion => |m| onMotion(self, m.x, m.y),
-        .pointer_button => |b| onButton(self, b.button, b.pressed, b.x, b.y),
+        .pointer_motion => |m| {
+            onMotion(self, m.x, m.y);
+            self.win.setCursor(cursorOf(self)) catch {};
+        },
+        .pointer_button => |b| {
+            onButton(self, b.button, b.pressed, b.x, b.y);
+            self.win.setCursor(cursorOf(self)) catch {};
+        },
         .pointer_axis => {},
         .key => |k| if (k.pressed) {
             // a layer surface has the keyboard only while the pointer
@@ -51,6 +57,15 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
             self.startDrag(p.card) catch |err| std.log.warn("quick access: drag failed: {t}", .{err});
         }
     };
+}
+
+/// The hand over a card's picture, which drags the capture out (closed
+/// while pressed); the arrow over its buttons and menu.
+fn cursorOf(self: *const Quick) window.Cursor {
+    const h = self.hover orelse return .arrow;
+    if (h.control != .body) return .arrow;
+    const held = if (self.pressed) |p| p.control == .body else false;
+    return window.Cursor.hand(held);
 }
 
 /// Right press toggles a card's menu; a left click (press and release

@@ -24,7 +24,11 @@ Wayland and DBus wire protocols directly.
 - One floating toolbar in a translucent, blurred material; colour, size
   and style in a popover, the rest under More. Light or dark and the
   accent colour follow the desktop (Settings portal), and transitions
-  stop when the desktop asks for reduced motion.
+  stop when the desktop asks for reduced motion. The pointer is the
+  desktop's own (cursor theme and size, through cursor-shape-v1): a hand
+  over what a drag moves, closed while it does, and resize arrows on
+  edges and corners; compositors without the protocol get drawn
+  lookalikes at the monitor's scale.
 - Copies straight to the clipboard (nothing written to disk), saves to
   your Pictures folder, or asks where to save (Save As, through the
   desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
@@ -721,7 +725,11 @@ run without the extension. `blink` and `blink-ext` (`tools/e2e/scenarios/blink.s
 film the editor's open and close frame by frame with GNOME's animations on
 (`shotlet-drive`'s `film` and `cut`) and fail on any frame that is neither
 the desktop, the editor nor a cross-fade of the two: without the extension
-the close (Esc, Copy) must have none, with it the open too. `tools` (`tools/e2e/tools.sh`) checks the
+the close (Esc, Copy) must have none, with it the open too. `cursors` and `cursors-drawn`
+(`tools/e2e/scenarios/cursors.sh`) follow the editor's pointer over a
+selection, dragging it and on its edge and corner, through
+cursor-shape-v1 and, with `SHOTLET_NO_CURSOR_SHAPE=1` on a 2x monitor,
+drawn by Shotlet (debug builds log each cursor shown). `tools` (`tools/e2e/tools.sh`) checks the
 editor's tools on a known picture: the colour picker's copies (read back
 with `wl-paste`), the ruler's snapped length, the spotlight's dimming and
 crop (and its undo) in the copies, `shotlet edit FILE`, `shotlet pin`

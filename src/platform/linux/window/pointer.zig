@@ -22,7 +22,7 @@ pub const Pointer = struct {
     x: f64 = 0,
     y: f64 = 0,
     surface: u8 = 0,
-    /// serial of the last enter, for set_cursor
+    /// serial of the last enter, for setting the cursor
     enter_serial: u32 = 0,
     /// vertical scroll gathered until the pointer frame
     axis_value: f64 = 0,
@@ -43,7 +43,9 @@ pub fn updateDevice(w: *Window, has_pointer: bool) !void {
             // zwp_relative_pointer_manager_v1.get_relative_pointer
             try c.request(w.globals.rel_manager, 1, &.{ .{ .new_id = p.rel }, .{ .object = p.id } });
         }
+        try cursor.pointerAdded(w);
     } else if (!has_pointer and p.id != 0) {
+        try cursor.pointerRemoved(w);
         if (p.rel != 0) {
             try c.request(p.rel, 0, &.{}); // destroy
             p.rel = 0;

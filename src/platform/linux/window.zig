@@ -1,6 +1,6 @@
 //! Software-rendered windows on top of the raw Wayland client: registry and
 //! global management, shm double buffering, pointer/keyboard input (real
-//! layouts via keyboard.zig), custom cursors, clipboard ownership, HiDPI
+//! layouts via keyboard.zig), cursors, clipboard ownership, HiDPI
 //! and IME (text-input-v3).
 //!
 //! ## Single surface (the classic API)
@@ -55,10 +55,19 @@
 //!   string with `win.preedit()` (empty when composition ended) and draw it
 //!   at the caret. Without the protocol nothing changes.
 //!
+//! ## Cursors
+//!
+//! `setCursor(kind)` picks the pointer's shape over our surfaces. With
+//! cursor-shape-v1 the compositor shows the desktop's own cursor for it;
+//! without, a drawn lookalike at the surface's scale (window/cursor.zig).
+//!
 //! ## Debugging
 //!
 //! SHOTLET_DUMP_FRAME=/path/prefix writes each surface's last presented
 //! frame to <prefix>-<surface>.png when the window closes.
+//! SHOTLET_NO_CURSOR_SHAPE=1 ignores cursor-shape-v1: the drawn cursors
+//! show. Debug builds log each cursor shown ("cursor: grab via
+//! cursor-shape", "cursor: grab drawn at 2x").
 //!
 //! ## Layout
 //!
@@ -105,6 +114,7 @@ comptime {
     _ = keys;
     _ = text_input;
     _ = cursor;
+    _ = @import("window/cursor_art.zig");
     _ = data_device;
     _ = clipboard;
     _ = drag;

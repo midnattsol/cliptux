@@ -81,6 +81,9 @@ scenario_pin() {
     echo "  pin centre ${cx0},${cy0} -> ${cx1},${cy1}" >&2
     check "dragging the pin moves it with the pointer (+200, +100)" \
         test $((cx1 - cx0)) -ge 190 -a $((cx1 - cx0)) -le 210 -a $((cy1 - cy0)) -ge 90 -a $((cy1 - cy0)) -le 110
+    # the compositor's own cursors (cursor-shape-v1; debug builds log them)
+    check "  ... an open hand over it (the desktop's cursor)" any_log 1 "cursor: grab via cursor-shape"
+    check "  ... closed while dragging it" any_log 1 "cursor: grabbing via cursor-shape"
     keys b
     sleep 0.3
     grep -q "^text b" "$OUT/drop.log" && echo "  (after the drag the app has the keyboard)" >&2

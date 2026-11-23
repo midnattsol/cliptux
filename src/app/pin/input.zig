@@ -1,6 +1,7 @@
-//! A pin's pointer: hover (its buttons, the menu's rows), drag to move,
-//! scroll to zoom, right-click or ⋯ for the menu, and clicks on the menu
-//! and the lock badge. Event positions are buffer pixels on the surface.
+//! A pin's pointer: hover (its buttons, the menu's rows), drag to move
+//! (a hand over the picture), scroll to zoom, right-click or ⋯ for the
+//! menu, and clicks on the menu and the lock badge. Event positions are
+//! buffer pixels on the surface.
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
@@ -28,6 +29,16 @@ pub fn handle(p: *Pin, ev: window.InputEvent) !void {
         .pointer_motion => |m| try onMotion(p, m.x, m.y, k),
         .pointer_button => |b| try onButton(p, b.button, b.pressed, b.x, b.y, k),
     }
+    switch (ev) {
+        .pointer_motion, .pointer_button => p.win.setCursor(cursorOf(p)) catch {},
+        else => {},
+    }
+}
+
+/// The hand over the picture, which a drag moves (closed while it
+/// does); the arrow over the buttons and the menu.
+fn cursorOf(p: *const Pin) window.Cursor {
+    return if (p.hover == .picture) window.Cursor.hand(p.drag_from != null) else .arrow;
 }
 
 fn onAxis(p: *Pin, v: f64) void {

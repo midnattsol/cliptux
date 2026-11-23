@@ -1,6 +1,6 @@
 //! Hit testing in the current pane: what lies under a buffer point (the
 //! chrome, a shape's handles, a text's width handle) and the pointer
-//! cursor that goes with it.
+//! cursor that goes with it, or with the drag in progress.
 
 const std = @import("std");
 const editor = @import("../editor.zig");
@@ -8,6 +8,7 @@ const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
 const tools = @import("../tools/mod.zig");
+const selchrome = @import("../selchrome.zig");
 
 const Editor = editor.Editor;
 const Point = shapes_mod.Point;
@@ -78,14 +79,28 @@ pub fn shapeHandleAt(ed: *const Editor, i: usize, m: Point) ?u3 {
     }
 }
 
-/// The pointer cursor for buffer point `m`.
+/// The pointer cursor for buffer point `m`: what the drag in progress
+/// does, else what a press there would do.
 pub fn cursorFor(ed: *Editor, m: Point) window.Cursor {
+    return switch (ed.drag) {
+        .none => hoverCursor(ed, m),
+        .moving_sel, .moving_shape => .grabbing,
+        .resizing_sel => |rs| selchrome.handleCursor(rs.handle),
+        .resizing_shape => |rs| shapeHandleCursor(rs.orig.handleKind(), rs.handle, true),
+        .text_width => .resize_ew,
+        .text_select => .text,
+        .size_slider => .arrow,
+        .selecting, .drawing, .picking => .crosshair,
+    };
+}
+
+fn hoverCursor(ed: *Editor, m: Point) window.Cursor {
     if (onToolbar(ed, m) or ed.help_open) return .arrow;
     if (tools.cursor(ed)) |c| return c;
     if (textHandleAt(ed, m) != null) return .resize_ew;
     if (ed.picker.open and (ed.mouse_pane == ed.tb_pane and ed.picker.rect.contains(m.x, m.y))) return .crosshair;
     if (ed.selected) |i| {
-        if (shapeHandleAt(ed, i, m) != null) return .move;
+        if (shapeHandleAt(ed, i, m)) |h| return shapeHandleCursor(ed.doc.shapes.items[i].handleKind(), h, false);
     }
     if (ed.tool == .select) {
         if (selectCursor(ed, m)) |c| return c;
@@ -94,16 +109,20 @@ pub fn cursorFor(ed: *Editor, m: Point) window.Cursor {
     return .crosshair;
 }
 
+/// A shape's handle `h`: a frame's resizes its way, an endpoint is
+/// picked up (closed hand while `held`).
+fn shapeHandleCursor(kind: shapes_mod.Shape.HandleKind, h: u3, held: bool) window.Cursor {
+    return switch (kind) {
+        .box => selchrome.handleCursor(h),
+        .endpoints, .none => window.Cursor.hand(held),
+    };
+}
+
 /// The select tool's cursor over a shape or the selection, if any.
 fn selectCursor(ed: *Editor, m: Point) ?window.Cursor {
-    if (ed.doc.sel != null and ed.doc.hit(ed.imgAt(m), hitTol(ed)) != null) return .move;
+    if (ed.doc.sel != null and ed.doc.hit(ed.imgAt(m), hitTol(ed)) != null) return .grab;
     const n = ed.selBuf() orelse return null;
-    if (shapes_mod.handleAt(n, m, ed.handleRadius())) |hi| return switch (hi) {
-        0, 4 => .resize_nwse,
-        2, 6 => .resize_nesw,
-        1, 5 => .resize_ns,
-        else => .resize_ew,
-    };
-    if (n.contains(m.x, m.y)) return .move;
+    if (shapes_mod.handleAt(n, m, ed.handleRadius())) |hi| return selchrome.handleCursor(hi);
+    if (n.contains(m.x, m.y)) return .grab;
     return null;
 }

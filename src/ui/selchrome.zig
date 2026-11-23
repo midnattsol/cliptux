@@ -8,6 +8,7 @@
 //!   edge(canvas, s, th)                       the two-tone edge around s
 //!   handle_radius, handle(canvas, x, y, r, f, th)   one handle
 //!   handleShown(s, i, mouse, grab)            whether handle i shows
+//!   handleCursor(i)                           the pointer over handle i
 //!   handles(canvas, s, mouse, grab, f, th)    the handles that show
 //!   pill(canvas, r, radius, th)               a label pill on the capture
 //!   size_style, sizeLabel(buf, w, h), sizePillRect(label, frame, bounds_w, f)
@@ -18,6 +19,7 @@ const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const shapes = @import("shapes.zig");
 const theme = @import("theme.zig");
+const Cursor = @import("../platform/api.zig").window.Cursor;
 
 const Canvas = render.Canvas;
 const Rect = shapes.Rect;
@@ -56,6 +58,16 @@ pub fn handleShown(s: Rect, i: usize, mouse: ?Point, grab: i32) bool {
     if (s.w < 4 * grab or s.h < 4 * grab) return false;
     const p = shapes.handlePoints(s)[i];
     return @abs(m.x - p.x) <= 2 * grab and @abs(m.y - p.y) <= 2 * grab;
+}
+
+/// The resize cursor over handle `i` (shapes.handlePoints order).
+pub fn handleCursor(i: u3) Cursor {
+    return switch (i) {
+        0, 4 => .resize_nwse,
+        2, 6 => .resize_nesw,
+        1, 5 => .resize_ns,
+        3, 7 => .resize_ew,
+    };
 }
 
 /// The handles of `s` that show, for a pointer at `mouse` (null: not over
@@ -107,6 +119,15 @@ test "the mid-edge handles show only near the pointer" {
     try std.testing.expect(!handleShown(s, 1, .{ .x = 305, .y = 150 }, 10));
     // too small to grab an edge apart from its corners
     try std.testing.expect(!handleShown(.{ .x = 0, .y = 0, .w = 30, .h = 30 }, 3, .{ .x = 30, .y = 15 }, 10));
+}
+
+test "a handle's cursor points the way it resizes" {
+    try std.testing.expectEqual(Cursor.resize_nwse, handleCursor(0));
+    try std.testing.expectEqual(Cursor.resize_ns, handleCursor(1));
+    try std.testing.expectEqual(Cursor.resize_nesw, handleCursor(2));
+    try std.testing.expectEqual(Cursor.resize_ew, handleCursor(3));
+    try std.testing.expectEqual(Cursor.resize_nwse, handleCursor(4));
+    try std.testing.expectEqual(Cursor.resize_ew, handleCursor(7));
 }
 
 test "the size pill sits above the selection, or inside it at the top" {

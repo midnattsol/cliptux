@@ -33,6 +33,7 @@ pub const Globals = struct {
     rel_manager: u32 = 0, // zwp_relative_pointer_manager_v1
     layer_shell: u32 = 0, // zwlr_layer_shell_v1
     layer_shell_version: u32 = 0,
+    cursor_shape: u32 = 0, // wp_cursor_shape_manager_v1
     /// zxdg_exporter_v2, else zxdg_exporter_v1 (window/foreign.zig)
     exporter: u32 = 0,
     /// whose window effects a closing window gets (window/vanish.zig)
@@ -162,6 +163,9 @@ fn bindExtension(w: *Window, name: u32, iface: []const u8, version: u32) !bool {
     } else if (eql(u8, iface, "wp_fractional_scale_manager_v1")) {
         if (std.c.getenv("SHOTLET_NO_FRACTIONAL") == null)
             g.fs_manager = try c.bind(g.registry, name, iface, 1);
+    } else if (eql(u8, iface, "wp_cursor_shape_manager_v1")) {
+        if (std.c.getenv("SHOTLET_NO_CURSOR_SHAPE") == null)
+            g.cursor_shape = try c.bind(g.registry, name, iface, 1);
     } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
         g.xdg_output_manager = try c.bind(g.registry, name, iface, @min(version, 3));
         _ = try output.ensureAllXdg(w);
