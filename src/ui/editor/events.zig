@@ -28,6 +28,7 @@ pub fn handle(ed: *Editor, ev: window.InputEvent) !void {
         },
         .pointer_motion => |m| {
             pointerAt(ed, m.surface, m.x, m.y);
+            ui.loupeMoved(ed);
             try drag.onMotion(ed);
         },
         .pointer_button => |b| {

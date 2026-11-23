@@ -14,10 +14,11 @@ const Action = binds.Action;
 const Bind = binds.Bind;
 const n_actions = binds.n_actions;
 
-/// The editor actions whose binding came from an older file's
-/// `bind_<action>` line (legacy_keys.zig): the next save writes them as
-/// `shortcut_<action>` and drops the old line.
-pub const Migrated = [n_actions]bool;
+/// The keys (model.keyName's numbering) whose value came from an older
+/// file's spelling: an editor action's `bind_<action>` line
+/// (legacy_keys.zig), `loupe=selecting`. The next save writes them anew
+/// (`shortcut_<action>`, dropping the old line; `loupe=auto`).
+pub const Migrated = [model.n_keys]bool;
 
 /// Apply every key=value line of `dir`'s config file to `cfg` (a missing
 /// or unreadable file changes nothing).
@@ -34,6 +35,7 @@ pub fn readInto(alloc: std.mem.Allocator, dir: []const u8, cfg: *Config) Migrate
 pub fn applyText(cfg: *Config, data: []const u8) Migrated {
     var old: [n_actions]?Bind = @splat(null);
     var current: [n_actions]bool = @splat(false);
+    var migrated: Migrated = @splat(false);
     var lines = std.mem.splitScalar(u8, data, '\n');
     while (lines.next()) |line| {
         const kv = parseLine(line) orelse continue;
@@ -42,12 +44,12 @@ pub fn applyText(cfg: *Config, data: []const u8) Migrated {
             continue;
         }
         if (actionOf(kv.key, model.bind_prefix)) |i| current[i] = true;
+        if (std.mem.eql(u8, kv.key, "loupe")) migrated[model.loupe_key] = std.mem.eql(u8, kv.value, model.Loupe.legacy_selecting);
         applyValue(cfg, kv.key, kv.value);
     }
-    var migrated: Migrated = @splat(false);
     for (old, current, 0..) |o, c, i| if (o != null and !c) {
         cfg.binds[i] = o.?;
-        migrated[i] = true;
+        migrated[model.n_fixed_keys + i] = true;
     };
     return migrated;
 }
@@ -145,7 +147,7 @@ fn applyQuickAndHistory(cfg: *Config, key: []const u8, value: []const u8) bool {
 /// The magnifier while choosing an area: when it shows, its zoom.
 fn applyLoupe(cfg: *Config, key: []const u8, value: []const u8) bool {
     if (std.mem.eql(u8, key, "loupe")) {
-        cfg.loupe = std.meta.stringToEnum(model.Loupe, value) orelse cfg.loupe;
+        cfg.loupe = model.Loupe.parse(value) orelse cfg.loupe;
     } else if (std.mem.eql(u8, key, "loupe_zoom")) {
         cfg.loupe_zoom = model.nearestZoom(std.fmt.parseInt(i64, value, 10) catch cfg.loupe_zoom);
     } else return false;
@@ -225,8 +227,13 @@ test "older files' key numbers migrate, and never win over the new keys" {
     // an old number is the key it was (2: the digit 1), not a digit
     try std.testing.expect(at(&cfg, .line).matches(.digit_1, false, false));
     try std.testing.expectEqual(KeyCode.none, at(&cfg, .text).code);
-    try std.testing.expect(migrated[@backingInt(Action.redo)] and migrated[@backingInt(Action.line)]);
-    try std.testing.expect(!migrated[@backingInt(Action.pen)] and !migrated[@backingInt(Action.undo)]);
+    const bind = struct {
+        fn f(a: Action) usize {
+            return model.n_fixed_keys + @as(usize, @backingInt(a));
+        }
+    }.f;
+    try std.testing.expect(migrated[bind(.redo)] and migrated[bind(.line)]);
+    try std.testing.expect(!migrated[bind(.pen)] and !migrated[bind(.undo)]);
 }
 
 test "the thumbnail setting, and the switch it replaced" {
@@ -244,7 +251,7 @@ test "the thumbnail setting, and the switch it replaced" {
 
 test "the magnifier's settings" {
     var cfg = Config{};
-    try std.testing.expectEqual(model.Loupe.always, cfg.loupe);
+    try std.testing.expectEqual(model.Loupe.auto, cfg.loupe);
     applyValue(&cfg, "loupe", "never");
     try std.testing.expectEqual(model.Loupe.never, cfg.loupe);
     applyValue(&cfg, "loupe", "sometimes");
@@ -253,4 +260,14 @@ test "the magnifier's settings" {
     try std.testing.expectEqual(@as(u8, 12), cfg.loupe_zoom);
     applyValue(&cfg, "loupe_zoom", "big");
     try std.testing.expectEqual(@as(u8, 12), cfg.loupe_zoom);
+}
+
+test "an older file's loupe=selecting reads as auto, to be written anew" {
+    var cfg = Config{ .loupe = .never };
+    const migrated = applyText(&cfg, "loupe=selecting\n");
+    try std.testing.expectEqual(model.Loupe.auto, cfg.loupe);
+    try std.testing.expect(migrated[model.loupe_key]);
+    var current = Config{};
+    try std.testing.expect(!applyText(&current, "loupe=always\n")[model.loupe_key]);
+    try std.testing.expectEqual(model.Loupe.always, current.loupe);
 }

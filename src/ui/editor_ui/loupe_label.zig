@@ -1,11 +1,9 @@
-//! The magnifier's label, a pill under the lens (the size pill's look):
-//! the pixel's coordinates on the left, its colour as a swatch and
-//! `#RRGGBB` on the right, in figures that do not jiggle. After C it
-//! says "Copied" in place of the coordinates. Its width is fixed for the
-//! picture (the widest coordinates and hex, or the lens's when that is
-//! wider: one column), so it never twitches.
+//! The magnifier's label, a pill under the lens (the size pill's look),
+//! shown on demand (Alt, the colour picker, after C): the pixel's colour
+//! as a swatch and `#RRGGBB`, in figures that do not jiggle. After C it
+//! says "Copied" instead. Its width is fixed (the widest hex), so it
+//! never twitches.
 
-const std = @import("std");
 const render = @import("../../gfx/render.zig");
 const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
@@ -19,13 +17,12 @@ const ff = @import("common.zig").ff;
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
-const Point = shapes_mod.Point;
 
 const style = selchrome.size_style;
+const copied_text = "Copied";
 
 pub const Info = struct {
-    /// the pixel (image coordinates) and its colour
-    at: Point,
+    /// the pixel's colour
     color: u32,
     /// the colour was just copied
     copied: bool = false,
@@ -42,26 +39,21 @@ fn hexWidth(fs: f64) i32 {
     return text_mod.widthStyled(fs, style, "#") + 6 * widest;
 }
 
-/// The widest coordinates in this picture (tabular figures: its size).
-fn coordsWidth(ed: *const Editor, fs: f64) i32 {
-    var buf: [32]u8 = undefined;
-    const s = std.fmt.bufPrint(&buf, "{d}, {d}", .{ ed.img.width, ed.img.height }) catch "0000, 0000";
-    return text_mod.widthStyled(fs, style, s);
-}
-
-fn swatch(ed: *const Editor) i32 {
-    return ed.sc(10);
-}
-
-/// The narrowest the pill can be, and its height.
-pub fn size(ed: *const Editor) [2]i32 {
-    const fs = fontSize(ed);
-    const w = 2 * pad(ed) + coordsWidth(ed, fs) + ed.sc(10) + swatch(ed) + ed.sc(5) + hexWidth(fs);
-    return .{ w, text_mod.height(fs) + ed.sc(8) };
+/// The swatch (or the check) and the gap after it.
+fn lead(ed: *const Editor) [2]i32 {
+    return .{ ed.sc(10), ed.sc(6) };
 }
 
 fn pad(ed: *const Editor) i32 {
     return ed.sc(9);
+}
+
+/// The pill's width and height.
+pub fn size(ed: *const Editor) [2]i32 {
+    const fs = fontSize(ed);
+    const l = lead(ed);
+    const body = @max(hexWidth(fs), text_mod.widthStyled(fs, style, copied_text) + ed.sc(2));
+    return .{ 2 * pad(ed) + l[0] + l[1] + body, text_mod.height(fs) + ed.sc(8) };
 }
 
 pub fn draw(ed: *const Editor, canvas: *Canvas, r: Rect, info: Info) void {
@@ -70,24 +62,20 @@ pub fn draw(ed: *const Editor, canvas: *Canvas, r: Rect, info: Info) void {
     const fs = fontSize(ed);
     selchrome.pill(canvas, r, 7 * f, th);
     const ty = r.y + @divTrunc(r.h - text_mod.height(fs), 2);
+    const l = lead(ed);
     const x0 = r.x + pad(ed);
+    const tx = x0 + l[0] + l[1];
     if (info.copied) {
         const ic = ed.sc(12);
-        icons.draw(canvas, .check, x0, r.y + @divTrunc(r.h - ic, 2), ic, th.pill_fg);
-        text_mod.drawStyled(canvas, x0 + ic + ed.sc(4), ty, fs, th.pill_fg, style, "Copied");
-    } else {
-        var buf: [32]u8 = undefined;
-        const s = std.fmt.bufPrint(&buf, "{d}, {d}", .{ info.at.x, info.at.y }) catch "?";
-        text_mod.drawStyled(canvas, x0, ty, fs, th.pill_fg, style, s);
+        icons.draw(canvas, .check, x0 - ed.sc(1), r.y + @divTrunc(r.h - ic, 2), ic, th.pill_fg);
+        text_mod.drawStyled(canvas, tx, ty, fs, th.pill_fg, style, copied_text);
+        return;
     }
     var hb: [16]u8 = undefined;
-    const hex = color.hex(&hb, info.color);
-    const hx = r.right() - pad(ed) - hexWidth(fs);
-    text_mod.drawStyled(canvas, hx, ty, fs, th.pill_fg, style, hex);
-    const sw = swatch(ed);
-    const sx = hx - ed.sc(5) - sw;
+    text_mod.drawStyled(canvas, tx, ty, fs, th.pill_fg, style, color.hex(&hb, info.color));
+    const sw = l[0];
     const sy = r.y + @divTrunc(r.h - sw, 2);
-    canvas.fillRoundRectAA(sx, sy, sw, sw, 2.5 * f, info.color | 0xFF000000);
+    canvas.fillRoundRectAA(x0, sy, sw, sw, 2.5 * f, info.color | 0xFF000000);
     // a hairline keeps a swatch the pill's own colour visible
-    shapes_mod.roundRectRing(canvas, .{ .x = sx, .y = sy, .w = sw, .h = sw }, 2.5 * f, @max(1, ff(ed.sc(1)) * 0.75), 0x4DFFFFFF);
+    shapes_mod.roundRectRing(canvas, .{ .x = x0, .y = sy, .w = sw, .h = sw }, 2.5 * f, @max(1, ff(ed.sc(1)) * 0.75), 0x4DFFFFFF);
 }

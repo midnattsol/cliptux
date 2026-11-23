@@ -92,9 +92,18 @@ fn capture(p: Page, y0: i32) !i32 {
     }
     try perms.drawRow(ui, &card, p.rowH(), &st.perm_note);
     const m = w.rowBegin(ui, &card, p.rowH());
-    w.rowTitle(ui, m, "Magnifier", "The pixels around the pointer while choosing an area");
+    w.rowTitle(ui, m, "Magnifier", loupeNote(p.cfg.loupe));
     try w.chipButton(ui, m, .cycle_loupe, null, p.cfg.loupe.label(), false);
     return w.endCard(&card) + ui.sc(26);
+}
+
+/// What the magnifier setting does, under its title.
+fn loupeNote(l: config.Loupe) []const u8 {
+    return switch (l) {
+        .auto => "Close-up of the pixels when you slow down or adjust an edge",
+        .always => "Close-up of the pixels at the pointer while choosing an area",
+        .never => "No close-up while choosing an area",
+    };
 }
 
 fn quickAccess(p: Page, y0: i32) !i32 {

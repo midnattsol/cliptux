@@ -1,7 +1,8 @@
 //! The selected shape: selecting one (the toolbar takes on its look),
 //! lifting it out of the layer while it changes, and the edits on it
 //! (delete, duplicate, bring to front, nudge). Arrow keys nudge the
-//! selection rectangle when no shape is selected.
+//! selection rectangle when no shape is selected: the edge last dragged,
+//! else the whole of it.
 
 const std = @import("std");
 const editor = @import("../editor.zig");
@@ -9,6 +10,7 @@ const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
 const caches = @import("caches.zig");
 const props = @import("props.zig");
+const ui = @import("../editor_ui.zig");
 const history = @import("history.zig");
 
 const Editor = editor.Editor;
@@ -84,8 +86,9 @@ pub fn bringSelectedToFront(ed: *Editor) !void {
     try caches.recompose(ed, ed.doc.shapes.items[ed.selected.?].bounds());
 }
 
-/// Arrow keys: nudge the selected shape, else move the selection (Alt:
-/// resize it); Shift steps 10 pixels.
+/// Arrow keys: nudge the selected shape, else the selection's edge last
+/// dragged, else the whole selection (Alt: its right and bottom edges);
+/// Shift steps 10 pixels. The magnifier shows the edge that moved.
 pub fn arrowKey(ed: *Editor, k: window.Key) !void {
     const step: i32 = if (k.shift) 10 else 1;
     const dx: i32 = switch (k.code) {
@@ -106,8 +109,12 @@ pub fn arrowKey(ed: *Editor, k: window.Key) !void {
         }.f, [2]i32{ dx, dy });
         return;
     }
-    if (ed.doc.sel == null) return;
+    const s = (ed.doc.sel orelse return).normalized();
     caches.selDirty(ed);
-    if (k.alt) ed.doc.resizeSelection(dx, dy) else ed.doc.moveSelection(dx, dy);
+    const edge: ?u3 = if (k.alt) 4 else ed.sel_edge;
+    if (edge) |h| {
+        ed.doc.sel = shapes_mod.nudgeHandle(s, h, dx, dy, ed.doc.imageRect());
+    } else ed.doc.moveSelection(dx, dy);
     caches.selDirty(ed);
+    ui.loupeNudged(ed, edge orelse shapes_mod.nearestCorner(s, ed.imgAt(ed.mouse)));
 }

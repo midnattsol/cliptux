@@ -45,6 +45,10 @@ pub const snapAngle = @import("drag.zig").snapAngle;
 pub const handlePoints = handles.handlePoints;
 pub const handleAt = handles.handleAt;
 pub const resizeWithHandle = handles.resizeWithHandle;
+pub const nudgeHandle = handles.nudgeHandle;
+pub const handleFocus = handles.handleFocus;
+pub const nearestCorner = handles.nearestCorner;
+pub const normalizedHandle = handles.normalizedHandle;
 
 // keep the submodules' tests reachable from the test root
 comptime {

@@ -144,6 +144,7 @@ pub fn onRelease(ed: *Editor) !void {
         .selecting => endSelecting(ed),
         .moving_sel, .resizing_sel => {
             caches.selDirty(ed);
+            if (ed.sel_edge) |h| ed.sel_edge = shapes_mod.normalizedHandle(ed.doc.sel.?, h);
             ed.doc.sel = Rect.intersect(ed.doc.sel.?.normalized(), ed.doc.imageRect());
             caches.selDirty(ed);
         },

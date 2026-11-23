@@ -100,31 +100,37 @@ shot 0 pinned
 keys esc
 wait_exit 5 || stop_shotlet
 
-# --- the magnifier follows the pointer and leaves nothing behind: swept
-# over plain blue, then away, neither its white centre frame nor its
-# label (#1c1c1e) is anywhere on the path
+# --- the magnifier waits for the pointer to slow down and leaves nothing
+# behind: swept over plain blue, then away, neither its white centre
+# frame nor a label (#1c1c1e) is anywhere on the path; resting, it shows
 run_shotlet loupe shot --from "$IMG"
 wait_editor 10
 arrive 300 600
 for p in 320,610 350,630 390,650 430,680 480,700 530,720 580,740 620,750; do
     drv move 0 "${p%,*}" "${p#*,}" && drv sleep 40
 done
-drv move 0 1100 760 && drv sleep 300
+drv move 0 1100 760 && drv sleep 400
 shot 0 loupe
 # (the mode strip's dark icons sit at the bottom centre, from x 650, y 814)
 check "the magnifier leaves no trail" eval 'for c in 1c1c1e ffffff; do no_find_exact 0 $c 12 1 260 520 780 805 && no_find_exact 0 $c 12 1 260 805 640 880 || return 1; done'
+check "  ... and shows once the pointer rests" drv find 0 ffffff 12 1 1080 600 1280 900
 keys esc
 wait_exit 5 || stop_shotlet
 
-# --- the magnifier's keys: over the orange box C copies the pixel's
-# colour (not Crop: there is no selection), the wheel and - = zoom it,
-# the zoom is remembered; loupe=selecting shows it only while dragging,
-# loupe=never not at all
+# --- the magnifier's keys: over the orange box Alt shows the pixel's
+# colour, C copies it (not Crop: there is no selection), the wheel and
+# - = zoom it, the zoom is remembered; an older loupe=selecting reads as
+# when needed, loupe=never shows none
 run_shotlet magnifier shot --from "$IMG"
 wait_editor 10
 arrive 1000 400
 shot 0 magnifier
 check "magnifier: shows by the pointer (its white centre frame)" drv find 0 ffffff 12 1 1020 420 1200 600
+check "  ... with no label" no_find_exact 0 1c1c1e 12 1 960 420 1240 620
+drv key alt down && drv sleep 200
+shot 0 magnifier-alt
+check "  ... Alt shows the colour's label" drv find 0 1c1c1e 12 1 960 420 1240 620
+drv key alt up && drv sleep 200
 keys c
 sleep 0.3
 check "  ... C copies the pixel's colour" eq "$(clip_text)" "#FF8800"
@@ -140,12 +146,9 @@ printf 'loupe=selecting\n' >>"$HOME/.config/shotlet/config"
 run_shotlet magnifier-selecting shot --from "$IMG"
 wait_editor 10
 arrive 1000 400
-check "  ... loupe=selecting: none while pointing" no_find_exact 0 ffffff 12 1 1020 420 1200 600
-drv move 0 950 250 && drv down && drv move 0 980 330 && drv move 0 1000 400 && drv sleep 300
 shot 0 magnifier-selecting
-check "  ... but while dragging" drv find 0 ffffff 12 1 1020 420 1200 600
-drv up
-keys esc esc
+check "  ... loupe=selecting reads as when needed: it shows at rest" drv find 0 ffffff 12 1 1020 420 1200 600
+keys esc
 wait_exit 5 || stop_shotlet
 sed -i 's/^loupe=.*/loupe=never/' "$HOME/.config/shotlet/config"
 run_shotlet magnifier-never shot --from "$IMG"
@@ -156,6 +159,32 @@ check "  ... loupe=never: no magnifier" no_find_exact 0 ffffff 12 1 1020 420 120
 keys esc
 wait_exit 5 || stop_shotlet
 sed -i '/^loupe=/d' "$HOME/.config/shotlet/config"
+
+# --- the magnifier on an edge: dragging the right edge it shows that
+# edge, the selection's light edge line inside it (dimmed blue around:
+# #e8ebf0), clear of the overlay's own edges; arrow keys move a new
+# selection whole, then the edge last dragged (Shift: 10 px), the
+# magnifier on it again
+lens_edge() { drv find 0 e8ebf0 24 1 400 560 596 796; }
+run_shotlet magnifier-edge shot --from "$IMG"
+wait_editor 10
+drag 0 300 500 0 600 800
+keys right
+slow_drag 0 601 650 621 650 641 650
+drv sleep 400
+check "magnifier: no lens once the edge is let go" eval '! lens_edge'
+drv move 0 601 650 && drv sleep 150 && drv move 0 641 650 && drv sleep 150 && drv down
+drv move 0 645 652 && drv sleep 120 && drv move 0 641 650 && drv sleep 300
+shot 0 magnifier-edge
+check "  ... dragging an edge shows it, the cut drawn inside" lens_edge
+drv up && drv sleep 1000
+keys right right shift+right
+shot 0 magnifier-nudge
+check "  ... nudging it too" lens_edge
+keys enter
+wait_exit 5 || stop_shotlet
+clip_png "$OUT/edge.png"
+check "  ... a selection moves whole, then its edge moves by 1 / 10 px" eq "$(png_size "$OUT/edge.png")" "352x300"
 
 # --- beautify is per capture: an old beautify=true is not carried over;
 # the panel's pin ("Apply to every capture") keeps it on for new ones

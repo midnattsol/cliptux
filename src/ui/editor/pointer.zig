@@ -139,8 +139,10 @@ fn pressSelect(ed: *Editor, m: Point, ip: Point, double: bool) !void {
         const n = ed.selBuf().?;
         if (shapes_mod.handleAt(n, m, ed.handleRadius())) |h| {
             ed.drag = .{ .resizing_sel = .{ .handle = h, .orig = ed.doc.sel.?.normalized() } };
+            ed.sel_edge = h;
             return;
         }
+        ed.sel_edge = null;
         if (n.contains(m.x, m.y)) {
             ed.drag = .{ .moving_sel = .{ .orig = ed.doc.sel.?.normalized(), .start = ip } };
             return;

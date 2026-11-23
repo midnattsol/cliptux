@@ -104,6 +104,9 @@ pub const Editor = struct {
     space: types.SpaceMove = .{},
     /// where the current drag started (image pixels)
     drag_anchor: Point = .{ .x = 0, .y = 0 },
+    /// the selection's handle last dragged: arrow keys move its edges
+    /// (none: they move the whole selection)
+    sel_edge: ?u3 = null,
     last_click: types.LastClick = .{},
     coalesce: types.Coalesce = .{},
 

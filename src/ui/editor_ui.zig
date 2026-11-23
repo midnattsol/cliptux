@@ -85,6 +85,8 @@ pub const syncLoupe = loupe.sync;
 pub const loupeDueMs = loupe.dueMs;
 pub const loupeColor = loupe.colorAt;
 pub const loupeCopied = loupe.copied;
+pub const loupeMoved = loupe.moved;
+pub const loupeNudged = loupe.nudged;
 pub const drawCopyNotice = notice.drawCopyNotice;
 
 // keep the submodules' tests reachable from the test root
@@ -93,4 +95,5 @@ comptime {
     _ = @import("editor_ui/strip.zig");
     _ = loupe;
     _ = @import("editor_ui/loupe_place.zig");
+    _ = @import("editor_ui/loupe_pace.zig");
 }

@@ -60,9 +60,10 @@ fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
     const migrated = parse.readInto(alloc, dir, &cfg);
     // missing keys get their defaults as baseline: unchanged, never written
     model.rememberBase(&cfg);
-    // binds read from an older file's lines are written anew at the next save
-    for (migrated, 0..) |m, i| if (m) {
-        cfg.base[model.n_fixed_keys + i] = 0;
+    // values read from an older file's spelling are written anew at the
+    // next save
+    for (migrated, 0..) |m, k| if (m) {
+        cfg.base[k] = 0;
     };
     return cfg;
 }
@@ -131,7 +132,7 @@ test "config save/load roundtrip" {
     cfg.history = false;
     cfg.history_max = 7;
     cfg.history_max_mb = 64;
-    cfg.loupe = .selecting;
+    cfg.loupe = .never;
     cfg.loupe_zoom = 16;
     try saveDir(alloc, dir, &cfg);
 
@@ -147,7 +148,7 @@ test "config save/load roundtrip" {
     try std.testing.expectEqual(false, loaded.history);
     try std.testing.expectEqual(@as(u16, 7), loaded.history_max);
     try std.testing.expectEqual(@as(u32, 64), loaded.history_max_mb);
-    try std.testing.expectEqual(Loupe.selecting, loaded.loupe);
+    try std.testing.expectEqual(Loupe.never, loaded.loupe);
     try std.testing.expectEqual(@as(u8, 16), loaded.loupe_zoom);
 
     // private to the user
@@ -283,4 +284,24 @@ test "binds of an older file are written anew in the neutral notation" {
     defer alloc.free(data);
     try std.testing.expectEqualStrings("notify=false\ncopy_on_save=true\nshortcut_pen=Ctrl+F\n", data);
     try std.testing.expect(loadDir(alloc, dir).binds[@backingInt(Action.pen)].matches(.f, true, false));
+}
+
+test "an older file's loupe=selecting is written anew as auto" {
+    const alloc = std.testing.allocator;
+    const root = try testDir();
+    defer alloc.free(root);
+    defer sys.removeTree(root);
+    var b1: [512]u8 = undefined;
+    var b2: [600]u8 = undefined;
+    const dir = try std.fmt.bufPrint(&b1, "{s}/shotlet", .{root});
+    sys.mkdirAll(dir, 0o700);
+    const path = try configFile(dir, &b2);
+    try sys.writeFile(path, "loupe=selecting\n");
+
+    var cfg = loadDir(alloc, dir);
+    try std.testing.expectEqual(Loupe.auto, cfg.loupe);
+    try saveDir(alloc, dir, &cfg);
+    const data = try sys.readFileAlloc(alloc, path, 4096);
+    defer alloc.free(data);
+    try std.testing.expectEqualStrings("loupe=auto\n", data);
 }
