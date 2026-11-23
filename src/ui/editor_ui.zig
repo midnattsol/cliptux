@@ -25,6 +25,7 @@ const draw_popover = @import("editor_ui/draw_popover.zig");
 const material = @import("editor_ui/material.zig");
 const picker = @import("editor_ui/picker.zig");
 const loupe = @import("editor_ui/loupe.zig");
+const loupe_hint = @import("editor_ui/loupe_hint.zig");
 const tooltip = @import("editor_ui/tooltip.zig");
 const notice = @import("editor_ui/notice.zig");
 
@@ -85,7 +86,9 @@ pub const syncLoupe = loupe.sync;
 pub const loupeDueMs = loupe.dueMs;
 pub const loupeColor = loupe.colorAt;
 pub const loupeCopied = loupe.copied;
-pub const loupeMoved = loupe.moved;
+pub const loupePointed = loupe.pointed;
+pub const loupeHeld = loupe.held;
+pub const loupeEdgeDragged = loupe_hint.edgeDragged;
 pub const loupeNudged = loupe.nudged;
 pub const drawCopyNotice = notice.drawCopyNotice;
 
@@ -95,5 +98,5 @@ comptime {
     _ = @import("editor_ui/strip.zig");
     _ = loupe;
     _ = @import("editor_ui/loupe_place.zig");
-    _ = @import("editor_ui/loupe_pace.zig");
+    _ = @import("editor_ui/loupe_hold.zig");
 }

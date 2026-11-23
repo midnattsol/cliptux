@@ -23,31 +23,33 @@ pub const Thumbnail = enum {
     }
 };
 
-/// When the magnifier shows while choosing an area: when the pointer
-/// slows down or rests, while an edge is dragged or nudged (auto); all
-/// the while pointing and dragging (always); or never.
+/// When the magnifier shows while choosing an area: while Ctrl is held
+/// (hold); all the while pointing and dragging (always); or never.
 pub const Loupe = enum {
-    auto,
+    hold,
     always,
     never,
 
     pub fn label(l: Loupe) []const u8 {
         return switch (l) {
-            .auto => "When Needed",
+            .hold => "While Holding Ctrl",
             .always => "Always",
             .never => "Never",
         };
     }
 
-    /// The setting a config value names; older files' "selecting" (only
-    /// while dragging) is auto now.
+    /// The setting a config value names; older files' values read as hold.
     pub fn parse(value: []const u8) ?Loupe {
-        if (std.mem.eql(u8, value, legacy_selecting)) return .auto;
+        if (isLegacy(value)) return .hold;
         return std.meta.stringToEnum(Loupe, value);
     }
 
-    /// what older files called the setting closest to auto
-    pub const legacy_selecting = "selecting";
+    /// What older files called the settings that are hold now: only while
+    /// dragging (selecting), when the pointer slows down (auto).
+    pub fn isLegacy(value: []const u8) bool {
+        for ([_][]const u8{ "selecting", "auto" }) |v| if (std.mem.eql(u8, value, v)) return true;
+        return false;
+    }
 };
 
 /// The magnifier's zoom levels: screen pixels per captured pixel, at
@@ -103,7 +105,7 @@ pub const Config = struct {
     history_max_mb: u32 = 500,
     /// the magnifier while choosing an area, and its zoom (one of
     /// loupe_zooms)
-    loupe: Loupe = .auto,
+    loupe: Loupe = .hold,
     loupe_zoom: u8 = loupe_zoom_default,
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from

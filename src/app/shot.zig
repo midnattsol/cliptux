@@ -187,6 +187,7 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, c
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
     configureEditor(&ed, conn, cfg, smoke_ms);
+    ed.loupe.hint.due = @import("zoom_hint.zig").due(env.home);
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
@@ -248,6 +249,7 @@ fn configureEditor(ed: *editor_mod.Editor, conn: *desktop.Session, cfg: *const c
 /// A reopened capture: the shapes as they were, still editable.
 fn restoreReopened(gpa: std.mem.Allocator, ed: *editor_mod.Editor, r: Reopen) !void {
     ed.show_hint = false;
+    ed.loupe.hint.due = false;
     ed.beautify = r.doc.beautify;
     ed.doc.sel = r.doc.sel orelse ed.doc.imageRect();
     for (r.doc.shapes.items) |*s| {

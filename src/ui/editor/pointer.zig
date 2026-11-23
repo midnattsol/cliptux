@@ -140,6 +140,7 @@ fn pressSelect(ed: *Editor, m: Point, ip: Point, double: bool) !void {
         if (shapes_mod.handleAt(n, m, ed.handleRadius())) |h| {
             ed.drag = .{ .resizing_sel = .{ .handle = h, .orig = ed.doc.sel.?.normalized() } };
             ed.sel_edge = h;
+            ui.loupeEdgeDragged(ed);
             return;
         }
         ed.sel_edge = null;

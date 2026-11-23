@@ -85,6 +85,7 @@ test {
     _ = @import("app/binds.zig");
     _ = @import("app/quick_ipc.zig");
     _ = @import("app/editor_prefs.zig");
+    _ = @import("app/zoom_hint.zig");
     _ = @import("ui/beautify.zig");
     _ = @import("ui/drag.zig");
     _ = @import("ui/help.zig");

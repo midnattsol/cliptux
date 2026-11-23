@@ -1,16 +1,19 @@
 //! What the editor remembers between captures: the beautify frame's
 //! style, whether every capture starts with it ("always apply"), whether
-//! the first-run hint was shown and the magnifier's zoom. Beautify itself
-//! is per capture.
+//! the first-run hint was shown and the magnifier's zoom (in the config
+//! file), whether the magnifier's hint was (zoom_hint.zig). Beautify
+//! itself is per capture.
 
 const std = @import("std");
 const config = @import("config.zig");
+const zoom_hint = @import("zoom_hint.zig");
 const Env = @import("env.zig").Env;
 
 /// Store the editor's beautify style, "always apply", the first-run
-/// hint flag and the magnifier's zoom, only the keys that changed (other settings in the file are
-/// left alone).
+/// hint flag and the magnifier's zoom, only the keys that changed (other
+/// settings in the file are left alone); the magnifier's hint once shown.
 pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
+    if (ed.loupe.hint.seen) zoom_hint.remember(env.home);
     const b = ed.beautify;
     var bg_buf: [8]u8 = undefined;
     var zoom_buf: [8]u8 = undefined;

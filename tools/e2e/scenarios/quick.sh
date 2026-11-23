@@ -139,9 +139,9 @@ scenario_settings() {
     drv_ready Meta-0
     cfgf=$HOME/.config/shotlet/config
     settings_reset
-    printf 'loupe=selecting\n' >>"$cfgf"
+    printf 'loupe=auto\n' >>"$cfgf"
     open_settings 4
-    check "an older magnifier choice is written as when needed" grep -q "^loupe=auto" "$cfgf"
+    check "an older magnifier choice is written as while holding Ctrl" grep -q "^loupe=hold" "$cfgf"
     open_settings 4 space
     check "the magnifier choice goes to always" grep -q "^loupe=always" "$cfgf"
     open_settings 5 space

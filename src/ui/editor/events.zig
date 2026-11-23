@@ -1,6 +1,7 @@
 //! Window events in: routes each to the pointer, drag, key or render
 //! handlers, and tracks the pointer's surface and held modifiers.
 
+const std = @import("std");
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const ui = @import("../editor_ui.zig");
@@ -27,8 +28,9 @@ pub fn handle(ed: *Editor, ev: window.InputEvent) !void {
             ed.running = false;
         },
         .pointer_motion => |m| {
+            const was = ed.mouse;
             pointerAt(ed, m.surface, m.x, m.y);
-            ui.loupeMoved(ed);
+            if (!std.meta.eql(was, ed.mouse)) ui.loupePointed(ed);
             try drag.onMotion(ed);
         },
         .pointer_button => |b| {
@@ -47,6 +49,7 @@ fn pointerAt(ed: *Editor, surface: u8, x: f64, y: f64) void {
 }
 
 fn onButtonEvent(ed: *Editor, button: window.Button, pressed: bool) !void {
+    if (pressed) loupe_input.pointerPressed(ed);
     if (button == .left) {
         if (pressed) try pointer.onPress(ed) else try drag.onRelease(ed);
     } else if (button == .right and pressed) {
@@ -56,6 +59,7 @@ fn onButtonEvent(ed: *Editor, button: window.Button, pressed: bool) !void {
 
 fn onKeyEvent(ed: *Editor, k: window.Key) !void {
     try trackModifiers(ed, k);
+    loupe_input.track(ed, k);
     if (k.code == .none) {
         // input method: committed text or a preedit change, never a
         // shortcut

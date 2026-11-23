@@ -286,7 +286,7 @@ test "binds of an older file are written anew in the neutral notation" {
     try std.testing.expect(loadDir(alloc, dir).binds[@backingInt(Action.pen)].matches(.f, true, false));
 }
 
-test "an older file's loupe=selecting is written anew as auto" {
+test "an older file's loupe=selecting or auto is written anew as hold" {
     const alloc = std.testing.allocator;
     const root = try testDir();
     defer alloc.free(root);
@@ -296,12 +296,13 @@ test "an older file's loupe=selecting is written anew as auto" {
     const dir = try std.fmt.bufPrint(&b1, "{s}/shotlet", .{root});
     sys.mkdirAll(dir, 0o700);
     const path = try configFile(dir, &b2);
-    try sys.writeFile(path, "loupe=selecting\n");
-
-    var cfg = loadDir(alloc, dir);
-    try std.testing.expectEqual(Loupe.auto, cfg.loupe);
-    try saveDir(alloc, dir, &cfg);
-    const data = try sys.readFileAlloc(alloc, path, 4096);
-    defer alloc.free(data);
-    try std.testing.expectEqualStrings("loupe=auto\n", data);
+    for ([_][]const u8{ "loupe=selecting\n", "loupe=auto\n" }) |old| {
+        try sys.writeFile(path, old);
+        var cfg = loadDir(alloc, dir);
+        try std.testing.expectEqual(Loupe.hold, cfg.loupe);
+        try saveDir(alloc, dir, &cfg);
+        const data = try sys.readFileAlloc(alloc, path, 4096);
+        defer alloc.free(data);
+        try std.testing.expectEqualStrings("loupe=hold\n", data);
+    }
 }

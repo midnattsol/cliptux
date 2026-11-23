@@ -1,12 +1,14 @@
 //! The magnifier: a lens (ui/lens.zig) beside the point being aimed at
 //! while an area is chosen, and for the colour picker. When it shows
-//! follows the `loupe` setting: when needed (the pointer slows down or
-//! rests, loupe_pace.zig; an edge is dragged or nudged), always, or
-//! never. On an edge it looks at that edge, the selection drawn inside
-//! it to the pixel. Its one label, the pixel's colour (loupe_label.zig),
-//! shows while Alt is held, in the colour picker and after C. It fades and grows in from the corner nearest the point, and
-//! fades out where it was. The wheel (and - =) zoom it, C copies the
-//! colour (editor/loupe_input.zig).
+//! follows the `loupe` setting: while Ctrl is held (loupe_hold.zig),
+//! always, or never. On an edge (creating the selection, dragging a
+//! handle, after an arrow key moved one) it looks at that edge, the
+//! selection drawn inside it to the pixel. Its one label, the pixel's
+//! colour (loupe_label.zig), shows while Alt is held, in the colour
+//! picker and after C; the label brings the lens with it. It fades and
+//! grows in from the corner nearest the point, and fades out where it
+//! was. The wheel (and - =) zoom it, C copies the colour
+//! (editor/loupe_input.zig, which also feeds it Ctrl).
 
 const std = @import("std");
 const render = @import("../../gfx/render.zig");
@@ -20,7 +22,8 @@ const material = @import("material.zig");
 const selection = @import("selection.zig");
 const label = @import("loupe_label.zig");
 const place = @import("loupe_place.zig");
-const pace_mod = @import("loupe_pace.zig");
+const hold_mod = @import("loupe_hold.zig");
+const hint = @import("loupe_hint.zig");
 const hit = @import("hit.zig");
 
 const Canvas = render.Canvas;
@@ -35,30 +38,32 @@ const lens_radius = 11;
 const grow_from = 0.92;
 /// how long "Copied" stays in the label
 const copied_ms = 1400;
-/// how long it stays on an edge after a nudge
-const nudge_ms = 800;
 /// from this zoom up a faint grid parts the pixels
 const grid_zoom = 12;
 
 pub const State = struct {
     /// when it shows, and its zoom (one of config.loupe_zooms)
-    mode: config.Loupe = .auto,
+    mode: config.Loupe = .hold,
     zoom: u8 = config.loupe_zoom_default,
     /// 0 gone .. 1 shown, eased
     shown: motion.Tween = .{ .dur_ms = theme.motion_fast },
-    /// the pointer's speed: "when needed" waits for it to slow down
-    pace: pace_mod.Pace = .{},
+    /// Ctrl held: "while holding Ctrl" shows it
+    hold: hold_mod.Hold = .{},
+    /// it is wanted and Ctrl will have been held long enough then
+    /// (monotonic ms; 0: not waiting for Ctrl)
+    hold_due_ms: i64 = 0,
     /// what it looks at while wanted (it fades out there), on which pane
     look: Look = .{},
     pane: u8 = 0,
-    /// after an arrow key it shows on that handle's edge until then
-    /// (monotonic ms)
-    nudge_until_ms: i64 = 0,
-    nudge_handle: u3 = 0,
+    /// the selection's handle an arrow key last moved (a corner when it
+    /// moved whole): it looks at that edge until the pointer moves
+    nudge: ?u3 = null,
     /// the label says "Copied" until then (monotonic ms), while it looks
     /// at that image pixel
     copied_until_ms: i64 = 0,
     copied_at: Point = .{ .x = 0, .y = 0 },
+    /// the one-time "Hold Ctrl to zoom" hint
+    hint: hint.Hint = .{},
 };
 
 /// What the lens looks at.
@@ -86,9 +91,10 @@ pub fn wanted(ed: *const Editor) bool {
     };
 }
 
-/// An arrow key just moved the selection: it shows on that edge.
-fn nudging(ed: *const Editor, now: i64) bool {
-    return now < ed.loupe.nudge_until_ms and ed.loupe.mode != .never and ed.doc.sel != null and
+/// An arrow key moved the selection since the pointer last did: it
+/// looks at that edge.
+fn nudging(ed: *const Editor) bool {
+    return ed.loupe.nudge != null and ed.loupe.mode != .never and ed.doc.sel != null and
         ed.tools.mode == .none and !ed.help_open;
 }
 
@@ -103,56 +109,63 @@ pub fn capturing(ed: *const Editor) bool {
     return ed.tools.mode == .none and wanted(ed);
 }
 
-/// Shown when wanted: right away where it is the point (the colour
-/// picker, the setting always, an edge dragged or nudged, the label);
-/// else once the pointer is calm.
+/// Shown when wanted: the colour picker's, the label's and the setting
+/// always's right away; while holding Ctrl once it is held long enough.
 fn visible(ed: *const Editor, now: i64) bool {
-    const st = &ed.loupe;
-    if (ed.tools.mode == .eyedropper or st.mode == .always or ed.drag == .resizing_sel) return true;
-    if (nudging(ed, now) or labelled(ed)) return true;
-    return st.pace.calm;
+    if (ed.tools.mode == .eyedropper or labelled(ed)) return true;
+    return switch (ed.loupe.mode) {
+        .hold => ed.loupe.hold.shown(now),
+        .always => true,
+        .never => false,
+    };
 }
 
-/// The pointer moved (to ed.mouse, on the current pane).
-pub fn moved(ed: *Editor) void {
-    const f = ed.uf();
-    ed.loupe.pace.move(@as(f64, @floatFromInt(ed.mouse.x)) / f, @as(f64, @floatFromInt(ed.mouse.y)) / f, motion.now());
+/// Ctrl held shows it: the wheel and - = zoom it then, Ctrl down.
+pub fn held(ed: *const Editor) bool {
+    return ed.loupe.mode == .hold and ed.loupe.hold.shown(motion.now());
+}
+
+/// The pointer moved or was pressed: it looks at the pointer (or the
+/// drag) again, not at the edge an arrow key moved.
+pub fn pointed(ed: *Editor) void {
+    ed.loupe.nudge = null;
 }
 
 /// An arrow key moved the selection's handle `h` (a corner when it moved
-/// as a whole): show that edge for a moment.
+/// as a whole): it looks at that edge.
 pub fn nudged(ed: *Editor, h: u3) void {
-    ed.loupe.nudge_until_ms = motion.now() + nudge_ms;
-    ed.loupe.nudge_handle = h;
+    ed.loupe.nudge = h;
     ed.needs_render = true;
 }
 
 /// Once a frame: follow what it looks at while wanted, fade toward shown
-/// or gone, end the nudge and the "Copied" note when due.
+/// or gone, end the "Copied" note and the hint when due.
 pub fn sync(ed: *Editor) void {
     const saved = ed.pane_i;
     defer ed.pane_i = saved;
     ed.pane_i = ed.mouse_pane;
     const st = &ed.loupe;
     const now = motion.now();
-    st.pace.tick(now);
-    if (st.nudge_until_ms != 0 and !nudging(ed, now)) st.nudge_until_ms = 0;
-    const want = st.nudge_until_ms != 0 or wanted(ed);
+    const nudge = nudging(ed);
+    const want = nudge or wanted(ed);
     if (want) {
-        st.look = look(ed);
-        st.pane = if (st.nudge_until_ms != 0) paneShowing(ed, st.look.at) else ed.mouse_pane;
+        st.look = look(ed, nudge);
+        st.pane = if (nudge) paneShowing(ed, st.look.at) else ed.mouse_pane;
     }
-    st.shown.to(if (want and visible(ed, now)) 1 else 0, now);
+    const show = want and visible(ed, now);
+    st.shown.to(if (show) 1 else 0, now);
+    st.hold_due_ms = if (want and !show and st.mode == .hold) st.hold.dueMs(now) else 0;
     if (st.copied_until_ms != 0 and (now >= st.copied_until_ms or !std.meta.eql(st.look.at, st.copied_at))) st.copied_until_ms = 0;
+    hint.sync(ed, now);
 }
 
 /// What it looks at now: the edge being nudged or dragged (a new
 /// selection's moving corner), else the pixel under the pointer.
-fn look(ed: *const Editor) Look {
+fn look(ed: *const Editor, nudge: bool) Look {
     const q = clampImg(ed, ed.imgAt(ed.mouse));
-    if (ed.loupe.nudge_until_ms != 0) {
+    if (nudge) {
         const s = ed.doc.sel.?.normalized();
-        return .{ .at = shapes_mod.handleFocus(s, ed.loupe.nudge_handle, q), .edge = true };
+        return .{ .at = shapes_mod.handleFocus(s, ed.loupe.nudge.?, q), .edge = true };
     }
     return switch (ed.drag) {
         .resizing_sel => |rs| .{ .at = shapes_mod.handleFocus(ed.doc.sel.?, rs.handle, q), .edge = true },
@@ -190,18 +203,17 @@ pub fn copied(ed: *Editor) void {
     ed.needs_render = true;
 }
 
-/// Still fading.
+/// Still fading, or its hint.
 pub fn busy(ed: *const Editor) bool {
-    return ed.loupe.shown.busy(motion.now());
+    return ed.loupe.shown.busy(motion.now()) or hint.busy(ed);
 }
 
-/// When it next changes by itself (0: never): the "Copied" note or a
-/// nudge ends, a pointer that slowed down rests.
+/// When it next changes by itself (0: never): Ctrl has been held long
+/// enough, the "Copied" note or the hint ends.
 pub fn dueMs(ed: *const Editor) i64 {
     const st = &ed.loupe;
-    const rest = if (st.mode == .auto and wanted(ed)) st.pace.dueMs() else 0;
     var due: i64 = 0;
-    for ([_]i64{ st.copied_until_ms, st.nudge_until_ms, rest }) |t| {
+    for ([_]i64{ st.copied_until_ms, hint.dueMs(ed), st.hold_due_ms }) |t| {
         if (t != 0 and (due == 0 or t < due)) due = t;
     }
     return due;

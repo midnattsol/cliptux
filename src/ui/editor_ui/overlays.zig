@@ -10,6 +10,7 @@ const material = @import("material.zig");
 const draw_chrome = @import("draw_chrome.zig");
 const selection = @import("selection.zig");
 const loupe = @import("loupe.zig");
+const loupe_hint = @import("loupe_hint.zig");
 const tooltip = @import("tooltip.zig");
 const notice = @import("notice.zig");
 const strip = @import("strip.zig");
@@ -43,7 +44,9 @@ pub fn collectOverlays(self: *Editor, list: *RectList) void {
     if (self.textHandleShape()) |i| list.add(draw_chrome.textHandleRect(self, i).expand(2));
     if (self.selBuf()) |s| {
         addOutline(list, s, chromePad(self));
-        list.add(selection.dimsPillRect(self, s).expand(1));
+        const pill = selection.dimsPillRect(self, s);
+        list.add(pill.expand(1));
+        if (loupe_hint.rect(self, pill)) |r| list.add(r.expand(1));
     }
     if (self.show_hint) list.add(selection.hintRect(self).expand(1));
     if (winpick.footprint(self)) |r| addOutline(list, r, chromePad(self));

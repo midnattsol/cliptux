@@ -100,7 +100,7 @@ fn capture(p: Page, y0: i32) !i32 {
 /// What the magnifier setting does, under its title.
 fn loupeNote(l: config.Loupe) []const u8 {
     return switch (l) {
-        .auto => "Close-up of the pixels when you slow down or adjust an edge",
+        .hold => "Hold Ctrl for a close-up of the pixels while choosing an area",
         .always => "Close-up of the pixels at the pointer while choosing an area",
         .never => "No close-up while choosing an area",
     };

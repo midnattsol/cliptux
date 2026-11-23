@@ -88,7 +88,7 @@ pub fn bringSelectedToFront(ed: *Editor) !void {
 
 /// Arrow keys: nudge the selected shape, else the selection's edge last
 /// dragged, else the whole selection (Alt: its right and bottom edges);
-/// Shift steps 10 pixels. The magnifier shows the edge that moved.
+/// Shift steps 10 pixels. The magnifier looks at the edge that moved.
 pub fn arrowKey(ed: *Editor, k: window.Key) !void {
     const step: i32 = if (k.shift) 10 else 1;
     const dx: i32 = switch (k.code) {

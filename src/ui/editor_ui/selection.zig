@@ -1,5 +1,6 @@
 //! The editor's selection chrome (ui/selchrome.zig draws it): which
-//! handles show, the size pill's text and place, and the first-run hint.
+//! handles show, the size pill's text and place (the magnifier's
+//! one-time hint beside it), and the first-run hint.
 
 const std = @import("std");
 const render = @import("../../gfx/render.zig");
@@ -8,6 +9,7 @@ const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const selchrome = @import("../selchrome.zig");
+const loupe_hint = @import("loupe_hint.zig");
 const ff = @import("common.zig").ff;
 
 const Canvas = render.Canvas;
@@ -72,7 +74,9 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
         // pointer is on, else the one showing most of the selection)
         if (self.isTbPane()) {
             var buf: [64]u8 = undefined;
-            selchrome.sizePill(canvas, dimsPillRect(self, s), f, th, dimsLabel(self, &buf));
+            const pill = dimsPillRect(self, s);
+            selchrome.sizePill(canvas, pill, f, th, dimsLabel(self, &buf));
+            loupe_hint.draw(self, canvas, pill);
         }
     }
     if (self.show_hint) {

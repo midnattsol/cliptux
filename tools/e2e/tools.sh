@@ -100,9 +100,12 @@ shot 0 pinned
 keys esc
 wait_exit 5 || stop_shotlet
 
-# --- the magnifier waits for the pointer to slow down and leaves nothing
-# behind: swept over plain blue, then away, neither its white centre
-# frame nor a label (#1c1c1e) is anywhere on the path; resting, it shows
+# --- the magnifier waits for Ctrl and leaves nothing behind: swept over
+# plain blue, then away and resting, neither its white centre frame nor
+# a label (#1c1c1e) is anywhere; Ctrl held brings it, letting go takes it
+# away, Ctrl+Z (a shortcut) never brings it
+# (right of the pointer's own white cross)
+lens_at_rest() { drv find 0 ffffff 12 1 1120 600 1280 900; }
 run_shotlet loupe shot --from "$IMG"
 wait_editor 10
 arrive 300 600
@@ -113,24 +116,35 @@ drv move 0 1100 760 && drv sleep 400
 shot 0 loupe
 # (the mode strip's dark icons sit at the bottom centre, from x 650, y 814)
 check "the magnifier leaves no trail" eval 'for c in 1c1c1e ffffff; do no_find_exact 0 $c 12 1 260 520 780 805 && no_find_exact 0 $c 12 1 260 805 640 880 || return 1; done'
-check "  ... and shows once the pointer rests" drv find 0 ffffff 12 1 1080 600 1280 900
+check "  ... and stays away at rest" eval '! lens_at_rest'
+drv key ctrl down && drv sleep 400
+shot 0 loupe-ctrl
+check "  ... holding Ctrl shows it" lens_at_rest
+drv key ctrl up && drv sleep 300
+check "  ... letting go hides it" eval '! lens_at_rest'
+drv key ctrl down && drv key z && drv sleep 400
+shot 0 loupe-ctrl-z
+check "  ... a shortcut with Ctrl never shows it" eval '! lens_at_rest'
+drv key ctrl up && drv sleep 100
 keys esc
 wait_exit 5 || stop_shotlet
 
-# --- the magnifier's keys: over the orange box Alt shows the pixel's
-# colour, C copies it (not Crop: there is no selection), the wheel and
-# - = zoom it, the zoom is remembered; an older loupe=selecting reads as
-# when needed, loupe=never shows none
+# --- the magnifier's keys: over the orange box Alt shows the lens and
+# the pixel's colour, C copies it with no lens (not Crop: there is no
+# selection), the wheel and - = zoom it, the zoom is remembered; older
+# loupe=selecting and loupe=auto read as while holding Ctrl, loupe=never
+# shows none even then
+lens_here() { drv find 0 ffffff 12 1 1020 420 1200 600; }
 run_shotlet magnifier shot --from "$IMG"
 wait_editor 10
 arrive 1000 400
 shot 0 magnifier
-check "magnifier: shows by the pointer (its white centre frame)" drv find 0 ffffff 12 1 1020 420 1200 600
-check "  ... with no label" no_find_exact 0 1c1c1e 12 1 960 420 1240 620
+check "magnifier: none by the pointer without Ctrl" eval '! lens_here'
 drv key alt down && drv sleep 200
 shot 0 magnifier-alt
-check "  ... Alt shows the colour's label" drv find 0 1c1c1e 12 1 960 420 1240 620
-drv key alt up && drv sleep 200
+check "  ... Alt shows it (its white centre frame)" lens_here
+check "  ... with the colour's label" drv find 0 1c1c1e 12 1 960 420 1240 620
+drv key alt up && drv sleep 300
 keys c
 sleep 0.3
 check "  ... C copies the pixel's colour" eq "$(clip_text)" "#FF8800"
@@ -142,49 +156,80 @@ check "  ... and - out" wait_log 3 "magnifier: zoom 4x"
 keys esc
 wait_exit 5 || stop_shotlet
 check "  ... the zoom is kept for the next capture" grep -q "^loupe_zoom=4" "$HOME/.config/shotlet/config"
-printf 'loupe=selecting\n' >>"$HOME/.config/shotlet/config"
-run_shotlet magnifier-selecting shot --from "$IMG"
-wait_editor 10
-arrive 1000 400
-shot 0 magnifier-selecting
-check "  ... loupe=selecting reads as when needed: it shows at rest" drv find 0 ffffff 12 1 1020 420 1200 600
-keys esc
-wait_exit 5 || stop_shotlet
+for old in selecting auto; do
+    sed -i '/^loupe=/d' "$HOME/.config/shotlet/config"
+    printf 'loupe=%s\n' "$old" >>"$HOME/.config/shotlet/config"
+    run_shotlet "magnifier-$old" shot --from "$IMG"
+    wait_editor 10
+    arrive 1000 400
+    check "  ... loupe=$old reads as while holding Ctrl: none at rest" eval '! lens_here'
+    drv key ctrl down && drv sleep 400
+    shot 0 "magnifier-$old"
+    check "  ... but with Ctrl" lens_here
+    drv key ctrl up && drv sleep 100
+    keys esc
+    wait_exit 5 || stop_shotlet
+done
 sed -i 's/^loupe=.*/loupe=never/' "$HOME/.config/shotlet/config"
 run_shotlet magnifier-never shot --from "$IMG"
 wait_editor 10
 arrive 1000 400
+drv key ctrl down && drv sleep 400
 shot 0 magnifier-never
-check "  ... loupe=never: no magnifier" no_find_exact 0 ffffff 12 1 1020 420 1200 600
+check "  ... loupe=never: no magnifier, Ctrl or not" eval '! lens_here'
+drv key ctrl up && drv sleep 100
 keys esc
 wait_exit 5 || stop_shotlet
 sed -i '/^loupe=/d' "$HOME/.config/shotlet/config"
 
-# --- the magnifier on an edge: dragging the right edge it shows that
-# edge, the selection's light edge line inside it (dimmed blue around:
-# #e8ebf0), clear of the overlay's own edges; arrow keys move a new
-# selection whole, then the edge last dragged (Shift: 10 px), the
-# magnifier on it again
+# --- the magnifier on an edge: dragging the right edge it stays away
+# until Ctrl is held, then shows that edge, the selection's light edge
+# line inside it (dimmed blue around: #e8ebf0), clear of the overlay's
+# own edges; arrow keys move a new selection whole, then the edge last
+# dragged (Shift: 10 px), Ctrl+arrows with the magnifier on it. The
+# first edge ever dragged brings a "Hold Ctrl to zoom" pill beside the
+# size label (#1c1c1e, right of it), once
 lens_edge() { drv find 0 e8ebf0 24 1 400 560 596 796; }
+edge_hint() { drv find 0 1c1c1e 24 30 392 455 600 494; }
+rm -f "$XDG_STATE_HOME/shotlet/zoom-hint-shown"
 run_shotlet magnifier-edge shot --from "$IMG"
 wait_editor 10
 drag 0 300 500 0 600 800
 keys right
-slow_drag 0 601 650 621 650 641 650
-drv sleep 400
-check "magnifier: no lens once the edge is let go" eval '! lens_edge'
+drv move 0 597 650 && drv sleep 150 && drv move 0 601 650 && drv sleep 150 && drv down
+drv move 0 621 650 && drv sleep 200 && drv move 0 641 650 && drv sleep 300
+shot 0 magnifier-hint
+check "magnifier: the first edge dragged shows the hint" edge_hint
+check "  ... and no lens without Ctrl" eval '! lens_edge'
+drv up && drv sleep 2600
+check "  ... the hint goes after a while" eval '! edge_hint'
 drv move 0 601 650 && drv sleep 150 && drv move 0 641 650 && drv sleep 150 && drv down
-drv move 0 645 652 && drv sleep 120 && drv move 0 641 650 && drv sleep 300
+drv move 0 645 652 && drv sleep 120 && drv move 0 641 650 && drv sleep 200
+drv key ctrl down && drv sleep 400
 shot 0 magnifier-edge
-check "  ... dragging an edge shows it, the cut drawn inside" lens_edge
-drv up && drv sleep 1000
-keys right right shift+right
+check "  ... holding Ctrl while dragging an edge shows it, the cut drawn inside" lens_edge
+drv key ctrl up && drv sleep 300
+check "  ... gone when Ctrl is let go" eval '! lens_edge'
+drv up && drv sleep 300
+drv key ctrl down && keys right right shift+right && drv sleep 400
 shot 0 magnifier-nudge
-check "  ... nudging it too" lens_edge
+check "  ... Ctrl+arrows nudge it with the magnifier on the edge" lens_edge
+drv key ctrl up && drv sleep 100
 keys enter
 wait_exit 5 || stop_shotlet
 clip_png "$OUT/edge.png"
 check "  ... a selection moves whole, then its edge moves by 1 / 10 px" eq "$(png_size "$OUT/edge.png")" "352x300"
+check "  ... the hint is remembered" test -e "$XDG_STATE_HOME/shotlet/zoom-hint-shown"
+run_shotlet magnifier-hint-again shot --from "$IMG"
+wait_editor 10
+drag 0 300 500 0 600 800
+drv move 0 596 650 && drv sleep 150 && drv move 0 600 650 && drv sleep 150 && drv down
+drv move 0 620 650 && drv sleep 300
+shot 0 magnifier-hint-again
+check "  ... never again" eval '! edge_hint'
+drv up
+keys esc esc
+wait_exit 5 || stop_shotlet
 
 # --- beautify is per capture: an old beautify=true is not carried over;
 # the panel's pin ("Apply to every capture") keeps it on for new ones
